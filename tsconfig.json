@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "eslint.config.js",
+    "vitest.config.ts",
+    "apps/**/*.ts",
+    "packages/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "./packages/core"
+    },
+    {
+      "path": "./apps/cli"
+    }
+  ]
+}

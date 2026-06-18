@@ -1,0 +1,46 @@
+{
+  "name": "@switchboard-mcp/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Local-first MCP profile router for multiple accounts, projects, environments, and AI coding agents.",
+  "bin": {
+    "switchboard": "./dist/index.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai-agents",
+    "codex",
+    "claude-code",
+    "cursor",
+    "vscode",
+    "supabase",
+    "stripe",
+    "posthog",
+    "sentry",
+    "mcp-server",
+    "mcp-router",
+    "mcp-gateway",
+    "tool-calling",
+    "developer-tools"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "switchboard": "tsx --conditions source src/index.ts",
+    "smoke:help": "tsx --conditions source src/index.ts --help"
+  },
+  "dependencies": {
+    "@switchboard-mcp/core": "workspace:*",
+    "commander": "^14.0.2",
+    "tsx": "^4.21.0"
+  }
+}
