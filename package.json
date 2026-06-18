@@ -10,7 +10,9 @@
     "typecheck": "pnpm build && pnpm -r typecheck",
     "lint": "eslint .",
     "test": "vitest run",
-    "smoke:cli-help": "pnpm --filter @switchboard-mcp/cli smoke:help"
+    "smoke:cli-help": "pnpm --filter @switchboard-mcp/cli smoke:help",
+    "smoke:cli-status": "pnpm --filter @switchboard-mcp/cli switchboard status --json",
+    "smoke:cli-doctor": "pnpm --filter @switchboard-mcp/cli switchboard doctor --json"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

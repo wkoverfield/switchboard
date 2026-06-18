@@ -78,10 +78,43 @@ export const switchboardConfigSchema = z
     workspaces: z.record(z.string(), workspaceSchema).default({}),
     policies: z.record(z.string(), policySchema).default({})
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((config, context) => {
+    for (const [profileName, profile] of Object.entries(config.profiles)) {
+      if (!canNormalizeNamespace(profileName)) {
+        context.addIssue({
+          code: "custom",
+          path: ["profiles", profileName],
+          message:
+            "Profile names must contain at least one letter or number for namespace generation."
+        });
+      }
+
+      if (profile.namespace && !canNormalizeNamespace(profile.namespace)) {
+        context.addIssue({
+          code: "custom",
+          path: ["profiles", profileName, "namespace"],
+          message:
+            "Profile namespace must contain at least one letter or number."
+        });
+      }
+    }
+  });
 
 export type SwitchboardConfig = z.infer<typeof switchboardConfigSchema>;
 export type ProfileConfig = z.infer<typeof profileSchema>;
 export type ProfileConfigInput = z.input<typeof profileSchema>;
 export type WorkspaceConfig = z.infer<typeof workspaceSchema>;
 export type PolicyConfig = z.infer<typeof policySchema>;
+
+function canNormalizeNamespace(input: string): boolean {
+  return (
+    input
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .replace(/_{2,}/g, "_").length > 0
+  );
+}

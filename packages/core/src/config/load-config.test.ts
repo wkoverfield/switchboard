@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadSwitchboardConfig } from "./load-config.js";
@@ -113,13 +114,43 @@ describe("loadSwitchboardConfig", () => {
       }
     ]);
   });
+
+  it("reports explicit namespaces that cannot normalize instead of throwing", () => {
+    const root = makeTempProject();
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  broken:",
+        "    provider: generic",
+        "    namespace: '!!!'"
+      ].join("\n")
+    );
+
+    const loaded = loadSwitchboardConfig({ cwd: root, env: {}, homeDir: root });
+
+    expect(loaded.diagnostics[0]?.message).toContain("namespace");
+  });
+
+  it("reports profile names that cannot generate a namespace instead of throwing", () => {
+    const root = makeTempProject();
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      ["version: 1", "profiles:", "  '!!!':", "    provider: generic"].join(
+        "\n"
+      )
+    );
+
+    const loaded = loadSwitchboardConfig({ cwd: root, env: {}, homeDir: root });
+
+    expect(loaded.diagnostics[0]?.message).toContain("Profile names");
+  });
 });
 
 function makeTempProject(): string {
   const root = join(
-    process.cwd(),
-    "node_modules",
-    ".tmp",
+    tmpdir(),
     `switchboard-${Date.now()}-${Math.random().toString(16).slice(2)}`
   );
   mkdirSync(root, { recursive: true });
