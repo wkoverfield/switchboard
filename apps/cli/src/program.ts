@@ -57,6 +57,9 @@ export interface ProgramIo {
     profile: StdioUpstreamProfile,
     options?: StdioProfileTestOptions
   ) => Promise<StdioProfileTestResult>;
+  daemonStatus?: typeof daemonStatus;
+  startDaemon?: typeof startDaemon;
+  serveDaemonMcp?: (socketPath: string) => Promise<void>;
 }
 
 export function createProgram(io: ProgramIo = {}): Command {
@@ -64,6 +67,9 @@ export function createProgram(io: ProgramIo = {}): Command {
   const writeErr = io.writeErr ?? ((message: string) => console.error(message));
   const serveMcp = io.serveMcp ?? serveProfilesOverStdio;
   const testProfile = io.testProfile ?? testStdioUpstreamProfile;
+  const getDaemonStatus = io.daemonStatus ?? daemonStatus;
+  const startDaemonProcess = io.startDaemon ?? startDaemon;
+  const serveDaemonMcp = io.serveDaemonMcp ?? serveDaemonBackedMcpStdio;
   const auditLogger = io.auditLogger ?? noopAuditLogger;
   const program = new Command();
 
@@ -228,7 +234,7 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--json", "print machine-readable JSON")
     .option("--runtime-dir <path>", "override daemon runtime directory")
     .action(async (options: { json?: boolean; runtimeDir?: string }) => {
-      const status = await daemonStatus(optionsFromRuntimeDir(options.runtimeDir));
+      const status = await getDaemonStatus(optionsFromRuntimeDir(options.runtimeDir));
       if (options.json) {
         writeOut(JSON.stringify(status, null, 2));
         return;
@@ -244,7 +250,7 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--runtime-dir <path>", "override daemon runtime directory")
     .action(async (options: { json?: boolean; runtimeDir?: string }) => {
       const globalOptions = program.opts<{ cwd?: string }>();
-      const result = await startDaemon({
+      const result = await startDaemonProcess({
         ...optionsFromRuntimeDir(options.runtimeDir),
         ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
       });
@@ -283,7 +289,7 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--json", "print machine-readable JSON")
     .option("--runtime-dir <path>", "override daemon runtime directory")
     .action(async (options: { json?: boolean; runtimeDir?: string }) => {
-      const status = await daemonStatus(optionsFromRuntimeDir(options.runtimeDir));
+      const status = await getDaemonStatus(optionsFromRuntimeDir(options.runtimeDir));
       if (status.state !== "running") {
         const result = {
           ok: false,
@@ -328,7 +334,7 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--json", "print machine-readable JSON")
     .option("--runtime-dir <path>", "override daemon runtime directory")
     .action(async (options: { json?: boolean; runtimeDir?: string }) => {
-      const status = await daemonStatus(optionsFromRuntimeDir(options.runtimeDir));
+      const status = await getDaemonStatus(optionsFromRuntimeDir(options.runtimeDir));
       if (status.state !== "running") {
         const result = {
           ok: false,
@@ -382,17 +388,33 @@ export function createProgram(io: ProgramIo = {}): Command {
     .command("mcp")
     .description("Serve MCP over stdio through the local Switchboard daemon.")
     .option("--runtime-dir <path>", "override daemon runtime directory")
-    .action(async (options: { runtimeDir?: string }) => {
-      const status = await daemonStatus(optionsFromRuntimeDir(options.runtimeDir));
+    .option("--no-auto-start", "fail if the daemon is not already running")
+    .action(async (options: { runtimeDir?: string; autoStart?: boolean }) => {
+      const globalOptions = program.opts<{ cwd?: string }>();
+      const daemonOptions = {
+        ...optionsFromRuntimeDir(options.runtimeDir),
+        ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
+      };
+      let status = await getDaemonStatus(daemonOptions);
       if (status.state !== "running") {
-        writeErr(
-          "error: Switchboard daemon is not running; run switchboard daemon start first"
-        );
-        process.exitCode = 1;
-        return;
+        if (options.autoStart === false) {
+          writeErr(
+            "error: Switchboard daemon is not running; run switchboard daemon start first"
+          );
+          process.exitCode = 1;
+          return;
+        }
+
+        const started = await startDaemonProcess(daemonOptions);
+        if (!started.ok || started.status.state !== "running") {
+          writeErr(`error: ${started.message}`);
+          process.exitCode = 1;
+          return;
+        }
+        status = started.status;
       }
 
-      await serveDaemonBackedMcpStdio(status.daemon.socketPath);
+      await serveDaemonMcp(status.daemon.socketPath);
     });
 
   program

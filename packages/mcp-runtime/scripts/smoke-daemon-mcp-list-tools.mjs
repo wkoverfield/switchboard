@@ -37,17 +37,19 @@ try {
     ].join("\n")
   );
 
-  const start = runDaemon("start");
-  assert(start.ok === true, "daemon start should succeed");
-
   const client = new Client({
     name: "switchboard-daemon-mcp-smoke",
     version: "0.1.0"
   });
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [cliPath, "mcp", "--runtime-dir", runtimeDir],
+    args: [cliPath, "--cwd", tmpRoot, "mcp", "--runtime-dir", runtimeDir],
     cwd: repoRoot,
+    env: {
+      ...process.env,
+      XDG_STATE_HOME: tmpRoot,
+      SWITCHBOARD_RUNTIME_DIR: runtimeDir
+    },
     stderr: "pipe"
   });
   transport.stderr?.resume();

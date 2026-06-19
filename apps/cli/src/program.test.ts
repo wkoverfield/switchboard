@@ -292,18 +292,107 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it("fails daemon-backed mcp when the daemon is not running", async () => {
+  it("fails daemon-backed mcp without auto-start when the daemon is not running", async () => {
     const root = makeTempProject();
 
     const errors: string[] = [];
     const program = createProgram({ writeErr: (message) => errors.push(message) });
-    await program.parseAsync(["mcp", "--runtime-dir", root], {
+    await program.parseAsync(["mcp", "--runtime-dir", root, "--no-auto-start"], {
       from: "user"
     });
 
     expect(errors).toEqual([
       "error: Switchboard daemon is not running; run switchboard daemon start first"
     ]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("auto-starts the daemon for daemon-backed mcp", async () => {
+    const root = makeTempProject();
+    const socketPath = join(root, "daemon.sock");
+    const servedSockets: string[] = [];
+    const startOptions: unknown[] = [];
+    const program = createProgram({
+      daemonStatus: async () => ({
+        state: "not-running",
+        paths: {
+          runtimeDir: root,
+          socketPath,
+          statePath: join(root, "daemon.json")
+        }
+      }),
+      startDaemon: async (options) => {
+        startOptions.push(options);
+        return {
+          ok: true,
+          message: "Switchboard daemon started.",
+          status: {
+            state: "running",
+            paths: {
+              runtimeDir: root,
+              socketPath,
+              statePath: join(root, "daemon.json")
+            },
+            daemon: {
+              version: 1,
+              pid: process.pid,
+              startedAt: "2026-06-19T16:00:00.000Z",
+              socketPath
+            }
+          }
+        };
+      },
+      serveDaemonMcp: async (socket) => {
+        servedSockets.push(socket);
+      }
+    });
+
+    await program.parseAsync(["--cwd", root, "mcp", "--runtime-dir", root], {
+      from: "user"
+    });
+
+    expect(startOptions).toEqual([{ runtimeDir: root, cwd: root }]);
+    expect(servedSockets).toEqual([socketPath]);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("fails daemon-backed mcp when auto-start fails", async () => {
+    const root = makeTempProject();
+    const errors: string[] = [];
+    const servedSockets: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message),
+      daemonStatus: async () => ({
+        state: "not-running",
+        paths: {
+          runtimeDir: root,
+          socketPath: join(root, "daemon.sock"),
+          statePath: join(root, "daemon.json")
+        }
+      }),
+      startDaemon: async () => ({
+        ok: false,
+        message: "Switchboard daemon did not start.",
+        status: {
+          state: "not-running",
+          paths: {
+            runtimeDir: root,
+            socketPath: join(root, "daemon.sock"),
+            statePath: join(root, "daemon.json")
+          }
+        }
+      }),
+      serveDaemonMcp: async (socket) => {
+        servedSockets.push(socket);
+      }
+    });
+
+    await program.parseAsync(["mcp", "--runtime-dir", root], {
+      from: "user"
+    });
+
+    expect(errors).toEqual(["error: Switchboard daemon did not start."]);
+    expect(servedSockets).toEqual([]);
     expect(process.exitCode).toBe(1);
   });
 
