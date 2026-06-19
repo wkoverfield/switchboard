@@ -132,7 +132,7 @@ Remaining useful hardening:
 
 ### Milestone 3: Stdio Adapter + Local Daemon
 
-Status: foundation in progress.
+Status: not started.
 
 Original intent:
 
@@ -148,7 +148,7 @@ explicitly marking them daemonless.
 
 ### Milestone 4: Audit Logs + Doctor
 
-Status: not started.
+Status: audit foundation complete, doctor guidance in progress.
 
 Original intent:
 
@@ -173,7 +173,7 @@ policy, approval, and provider-specific behavior exist.
 
 ### Milestone 5: Policy Engine + Operating Modes
 
-Status: dry-run foundation complete.
+Status: not started.
 
 Original modes:
 
@@ -250,6 +250,8 @@ Status: partly pulled forward.
 Already shipped:
 
 - `switchboard test <profile>`
+- Codex/Claude client config dry-runs
+- local audit log viewing
 
 Still needed:
 
@@ -322,7 +324,7 @@ Acceptance:
 - no provider secrets are written
 - tests cover generated config shape
 
-### Current Slice: Audit Log Foundation
+### Completed Slice: Audit Log Foundation
 
 Goal: start the trust layer before policy/provider complexity.
 
@@ -332,6 +334,18 @@ Acceptance:
 - redaction helper
 - audit entry for profile test and routed tool call
 - docs for local-only audit behavior
+
+### Current Slice: Doctor + Onboarding Polish
+
+Goal: make the current daemonless path clear for a first-time user before the
+daemon exists.
+
+Acceptance:
+
+- `switchboard init` starter config preview/write path
+- doctor next-step guidance
+- quickstart docs
+- smoke coverage for starter config generation
 
 ### Then: Daemon Spike
 

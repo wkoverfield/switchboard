@@ -1,8 +1,10 @@
 import { Command } from "commander";
+import { writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import {
   type AuditLogger,
   checkLocalConfigIgnored,
+  createInitConfigPlan,
   type LoadConfigOptions,
   loadSwitchboardConfig,
   noopAuditLogger,
@@ -15,6 +17,7 @@ import {
   resolveGlobalConfigPath,
   resolveRepoConfigPaths,
   type SupportedClient,
+  validateInitConfigOptions,
   validateSwitchboardClientConfigOptions
 } from "@switchboard-mcp/core";
 import {
@@ -120,7 +123,13 @@ export function createProgram(io: ProgramIo = {}): Command {
         ok,
         checks,
         diagnostics: loaded.diagnostics,
-        namespaceCollisions: loaded.namespaceCollisions
+        namespaceCollisions: loaded.namespaceCollisions,
+        nextSteps: doctorNextSteps({
+          ok,
+          loaded,
+          localIgnoreOk: localIgnore.ok,
+          cwd: globalOptions.cwd
+        })
       };
 
       if (options.json) {
@@ -133,6 +142,69 @@ export function createProgram(io: ProgramIo = {}): Command {
         process.exitCode = 1;
       }
     });
+
+  program
+    .command("init")
+    .description("Create or print a starter Switchboard repo config.")
+    .option("--json", "print machine-readable JSON")
+    .option("--write", "write .switchboard.yaml")
+    .option("--force", "overwrite .switchboard.yaml when used with --write")
+    .option("--profile-name <name>", "starter profile name", "local_example")
+    .option("--command <command>", "starter upstream command", "node")
+    .action(
+      (options: {
+        json?: boolean;
+        write?: boolean;
+        force?: boolean;
+        profileName: string;
+        command: string;
+      }) => {
+        const globalOptions = program.opts<{ cwd?: string }>();
+        const validation = validateInitConfigOptions({
+          profileName: options.profileName,
+          command: options.command
+        });
+        if (!validation.ok) {
+          for (const error of validation.errors) {
+            writeErr(`error: ${error}`);
+          }
+          process.exitCode = 1;
+          return;
+        }
+
+        const plan = createInitConfigPlan({
+          ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+          profileName: options.profileName,
+          command: options.command
+        });
+
+        if (options.write) {
+          if (plan.exists && !options.force) {
+            writeErr(
+              `error: ${plan.path} already exists; use --force to overwrite`
+            );
+            process.exitCode = 1;
+            return;
+          }
+
+          writeFileSync(plan.path, plan.content);
+        }
+
+        const result = {
+          path: plan.path,
+          written: Boolean(options.write),
+          overwritten: Boolean(options.write && plan.exists),
+          content: plan.content
+        };
+
+        if (options.json) {
+          writeOut(JSON.stringify(result, null, 2));
+          return;
+        }
+
+        writeOut(formatInit(result));
+      }
+    );
 
   program
     .command("serve")
@@ -380,6 +452,7 @@ function formatDoctor(result: {
   ok: boolean;
   checks: Array<{ name: string; ok: boolean; message: string }>;
   diagnostics: Array<{ level: string; message: string }>;
+  nextSteps: string[];
 }): string {
   const lines = [
     result.ok ? "Switchboard doctor: OK" : "Switchboard doctor: failed"
@@ -393,7 +466,29 @@ function formatDoctor(result: {
     lines.push(`${diagnostic.level}: ${diagnostic.message}`);
   }
 
+  if (result.nextSteps.length > 0) {
+    lines.push("", "Next steps:");
+    for (const step of result.nextSteps) {
+      lines.push(`  ${step}`);
+    }
+  }
+
   return lines.join("\n");
+}
+
+function formatInit(result: {
+  path: string;
+  written: boolean;
+  overwritten: boolean;
+  content: string;
+}): string {
+  const header = result.written
+    ? result.overwritten
+      ? `Overwrote ${result.path}`
+      : `Wrote ${result.path}`
+    : `Switchboard init dry run for ${result.path}`;
+
+  return [header, "", result.content].join("\n");
 }
 
 function formatProfileTest(result: StdioProfileTestResult): string {
@@ -495,6 +590,48 @@ function validateLoadedConfigForCommand(
   }
 
   return true;
+}
+
+function doctorNextSteps(options: {
+  ok: boolean;
+  loaded: ReturnType<typeof loadSwitchboardConfig>;
+  localIgnoreOk: boolean;
+  cwd: string | undefined;
+}): string[] {
+  const steps: string[] = [];
+  const hasRepoConfig = options.loaded.sources.some(
+    (source) => source.kind === "repo" && source.loaded
+  );
+  const stdioProfiles = stdioProfilesFromConfig(
+    options.loaded.config.profiles,
+    configCwdBase(options.loaded, options.cwd)
+  );
+
+  if (!hasRepoConfig) {
+    steps.push("switchboard init --write");
+  }
+
+  if (!options.localIgnoreOk) {
+    steps.push('add ".switchboard.local.yaml" to .gitignore');
+  }
+
+  if (options.loaded.namespaceCollisions.length > 0) {
+    steps.push("rename profiles or set explicit namespaces to resolve collisions");
+  }
+
+  if (options.loaded.diagnostics.some((diagnostic) => diagnostic.level === "error")) {
+    steps.push("fix config diagnostics above, then rerun switchboard doctor");
+  }
+
+  if (options.ok && stdioProfiles.length > 0) {
+    steps.push(`switchboard test ${stdioProfiles[0]?.profileName}`);
+    steps.push("switchboard install codex");
+    steps.push("switchboard install claude");
+  } else if (options.ok) {
+    steps.push("add a stdio upstream profile, then run switchboard test <profile>");
+  }
+
+  return [...new Set(steps)];
 }
 
 function parseTimeoutMs(value: string): number | undefined {

@@ -14,6 +14,7 @@
     "smoke:cli-status": "pnpm --filter @switchboard-mcp/cli switchboard status --json",
     "smoke:cli-doctor": "pnpm --filter @switchboard-mcp/cli switchboard doctor --json",
     "smoke:repo-config": "tmpfile=$(mktemp) && pnpm --silent --filter @switchboard-mcp/cli switchboard status --json > \"$tmpfile\" && node scripts/smoke/assert-repo-config.mjs \"$tmpfile\"",
+    "smoke:init": "tmpdir=$(mktemp -d) && repo=$PWD && (cd \"$tmpdir\" && node \"$repo/apps/cli/dist/index.js\" --cwd \"$tmpdir\" init --json); status=$?; rm -rf \"$tmpdir\"; exit $status",
     "smoke:profile-test": "tmpdir=$(mktemp -d) && repo=$PWD && (cd \"$tmpdir\" && XDG_STATE_HOME=\"$tmpdir\" node \"$repo/apps/cli/dist/index.js\" --cwd \"$repo\" test switchboard_fixture --json); status=$?; rm -rf \"$tmpdir\"; exit $status",
     "smoke:audit-profile-test": "tmpdir=$(mktemp -d) && repo=$PWD && (cd \"$tmpdir\" && XDG_STATE_HOME=\"$tmpdir\" node \"$repo/apps/cli/dist/index.js\" --cwd \"$repo\" test switchboard_fixture --json >/dev/null && XDG_STATE_HOME=\"$tmpdir\" node \"$repo/apps/cli/dist/index.js\" logs --json); status=$?; rm -rf \"$tmpdir\"; exit $status",
     "smoke:install-codex": "tmpdir=$(mktemp -d) && repo=$PWD && (cd \"$tmpdir\" && node \"$repo/apps/cli/dist/index.js\" --cwd \"$repo\" install codex --json); status=$?; rm -rf \"$tmpdir\"; exit $status",

@@ -13,3 +13,5 @@
 - Added `switchboard install <codex|claude>` dry-run snippets for client MCP config.
 - Added local JSONL audit logging for profile tests and routed tool calls.
 - Added `switchboard logs` for reading local audit entries.
+- Added `switchboard init` for starter repo config previews and safe writes.
+- Added doctor next-step guidance for first-run onboarding.
