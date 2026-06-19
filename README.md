@@ -12,6 +12,7 @@ This repository is in Milestone 2. It currently ships the TypeScript workspace, 
 pnpm install
 pnpm build
 pnpm --filter @switchboard-mcp/cli switchboard --help
+pnpm smoke:mcp-serve-session
 ```
 
 ## Current Commands

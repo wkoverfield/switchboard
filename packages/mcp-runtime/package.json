@@ -14,7 +14,8 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "smoke:serve-session": "node scripts/smoke-serve-session.mjs"
   },
   "dependencies": {
     "@switchboard-mcp/core": "workspace:*",
