@@ -9,7 +9,8 @@ import {
   type PathResolutionOptions,
   resolveGlobalConfigPath,
   resolveRepoConfigPaths,
-  type SupportedClient
+  type SupportedClient,
+  validateSwitchboardClientConfigOptions
 } from "@switchboard-mcp/core";
 import {
   GenericMcpRouter,
@@ -253,12 +254,24 @@ export function createProgram(io: ProgramIo = {}): Command {
           return;
         }
 
-        const rendered = renderSwitchboardClientConfig({
+        const cwd = configCwdBase(loaded, globalOptions.cwd);
+        const clientConfigOptions = {
           client: supportedClient,
           serverName: options.serverName,
           command: options.command,
-          cwd: configCwdBase(loaded, globalOptions.cwd)
-        });
+          cwd
+        };
+        const installValidation =
+          validateSwitchboardClientConfigOptions(clientConfigOptions);
+        if (!installValidation.ok) {
+          for (const error of installValidation.errors) {
+            writeErr(`error: ${error}`);
+          }
+          process.exitCode = 1;
+          return;
+        }
+
+        const rendered = renderSwitchboardClientConfig(clientConfigOptions);
 
         if (options.json) {
           writeOut(JSON.stringify(rendered, null, 2));

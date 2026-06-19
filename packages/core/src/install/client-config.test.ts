@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { renderSwitchboardClientConfig } from "./client-config.js";
+import {
+  renderSwitchboardClientConfig,
+  validateSwitchboardClientConfigOptions
+} from "./client-config.js";
 
 describe("renderSwitchboardClientConfig", () => {
   it("renders Codex TOML for the Switchboard stdio front door", () => {
@@ -54,6 +57,36 @@ describe("renderSwitchboardClientConfig", () => {
     );
     expect(rendered.content).toContain(
       'args = ["--cwd", "/repo/with spaces", "serve"]'
+    );
+  });
+
+  it("rejects empty and control-character config values", () => {
+    expect(
+      validateSwitchboardClientConfigOptions({
+        client: "codex",
+        serverName: "switchboard\nlocal",
+        command: "",
+        cwd: "/repo"
+      })
+    ).toEqual({
+      ok: false,
+      errors: [
+        "server name must not contain control characters",
+        "command must not be empty"
+      ]
+    });
+
+    expect(() =>
+      renderSwitchboardClientConfig({
+        client: "codex",
+        serverName: "\n",
+        cwd: "/repo"
+      })
+    ).toThrow(
+      [
+        "server name must not be empty",
+        "server name must not contain control characters"
+      ].join("\n")
     );
   });
 });

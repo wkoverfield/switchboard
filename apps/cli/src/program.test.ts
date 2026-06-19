@@ -441,6 +441,35 @@ describe("switchboard CLI program", () => {
     expect(errors).toEqual(["error: no stdio upstream profiles are configured"]);
     expect(process.exitCode).toBe(1);
   });
+
+  it("fails install for invalid server names and commands", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    const errors: string[] = [];
+    const program = createProgram({ writeErr: (message) => errors.push(message) });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "install",
+        "codex",
+        "--server-name",
+        "switchboard\nlocal",
+        "--command",
+        ""
+      ],
+      {
+        from: "user"
+      }
+    );
+
+    expect(errors).toEqual([
+      "error: server name must not contain control characters",
+      "error: command must not be empty"
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
 });
 
 function makeTempProject(): string {

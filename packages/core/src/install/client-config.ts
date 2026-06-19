@@ -14,6 +14,11 @@ export interface RenderedClientConfig {
   content: string;
 }
 
+export interface ClientConfigValidationResult {
+  ok: boolean;
+  errors: string[];
+}
+
 const defaultServerName = "switchboard";
 const defaultCommand = "switchboard";
 
@@ -23,6 +28,15 @@ export function renderSwitchboardClientConfig(
   const serverName = options.serverName ?? defaultServerName;
   const command = options.command ?? defaultCommand;
   const args = ["--cwd", options.cwd, "serve"];
+  const validation = validateSwitchboardClientConfigOptions({
+    ...options,
+    serverName,
+    command
+  });
+
+  if (!validation.ok) {
+    throw new Error(validation.errors.join("\n"));
+  }
 
   if (options.client === "codex") {
     return {
@@ -51,6 +65,39 @@ export function renderSwitchboardClientConfig(
       2
     )
   };
+}
+
+export function validateSwitchboardClientConfigOptions(
+  options: SwitchboardClientConfigOptions
+): ClientConfigValidationResult {
+  const serverName = options.serverName ?? defaultServerName;
+  const command = options.command ?? defaultCommand;
+  const errors: string[] = [];
+
+  if (serverName.trim().length === 0) {
+    errors.push("server name must not be empty");
+  }
+
+  if (containsControlCharacter(serverName)) {
+    errors.push("server name must not contain control characters");
+  }
+
+  if (command.trim().length === 0) {
+    errors.push("command must not be empty");
+  }
+
+  if (containsControlCharacter(command)) {
+    errors.push("command must not contain control characters");
+  }
+
+  return { ok: errors.length === 0, errors };
+}
+
+function containsControlCharacter(value: string): boolean {
+  return [...value].some((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint !== undefined && (codePoint < 32 || codePoint === 127);
+  });
 }
 
 function renderCodexConfig(options: {
