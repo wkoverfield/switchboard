@@ -234,7 +234,7 @@ Do not build provider presets before this has at least a minimal design.
 
 ### Milestone 8: Client Installers
 
-Status: not started.
+Status: partly pulled forward.
 
 Original intent:
 
@@ -245,19 +245,20 @@ Original intent:
 
 Safe near-term slice:
 
-- docs-only Codex/Claude setup using current `switchboard serve`
+- docs-only Codex/Claude setup using current daemon-backed `switchboard mcp`
 - dry-run config generation to stdout
 
 Shipped:
 
-- Codex TOML dry-run snippets
-- Claude Code JSON dry-run snippets
+- Codex TOML dry-run snippets for `switchboard --cwd <repo> mcp`
+- Claude Code JSON dry-run snippets for `switchboard --cwd <repo> mcp`
 - validation for client config names/commands
 - CI smoke coverage for both snippets
+- daemonless `switchboard serve` debug/CI fallback documentation
 
 Risk:
 
-Full installers before daemon/secrets may create configs we later need to
+Write-mode installers before secrets may create configs we later need to
 migrate.
 
 ### Milestone 9: Guided Onboarding

@@ -6,7 +6,8 @@ profiles.
 Current audited actions:
 
 - `switchboard test <profile>`
-- routed MCP tool calls through `switchboard serve`
+- routed MCP tool calls through `switchboard mcp`
+- routed MCP tool calls through the daemonless `switchboard serve` fallback
 
 The log path follows XDG state conventions:
 
