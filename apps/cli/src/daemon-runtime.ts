@@ -3,6 +3,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, resolve } from "node:path";
 import {
+  createJsonlAuditLogger,
   createDaemonState,
   getDaemonStatus,
   loadSwitchboardConfig,
@@ -267,13 +268,19 @@ function handleDaemonSocket(socket: Socket, context: DaemonSocketContext): void 
 async function handleDaemonRequest(raw: string, context: DaemonSocketContext): Promise<{
   id: string;
   ok: boolean;
-  type?: "pong" | "tools";
+  type?: "pong" | "tools" | "tool_result";
   version?: string;
   tools?: NamespacedTool[];
+  result?: unknown;
   error?: string;
 }> {
   try {
-    const request = JSON.parse(raw) as { id?: unknown; type?: unknown };
+    const request = JSON.parse(raw) as {
+      id?: unknown;
+      type?: unknown;
+      name?: unknown;
+      arguments?: unknown;
+    };
     const id = typeof request.id === "string" ? request.id : "unknown";
     if (request.type === "ping") {
       return {
@@ -285,6 +292,27 @@ async function handleDaemonRequest(raw: string, context: DaemonSocketContext): P
     }
     if (request.type === "list_tools") {
       return listConfiguredTools(id, context);
+    }
+    if (request.type === "call_tool") {
+      if (typeof request.name !== "string" || request.name.length === 0) {
+        return {
+          id,
+          ok: false,
+          error: "Daemon call_tool request name is missing or invalid."
+        };
+      }
+      if (
+        request.arguments !== undefined &&
+        !isRecord(request.arguments)
+      ) {
+        return {
+          id,
+          ok: false,
+          error: "Daemon call_tool request arguments must be an object."
+        };
+      }
+
+      return callConfiguredTool(id, context, request.name, request.arguments);
     }
 
     return {
@@ -312,29 +340,16 @@ async function listConfiguredTools(
   tools?: NamespacedTool[];
   error?: string;
 }> {
-  const loaded = loadSwitchboardConfig(optionsFromCwd(context.cwd));
-  const validationError = loadedConfigError(loaded);
-  if (validationError) {
+  const routerResult = routerForConfiguredProfiles(context);
+  if (!routerResult.ok) {
     return {
       id,
       ok: false,
-      error: validationError
+      error: routerResult.error
     };
   }
 
-  const profiles = stdioProfilesFromConfig(
-    loaded.config.profiles,
-    configCwdBase(loaded, context.cwd)
-  );
-  if (profiles.length === 0) {
-    return {
-      id,
-      ok: false,
-      error: "No stdio upstream profiles are configured."
-    };
-  }
-
-  const router = new GenericMcpRouter(profiles);
+  const router = routerResult.router;
   try {
     return {
       id,
@@ -352,6 +367,76 @@ async function listConfiguredTools(
   } finally {
     await router.close().catch(() => undefined);
   }
+}
+
+async function callConfiguredTool(
+  id: string,
+  context: DaemonSocketContext,
+  name: string,
+  args: Record<string, unknown> | undefined
+): Promise<{
+  id: string;
+  ok: boolean;
+  type?: "tool_result";
+  version?: string;
+  result?: unknown;
+  error?: string;
+}> {
+  const routerResult = routerForConfiguredProfiles(context);
+  if (!routerResult.ok) {
+    return {
+      id,
+      ok: false,
+      error: routerResult.error
+    };
+  }
+
+  const router = routerResult.router;
+  try {
+    await router.discoverTools();
+    return {
+      id,
+      ok: true,
+      type: "tool_result",
+      version: daemonProtocolVersion,
+      result: await router.callTool(name, args)
+    };
+  } catch (error) {
+    return {
+      id,
+      ok: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  } finally {
+    await router.close().catch(() => undefined);
+  }
+}
+
+function routerForConfiguredProfiles(
+  context: DaemonSocketContext
+):
+  | { ok: true; router: GenericMcpRouter }
+  | { ok: false; error: string } {
+  const loaded = loadSwitchboardConfig(optionsFromCwd(context.cwd));
+  const validationError = loadedConfigError(loaded);
+  if (validationError) {
+    return { ok: false, error: validationError };
+  }
+
+  const profiles = stdioProfilesFromConfig(
+    loaded.config.profiles,
+    configCwdBase(loaded, context.cwd)
+  );
+  if (profiles.length === 0) {
+    return { ok: false, error: "No stdio upstream profiles are configured." };
+  }
+
+  return {
+    ok: true,
+    router: new GenericMcpRouter(profiles, {
+      auditLogger: createJsonlAuditLogger()
+    })
+  };
 }
 
 function loadedConfigError(
@@ -388,6 +473,10 @@ function stdioProfilesFromConfig(
 
 function optionsFromCwd(cwd: string | undefined): { cwd?: string } {
   return cwd ? { cwd } : {};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function configCwdBase(

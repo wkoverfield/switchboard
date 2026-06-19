@@ -58,6 +58,40 @@ describe("daemon client response validation", () => {
     });
   });
 
+  it("accepts valid tool call responses", () => {
+    expect(
+      parseDaemonResponse(
+        JSON.stringify({
+          id: "call",
+          ok: true,
+          type: "tool_result",
+          version: "0.1.0",
+          result: {
+            content: [
+              {
+                type: "text",
+                text: "ok"
+              }
+            ]
+          }
+        })
+      )
+    ).toEqual({
+      id: "call",
+      ok: true,
+      type: "tool_result",
+      version: "0.1.0",
+      result: {
+        content: [
+          {
+            type: "text",
+            text: "ok"
+          }
+        ]
+      }
+    });
+  });
+
   it("rejects malformed success responses", () => {
     expect(() =>
       parseDaemonResponse(JSON.stringify({ id: "one", ok: true, type: "pong" }))
@@ -97,5 +131,26 @@ describe("daemon client response validation", () => {
         })
       )
     ).toThrow("Daemon tools response contains an invalid tool schema.");
+  });
+
+  it("rejects malformed tool call responses", () => {
+    expect(() =>
+      parseDaemonResponse(
+        JSON.stringify({
+          id: "call",
+          ok: true,
+          type: "tool_result",
+          version: "0.1.0",
+          result: {
+            content: [
+              {
+                type: "unknown",
+                text: "nope"
+              }
+            ]
+          }
+        })
+      )
+    ).toThrow("Daemon tool result response result is invalid.");
   });
 });

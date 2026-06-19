@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
@@ -58,6 +58,27 @@ try {
     const names = tools.tools.map((tool) => tool.name).sort();
     assert(names.includes("daemon_mcp_echo"), "expected daemon_mcp_echo tool");
     assert(names.includes("daemon_mcp_whoami"), "expected daemon_mcp_whoami tool");
+
+    const result = await client.callTool({
+      name: "daemon_mcp_echo",
+      arguments: { message: "forwarded" }
+    });
+    assert(textContent(result) === "daemon-mcp:forwarded", "expected routed call result");
+
+    const auditLogPath = join(tmpRoot, "switchboard", "logs", "switchboard.jsonl");
+    const auditEntries = readFileSync(auditLogPath, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    assert(
+      auditEntries.some(
+        (entry) =>
+          entry.action === "tool_call" &&
+          entry.status === "ok" &&
+          entry.toolName === "daemon_mcp_echo"
+      ),
+      "expected daemon routed tool call audit entry"
+    );
   } finally {
     await client.close();
   }
@@ -83,6 +104,7 @@ function runDaemon(command, options = {}) {
       encoding: "utf8",
       env: {
         ...process.env,
+        XDG_STATE_HOME: tmpRoot,
         SWITCHBOARD_RUNTIME_DIR: runtimeDir
       }
     }
@@ -101,4 +123,17 @@ function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+function textContent(result) {
+  if (!Array.isArray(result.content)) {
+    return "";
+  }
+
+  const first = result.content[0];
+  if (first?.type !== "text" || typeof first.text !== "string") {
+    return "";
+  }
+
+  return first.text;
 }

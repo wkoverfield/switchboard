@@ -32,7 +32,7 @@ use boring:
 
 ## Current State
 
-Implemented on `main` through PR #12:
+Implemented on `main` through PR #13:
 
 - TypeScript pnpm workspace
 - `@switchboard-mcp/cli`
@@ -67,10 +67,11 @@ Implemented on `main` through PR #12:
 - `switchboard daemon status/start/stop/ping/tools`
 - daemon JSON socket protocol
 - daemon-side namespaced tool discovery
+- `switchboard mcp`
+- daemon-backed MCP `tools/list`
 
 Not started:
 
-- MCP tool-call forwarding through the daemon
 - policy engine
 - approval broker
 - secrets/keychain
@@ -370,7 +371,7 @@ Acceptance:
 - stale daemon recovery test
 - no provider integrations
 
-### Current Slice: Daemon-Backed MCP List Tools
+### Completed Slice: Daemon-Backed MCP List Tools
 
 Goal: let an MCP client connect to a stdio adapter that asks the daemon for
 namespaced tool metadata, without forwarding tool calls yet.
@@ -383,7 +384,7 @@ Acceptance:
 - smoke covers MCP client -> adapter -> daemon -> fixture upstream discovery
 - no MCP tool-call forwarding yet
 
-### Then: Daemon Tool Call Forwarding
+### Current Slice: Daemon Tool Call Forwarding
 
 Goal: move routed MCP tool calls through the local daemon.
 
@@ -392,8 +393,9 @@ Acceptance:
 - daemon protocol accepts namespaced tool-call requests
 - stdio adapter forwards MCP `tools/call` to the daemon
 - daemon owns upstream routing for forwarded calls
+- daemon-routed calls preserve local audit logging
 - existing `serve` behavior remains available for debug/CI
-- version mismatch or stale daemon errors are clear
+- no daemon auto-start yet
 
 ## Rules For Future Agents
 
