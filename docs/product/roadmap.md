@@ -32,7 +32,7 @@ use boring:
 
 ## Current State
 
-Implemented on `main` through PR #16:
+Implemented on `main` through PR #17:
 
 - TypeScript pnpm workspace
 - `@switchboard-mcp/cli`
@@ -74,6 +74,7 @@ Implemented on `main` through PR #16:
 - daemon auto-start for `switchboard mcp`
 - daemon cwd isolation before MCP attach
 - daemon-backed Codex/Claude install snippets
+- project-scoped Codex/Claude install writes with backups and rollback
 
 Not started:
 
