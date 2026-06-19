@@ -8,3 +8,4 @@
 - Added `switchboard status` and `switchboard doctor`.
 - Started generic stdio MCP upstream mounting with namespaced tool discovery and routed calls.
 - Added a stdio MCP front door through `switchboard serve`.
+- Added an end-to-end smoke check for a real `switchboard serve` MCP session.
