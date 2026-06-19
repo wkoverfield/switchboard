@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
@@ -11,10 +11,17 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(scriptDir, "..");
 const repoRoot = resolve(packageDir, "..", "..");
 const fixtureServerPath = resolve(packageDir, "fixtures", "echo-server.mjs");
+const cliEntryPath = resolve(repoRoot, "apps", "cli", "dist", "index.js");
 const tmpRoot = join(
   tmpdir(),
   `switchboard-serve-smoke-${Date.now()}-${Math.random().toString(16).slice(2)}`
 );
+
+if (!existsSync(cliEntryPath)) {
+  throw new Error(
+    "Built CLI entrypoint not found. Run `pnpm build` before `pnpm smoke:mcp-serve-session`."
+  );
+}
 
 mkdirSync(tmpRoot, { recursive: true });
 writeFileSync(join(tmpRoot, ".gitignore"), ".switchboard.local.yaml\n");
@@ -40,16 +47,8 @@ const client = new Client({
   version: "0.1.0"
 });
 const transport = new StdioClientTransport({
-  command: "pnpm",
-  args: [
-    "--silent",
-    "--filter",
-    "@switchboard-mcp/cli",
-    "switchboard",
-    "--cwd",
-    tmpRoot,
-    "serve"
-  ],
+  command: process.execPath,
+  args: [cliEntryPath, "--cwd", tmpRoot, "serve"],
   cwd: repoRoot,
   stderr: "pipe"
 });
