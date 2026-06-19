@@ -278,14 +278,16 @@ describe("inspectProjectClientConfig", () => {
         serverName: "switchboard",
         targetPath: join(root, ".codex", "config.toml"),
         status: "missing",
-        message: "Project client config file was not found."
+        message: "Project client config file was not found.",
+        otherServerNames: []
       },
       {
         client: "claude",
         serverName: "switchboard",
         targetPath: join(root, ".mcp.json"),
         status: "missing",
-        message: "Project client config file was not found."
+        message: "Project client config file was not found.",
+        otherServerNames: []
       }
     ]);
   });
@@ -301,14 +303,16 @@ describe("inspectProjectClientConfig", () => {
         serverName: "switchboard",
         targetPath: join(root, ".codex", "config.toml"),
         status: "installed",
-        message: "Codex project config routes through switchboard mcp."
+        message: "Codex project config routes through switchboard mcp.",
+        otherServerNames: []
       },
       {
         client: "claude",
         serverName: "switchboard",
         targetPath: join(root, ".mcp.json"),
         status: "installed",
-        message: "Claude project config routes through switchboard mcp."
+        message: "Claude project config routes through switchboard mcp.",
+        otherServerNames: []
       }
     ]);
   });
@@ -346,6 +350,49 @@ describe("inspectProjectClientConfig", () => {
     await expect(inspectProjectClientConfigs({ cwd: root })).resolves.toEqual([
       expect.objectContaining({ client: "codex", status: "installed" }),
       expect.objectContaining({ client: "claude", status: "installed" })
+    ]);
+  });
+
+  it("reports other project MCP server names", async () => {
+    const root = await makeTempProject();
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      join(root, ".codex", "config.toml"),
+      [
+        "[mcp_servers.github]",
+        'command = "github-mcp"',
+        "",
+        '[mcp_servers."switchboard"]',
+        'command = "switchboard"',
+        `args = ["--cwd", "${root}", "mcp"]`
+      ].join("\n")
+    );
+    writeFileSync(
+      join(root, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          linear: {
+            command: "linear-mcp"
+          },
+          switchboard: {
+            command: "switchboard",
+            args: ["--cwd", root, "mcp"]
+          }
+        }
+      })
+    );
+
+    await expect(inspectProjectClientConfigs({ cwd: root })).resolves.toEqual([
+      expect.objectContaining({
+        client: "codex",
+        status: "installed",
+        otherServerNames: ["github"]
+      }),
+      expect.objectContaining({
+        client: "claude",
+        status: "installed",
+        otherServerNames: ["linear"]
+      })
     ]);
   });
 

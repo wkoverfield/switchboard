@@ -36,7 +36,8 @@ switchboard install claude
 ```
 
 Doctor also reports project client config state for Codex and Claude as
-`missing`, `installed`, `stale`, or `invalid`.
+`missing`, `installed`, `stale`, or `invalid`, plus other MCP server names
+already present in those project config files.
 
 ## 3. Test One Profile
 
