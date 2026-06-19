@@ -15,3 +15,4 @@
 - Added `switchboard logs` for reading local audit entries.
 - Added `switchboard init` for starter repo config previews and safe writes.
 - Added doctor next-step guidance for first-run onboarding.
+- Added `switchboard daemon status/start/stop` lifecycle foundation.

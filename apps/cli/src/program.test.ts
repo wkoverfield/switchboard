@@ -174,6 +174,86 @@ describe("switchboard CLI program", () => {
     expect(existsSync(join(root, ".switchboard.yaml"))).toBe(false);
   });
 
+  it("prints daemon not-running status JSON", async () => {
+    const root = makeTempProject();
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(
+      ["daemon", "status", "--runtime-dir", root, "--json"],
+      {
+        from: "user"
+      }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      state: "not-running",
+      paths: {
+        runtimeDir: root,
+        socketPath: join(root, "daemon.sock"),
+        statePath: join(root, "daemon.json")
+      }
+    });
+  });
+
+  it("cleans stale daemon state on stop", async () => {
+    const root = makeTempProject();
+    writeFileSync(
+      join(root, "daemon.json"),
+      JSON.stringify({
+        version: 1,
+        pid: 99999999,
+        startedAt: "2026-06-19T15:00:00.000Z",
+        socketPath: join(root, "daemon.sock")
+      })
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["daemon", "stop", "--runtime-dir", root, "--json"], {
+      from: "user"
+    });
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: true,
+      status: {
+        state: "not-running"
+      },
+      message: "Removed stale Switchboard daemon state."
+    });
+    expect(existsSync(join(root, "daemon.json"))).toBe(false);
+  });
+
+  it("does not trust daemon status without a heartbeat", async () => {
+    const root = makeTempProject();
+    writeFileSync(
+      join(root, "daemon.json"),
+      JSON.stringify({
+        version: 1,
+        pid: process.pid,
+        startedAt: "2026-06-19T15:00:00.000Z",
+        socketPath: join(root, "daemon.sock")
+      })
+    );
+    writeFileSync(join(root, "daemon.sock"), "");
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(
+      ["daemon", "status", "--runtime-dir", root, "--json"],
+      {
+        from: "user"
+      }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      state: "stale",
+      daemon: {
+        pid: process.pid
+      }
+    });
+  });
+
   it("writes init config and refuses accidental overwrite", async () => {
     const root = makeTempProject();
     const output: string[] = [];

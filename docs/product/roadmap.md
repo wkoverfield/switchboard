@@ -32,7 +32,7 @@ use boring:
 
 ## Current State
 
-Implemented on `main` through PR #7:
+Implemented on `main` through PR #9:
 
 - TypeScript pnpm workspace
 - `@switchboard-mcp/cli`
@@ -59,10 +59,13 @@ Implemented on `main` through PR #7:
 - profile-test smoke from a temp cwd using `--cwd`
 - client config dry-run snippets for Codex and Claude Code
 - `switchboard install <codex|claude>`
+- local JSONL audit log foundation
+- `switchboard logs`
+- `switchboard init`
+- doctor next-step guidance
 
 Not started:
 
-- local daemon
 - stdio adapter that talks to the daemon
 - policy engine
 - approval broker
@@ -132,7 +135,7 @@ Remaining useful hardening:
 
 ### Milestone 3: Stdio Adapter + Local Daemon
 
-Status: not started.
+Status: lifecycle foundation in progress.
 
 Original intent:
 
@@ -140,11 +143,15 @@ Original intent:
 - adapter connects to an auto-started local daemon
 - daemon owns upstream sessions, tool cache, policy, approvals, secrets, and audit
 
-Recommended next decision:
+Foundation slice:
 
-Do not jump directly to provider presets. Either build the daemon slice next, or
-ship client config docs/helpers as a very small productization slice while
-explicitly marking them daemonless.
+- daemon runtime path/state helpers
+- `switchboard daemon status`
+- `switchboard daemon start`
+- `switchboard daemon stop`
+- local socket heartbeat
+- stale daemon cleanup
+- lifecycle smoke test
 
 ### Milestone 4: Audit Logs + Doctor
 
@@ -335,7 +342,7 @@ Acceptance:
 - audit entry for profile test and routed tool call
 - docs for local-only audit behavior
 
-### Current Slice: Doctor + Onboarding Polish
+### Completed Slice: Doctor + Onboarding Polish
 
 Goal: make the current daemonless path clear for a first-time user before the
 daemon exists.
@@ -347,7 +354,7 @@ Acceptance:
 - quickstart docs
 - smoke coverage for starter config generation
 
-### Then: Daemon Spike
+### Current Slice: Daemon Lifecycle Spike
 
 Goal: prove lifecycle before approvals/secrets.
 
@@ -355,9 +362,19 @@ Acceptance:
 
 - daemon start/status/stop
 - local socket
-- adapter connects to daemon
 - stale daemon recovery test
 - no provider integrations
+
+### Then: Adapter To Daemon
+
+Goal: move agent-facing stdio traffic through the local daemon.
+
+Acceptance:
+
+- stdio adapter connects to daemon socket
+- daemon owns upstream sessions/tool cache
+- existing `serve` behavior remains available for debug/CI
+- version mismatch or stale daemon errors are clear
 
 ## Rules For Future Agents
 
