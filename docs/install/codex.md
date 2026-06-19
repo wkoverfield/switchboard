@@ -1,8 +1,8 @@
 # Codex Install
 
-Switchboard can run as a stdio MCP server behind Codex. Full write-to-config
-installer support is planned for a later milestone; today the CLI prints a
-dry-run snippet you can inspect before adding it to Codex.
+Switchboard can run as a stdio MCP server behind Codex. The CLI defaults to a
+dry-run snippet and can write project-scoped Codex config when you pass
+`--write`.
 
 ## Dry Run
 
@@ -28,6 +28,21 @@ For JSON automation:
 
 ```bash
 switchboard install codex --json
+```
+
+## Write Project Config
+
+Write `.codex/config.toml` for the current repo:
+
+```bash
+switchboard install codex --write
+```
+
+If `.codex/config.toml` already exists, Switchboard creates a timestamped
+backup next to it before writing. Restore one with:
+
+```bash
+switchboard install codex --rollback .codex/config.toml.switchboard-backup-<timestamp>
 ```
 
 Codex also supports registering stdio MCP servers with its CLI:

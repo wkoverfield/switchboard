@@ -35,6 +35,8 @@ jobs:
       - run: pnpm smoke:audit-profile-test
       - run: pnpm smoke:install-codex
       - run: pnpm smoke:install-claude
+      - run: pnpm smoke:install-write-codex
+      - run: pnpm smoke:install-write-claude
       - run: pnpm smoke:daemon-lifecycle
       - run: pnpm smoke:daemon-list-tools
       - run: pnpm smoke:daemon-mcp-list-tools

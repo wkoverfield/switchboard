@@ -32,7 +32,7 @@ use boring:
 
 ## Current State
 
-Implemented on `main` through PR #15:
+Implemented on `main` through PR #16:
 
 - TypeScript pnpm workspace
 - `@switchboard-mcp/cli`
@@ -73,6 +73,7 @@ Implemented on `main` through PR #15:
 - daemon-routed tool-call audit logging
 - daemon auto-start for `switchboard mcp`
 - daemon cwd isolation before MCP attach
+- daemon-backed Codex/Claude install snippets
 
 Not started:
 
@@ -81,7 +82,7 @@ Not started:
 - secrets/keychain
 - provider presets
 - guided onboarding
-- write-to-config client installers
+- global/user-scope client installers
 - Supabase, Stripe, PostHog, or Sentry integrations
 
 ## Milestone Status
@@ -247,18 +248,23 @@ Safe near-term slice:
 
 - docs-only Codex/Claude setup using current daemon-backed `switchboard mcp`
 - dry-run config generation to stdout
+- project-scoped Codex/Claude writes with backups and rollback
 
 Shipped:
 
 - Codex TOML dry-run snippets for `switchboard --cwd <repo> mcp`
 - Claude Code JSON dry-run snippets for `switchboard --cwd <repo> mcp`
+- project-scoped `.codex/config.toml` write support
+- project-scoped `.mcp.json` write support
+- timestamped backups before updates
+- rollback from an explicit backup path
 - validation for client config names/commands
-- CI smoke coverage for both snippets
+- CI smoke coverage for dry-run, write, and rollback paths
 - daemonless `switchboard serve` debug/CI fallback documentation
 
 Risk:
 
-Write-mode installers before secrets may create configs we later need to
+Global/user-scope installers before secrets may create configs we later need to
 migrate.
 
 ### Milestone 9: Guided Onboarding
@@ -413,9 +419,8 @@ Acceptance:
 - `switchboard mcp --no-auto-start` preserves fail-fast behavior
 - auto-start passes the adapter launch cwd through to the daemon
 - MCP smoke covers auto-start, list, call, and audit
-- install snippets still remain on `serve` until the next install-switch slice
 
-### Current Slice: Daemon-Backed Install Snippets
+### Completed Slice: Daemon-Backed Install Snippets
 
 Goal: make generated Codex and Claude snippets point at the daemon-backed MCP
 adapter now that auto-start is reliable.
@@ -427,6 +432,21 @@ Acceptance:
 - install docs use `mcp` as the primary path
 - `serve` remains documented as debug/CI fallback
 - Codex and Claude install smokes pass
+
+### Current Slice: Project-Scoped Client Installers
+
+Goal: make Codex and Claude install commands useful without hand-editing config
+while keeping writes repo-local and reversible.
+
+Acceptance:
+
+- `switchboard install codex --write` writes `.codex/config.toml`
+- `switchboard install claude --write` writes `.mcp.json`
+- dry-run remains the default
+- existing config updates create timestamped backups
+- `switchboard install <client> --rollback <backup>` restores a backup
+- existing Codex/Claude config entries outside the Switchboard server are preserved
+- CI smokes cover write and rollback for both clients
 
 ## Rules For Future Agents
 
