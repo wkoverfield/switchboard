@@ -194,24 +194,41 @@ async function daemonHeartbeat(socketPath: string): Promise<boolean> {
 }
 
 function handleDaemonSocket(socket: Socket): void {
+  let buffered = "";
+
   socket.setEncoding("utf8");
+  socket.on("error", () => {
+    socket.destroy();
+  });
   socket.on("data", (chunk) => {
-    const request = chunk.toString().trim();
-    if (request === "ping") {
-      socket.write(
-        `${JSON.stringify({
-          id: "legacy",
-          ok: true,
-          type: "pong",
-          version: daemonProtocolVersion
-        })}\n`
-      );
+    buffered += chunk.toString();
+
+    while (buffered.includes("\n")) {
+      const newlineIndex = buffered.indexOf("\n");
+      const request = buffered.slice(0, newlineIndex).trim();
+      buffered = buffered.slice(newlineIndex + 1);
+
+      if (request.length === 0) {
+        continue;
+      }
+
+      if (request === "ping") {
+        socket.write(
+          `${JSON.stringify({
+            id: "legacy",
+            ok: true,
+            type: "pong",
+            version: daemonProtocolVersion
+          })}\n`
+        );
+        socket.end();
+        return;
+      }
+
+      socket.write(`${JSON.stringify(handleDaemonRequest(request))}\n`);
       socket.end();
       return;
     }
-
-    socket.write(`${JSON.stringify(handleDaemonRequest(request))}\n`);
-    socket.end();
   });
 }
 

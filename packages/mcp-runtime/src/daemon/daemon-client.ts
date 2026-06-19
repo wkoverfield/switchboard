@@ -23,11 +23,15 @@ export async function pingDaemon(
   socketPath: string,
   options: DaemonClientOptions = {}
 ): Promise<DaemonPingResponse> {
+  const id = randomRequestId();
   const response = await requestDaemon(socketPath, {
-    id: randomRequestId(),
+    id,
     type: "ping"
   }, options);
 
+  if (response.id !== id) {
+    throw new Error("Daemon response id did not match request id.");
+  }
   if (!response.ok) {
     throw new Error(response.error);
   }
@@ -67,7 +71,7 @@ export async function requestDaemon(
     socket.on("end", () => {
       clearTimeout(timeout);
       try {
-        resolve(JSON.parse(response.trim()) as DaemonResponse);
+        resolve(parseDaemonResponse(response.trim()));
       } catch (error) {
         reject(error);
       }
@@ -80,4 +84,44 @@ export async function requestDaemon(
 
 function randomRequestId(): string {
   return Math.random().toString(16).slice(2);
+}
+
+export function parseDaemonResponse(raw: string): DaemonResponse {
+  const parsed = JSON.parse(raw) as unknown;
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error("Daemon response must be an object.");
+  }
+
+  if (!("id" in parsed) || typeof parsed.id !== "string") {
+    throw new Error("Daemon response id is missing or invalid.");
+  }
+  if (!("ok" in parsed) || typeof parsed.ok !== "boolean") {
+    throw new Error("Daemon response ok flag is missing or invalid.");
+  }
+
+  if (parsed.ok) {
+    if (!("type" in parsed) || parsed.type !== "pong") {
+      throw new Error("Daemon success response type is invalid.");
+    }
+    if (!("version" in parsed) || typeof parsed.version !== "string") {
+      throw new Error("Daemon success response version is missing or invalid.");
+    }
+
+    return {
+      id: parsed.id,
+      ok: true,
+      type: "pong",
+      version: parsed.version
+    };
+  }
+
+  if (!("error" in parsed) || typeof parsed.error !== "string") {
+    throw new Error("Daemon error response message is missing or invalid.");
+  }
+
+  return {
+    id: parsed.id,
+    ok: false,
+    error: parsed.error
+  };
 }
