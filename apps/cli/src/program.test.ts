@@ -205,13 +205,39 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("doctor treats freshly initialized placeholder profiles as not ready", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "init", "--write", "--json"], {
+      from: "user"
+    });
+
+    await program.parseAsync(["--cwd", root, "doctor", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[1] ?? "{}") as {
+      ok: boolean;
+      nextSteps: string[];
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.nextSteps).toContain(
+      "edit .switchboard.yaml and replace the starter upstream args"
+    );
+    expect(parsed.nextSteps).not.toContain("switchboard install codex");
+    expect(parsed.nextSteps).not.toContain("switchboard install claude");
+  });
+
   it("fails init for invalid starter config options", async () => {
     const root = makeTempProject();
 
     const errors: string[] = [];
     const program = createProgram({ writeErr: (message) => errors.push(message) });
     await program.parseAsync(
-      ["--cwd", root, "init", "--profile-name", "!!!", "--command", ""],
+      ["--cwd", root, "init", "--profile-name", "!!!", "--command", "node\nbad"],
       {
         from: "user"
       }

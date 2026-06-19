@@ -22,6 +22,7 @@ export interface InitConfigValidationResult {
 
 const defaultProfileName = "local_example";
 const defaultCommand = "node";
+export const starterUpstreamArgPlaceholder = "./path/to/your-mcp-server.mjs";
 
 export function createInitConfigPlan(
   options: InitConfigOptions = {}
@@ -53,16 +54,37 @@ export function renderStarterConfig(
 export function validateInitConfigOptions(
   options: Pick<Required<InitConfigOptions>, "profileName" | "command">
 ): InitConfigValidationResult {
+  const errors: string[] = [];
+  if (options.command.trim().length === 0) {
+    errors.push("command must not be empty");
+  }
+
+  if (containsControlCharacter(options.command)) {
+    errors.push("command must not contain control characters");
+  }
+
   const config = starterConfigObject(options);
   const parsed = switchboardConfigSchema.safeParse(config);
-  if (parsed.success) {
+  if (parsed.success && errors.length === 0) {
     return { ok: true, errors: [] };
   }
 
   return {
     ok: false,
-    errors: parsed.error.issues.map((issue) => issue.message)
+    errors: [
+      ...errors,
+      ...(parsed.success
+        ? []
+        : parsed.error.issues.map((issue) => issue.message))
+    ]
   };
+}
+
+function containsControlCharacter(value: string): boolean {
+  return [...value].some((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint !== undefined && (codePoint < 32 || codePoint === 127);
+  });
 }
 
 function starterConfigObject(
@@ -83,7 +105,7 @@ function starterConfigObject(
         upstream: {
           type: "stdio",
           command: options.command,
-          args: ["./path/to/your-mcp-server.mjs"]
+          args: [starterUpstreamArgPlaceholder]
         }
       }
     },

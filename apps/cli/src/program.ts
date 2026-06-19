@@ -16,6 +16,7 @@ import {
   type PathResolutionOptions,
   resolveGlobalConfigPath,
   resolveRepoConfigPaths,
+  starterUpstreamArgPlaceholder,
   type SupportedClient,
   validateInitConfigOptions,
   validateSwitchboardClientConfigOptions
@@ -606,6 +607,9 @@ function doctorNextSteps(options: {
     options.loaded.config.profiles,
     configCwdBase(options.loaded, options.cwd)
   );
+  const placeholderProfiles = stdioProfiles.filter((profile) =>
+    (profile.args ?? []).includes(starterUpstreamArgPlaceholder)
+  );
 
   if (!hasRepoConfig) {
     steps.push("switchboard init --write");
@@ -623,11 +627,18 @@ function doctorNextSteps(options: {
     steps.push("fix config diagnostics above, then rerun switchboard doctor");
   }
 
-  if (options.ok && stdioProfiles.length > 0) {
-    steps.push(`switchboard test ${stdioProfiles[0]?.profileName}`);
+  if (placeholderProfiles.length > 0) {
+    steps.push("edit .switchboard.yaml and replace the starter upstream args");
+  }
+
+  const readyProfile = stdioProfiles.find(
+    (profile) => !placeholderProfiles.includes(profile)
+  );
+  if (options.ok && readyProfile) {
+    steps.push(`switchboard test ${readyProfile.profileName}`);
     steps.push("switchboard install codex");
     steps.push("switchboard install claude");
-  } else if (options.ok) {
+  } else if (options.ok && placeholderProfiles.length === 0) {
     steps.push("add a stdio upstream profile, then run switchboard test <profile>");
   }
 

@@ -53,6 +53,17 @@ describe("init config", () => {
     ).toMatchObject({
       ok: false
     });
+    expect(
+      validateInitConfigOptions({
+        profileName: "local_tools",
+        command: "node\nboom"
+      })
+    ).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([
+        "command must not contain control characters"
+      ])
+    });
     expect(() =>
       renderStarterConfig({ profileName: "!!!", command: "node" })
     ).toThrow();
