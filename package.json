@@ -1,0 +1,26 @@
+{
+  "name": "switchboard",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.28.2",
+  "description": "Local-first MCP profile router for multiple accounts, projects, environments, and AI coding agents.",
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm build && pnpm -r typecheck",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "smoke:cli-help": "pnpm --filter @switchboard-mcp/cli smoke:help",
+    "smoke:cli-status": "pnpm --filter @switchboard-mcp/cli switchboard status --json",
+    "smoke:cli-doctor": "pnpm --filter @switchboard-mcp/cli switchboard doctor --json",
+    "smoke:repo-config": "tmpfile=$(mktemp) && pnpm --silent --filter @switchboard-mcp/cli switchboard status --json > \"$tmpfile\" && node scripts/smoke/assert-repo-config.mjs \"$tmpfile\""
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^22.19.1",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.49.0",
+    "vitest": "^4.1.6"
+  }
+}

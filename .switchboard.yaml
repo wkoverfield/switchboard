@@ -1,0 +1,20 @@
+version: 1
+
+defaults:
+  defaultEnvironment: local
+
+profiles:
+  switchboard_fixture:
+    provider: generic
+    environment: local
+    namespace: switchboard_fixture
+    readOnly: true
+    description: Milestone 0/1 fixture profile for config, schema, and namespace validation.
+
+workspaces:
+  switchboard:
+    paths:
+      - .
+    profiles:
+      - switchboard_fixture
+    defaultEnvironment: local
