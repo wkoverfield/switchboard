@@ -356,6 +356,44 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it("refuses daemon-backed mcp when the running daemon uses another cwd", async () => {
+    const root = makeTempProject();
+    const otherRoot = makeTempProject();
+    const errors: string[] = [];
+    const servedSockets: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message),
+      daemonStatus: async () => ({
+        state: "running",
+        paths: {
+          runtimeDir: root,
+          socketPath: join(root, "daemon.sock"),
+          statePath: join(root, "daemon.json")
+        },
+        daemon: {
+          version: 1,
+          pid: process.pid,
+          startedAt: "2026-06-19T16:00:00.000Z",
+          socketPath: join(root, "daemon.sock"),
+          cwd: otherRoot
+        }
+      }),
+      serveDaemonMcp: async (socket) => {
+        servedSockets.push(socket);
+      }
+    });
+
+    await program.parseAsync(["--cwd", root, "mcp", "--runtime-dir", root], {
+      from: "user"
+    });
+
+    expect(errors).toEqual([
+      `error: Switchboard daemon is running for ${otherRoot}; stop it or use --runtime-dir for a separate daemon before serving ${root}`
+    ]);
+    expect(servedSockets).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
   it("fails daemon-backed mcp when auto-start fails", async () => {
     const root = makeTempProject();
     const errors: string[] = [];

@@ -395,7 +395,19 @@ export function createProgram(io: ProgramIo = {}): Command {
         ...optionsFromRuntimeDir(options.runtimeDir),
         ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
       };
+      const desiredCwd = resolve(globalOptions.cwd ?? process.cwd());
       let status = await getDaemonStatus(daemonOptions);
+      if (
+        status.state === "running" &&
+        status.daemon.cwd !== desiredCwd
+      ) {
+        writeErr(
+          `error: Switchboard daemon is running for ${status.daemon.cwd ?? "an unknown cwd"}; stop it or use --runtime-dir for a separate daemon before serving ${desiredCwd}`
+        );
+        process.exitCode = 1;
+        return;
+      }
+
       if (status.state !== "running") {
         if (options.autoStart === false) {
           writeErr(

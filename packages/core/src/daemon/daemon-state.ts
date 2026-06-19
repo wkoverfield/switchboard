@@ -15,6 +15,7 @@ export interface DaemonState {
   pid: number;
   startedAt: string;
   socketPath: string;
+  cwd?: string;
 }
 
 export type DaemonStatus =
@@ -124,13 +125,19 @@ export function createDaemonState(options: {
   pid: number;
   socketPath: string;
   startedAt?: Date;
+  cwd?: string;
 }): DaemonState {
-  return {
+  const state: DaemonState = {
     version: 1,
     pid: options.pid,
     socketPath: options.socketPath,
     startedAt: (options.startedAt ?? new Date()).toISOString()
   };
+  if (options.cwd) {
+    state.cwd = resolve(options.cwd);
+  }
+
+  return state;
 }
 
 function parseDaemonState(raw: string): DaemonState {
@@ -151,6 +158,9 @@ function parseDaemonState(raw: string): DaemonState {
     typeof parsed.startedAt !== "string" ||
     typeof parsed.socketPath !== "string"
   ) {
+    throw new Error("Daemon state file is invalid.");
+  }
+  if (parsed.cwd !== undefined && typeof parsed.cwd !== "string") {
     throw new Error("Daemon state file is invalid.");
   }
 
