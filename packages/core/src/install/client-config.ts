@@ -27,7 +27,7 @@ export function renderSwitchboardClientConfig(
 ): RenderedClientConfig {
   const serverName = options.serverName ?? defaultServerName;
   const command = options.command ?? defaultCommand;
-  const args = ["--cwd", options.cwd, "serve"];
+  const args = ["--cwd", options.cwd, "mcp"];
   const validation = validateSwitchboardClientConfigOptions({
     ...options,
     serverName,

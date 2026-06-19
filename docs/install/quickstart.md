@@ -1,7 +1,7 @@
 # Quickstart
 
-Use this path for a daemonless local setup while the daemon and provider
-presets are still future milestones.
+Use this path for the local daemon-backed setup. Provider presets and
+write-mode installers are still future milestones.
 
 ## 1. Create Starter Config
 
@@ -55,3 +55,7 @@ switchboard install claude
 
 Switchboard does not write Codex or Claude config files yet. Copy the dry-run
 snippet into the client config you choose.
+
+The generated snippets run `switchboard --cwd <repo> mcp`, which auto-starts
+the local daemon and routes MCP traffic through it. Use `switchboard serve`
+only when you need a daemonless debug or CI fallback.

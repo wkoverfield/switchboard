@@ -32,7 +32,7 @@ use boring:
 
 ## Current State
 
-Implemented on `main` through PR #14:
+Implemented on `main` through PR #15:
 
 - TypeScript pnpm workspace
 - `@switchboard-mcp/cli`
@@ -71,6 +71,8 @@ Implemented on `main` through PR #14:
 - daemon-backed MCP `tools/list`
 - daemon-backed MCP `tools/call`
 - daemon-routed tool-call audit logging
+- daemon auto-start for `switchboard mcp`
+- daemon cwd isolation before MCP attach
 
 Not started:
 
@@ -232,7 +234,7 @@ Do not build provider presets before this has at least a minimal design.
 
 ### Milestone 8: Client Installers
 
-Status: not started.
+Status: partly pulled forward.
 
 Original intent:
 
@@ -243,19 +245,20 @@ Original intent:
 
 Safe near-term slice:
 
-- docs-only Codex/Claude setup using current `switchboard serve`
+- docs-only Codex/Claude setup using current daemon-backed `switchboard mcp`
 - dry-run config generation to stdout
 
 Shipped:
 
-- Codex TOML dry-run snippets
-- Claude Code JSON dry-run snippets
+- Codex TOML dry-run snippets for `switchboard --cwd <repo> mcp`
+- Claude Code JSON dry-run snippets for `switchboard --cwd <repo> mcp`
 - validation for client config names/commands
 - CI smoke coverage for both snippets
+- daemonless `switchboard serve` debug/CI fallback documentation
 
 Risk:
 
-Full installers before daemon/secrets may create configs we later need to
+Write-mode installers before secrets may create configs we later need to
 migrate.
 
 ### Milestone 9: Guided Onboarding
@@ -326,15 +329,15 @@ Alpha gate:
 
 ## Recommended Next Sequence
 
-### Completed Slice: Product Docs + Client Config Dry Run
+### Completed Slice: Product Docs + Initial Client Config Dry Run
 
-Goal: make current daemonless Switchboard usable from Codex/Claude without
-pretending the daemon exists.
+Goal: make the initial daemonless Switchboard path usable from Codex/Claude
+before the daemon-backed adapter existed.
 
 Acceptance:
 
-- `docs/install/codex.md` reflects current `switchboard serve`
-- `docs/install/claude-code.md` reflects current `switchboard serve`
+- `docs/install/codex.md` reflected the then-current `switchboard serve`
+- `docs/install/claude-code.md` reflected the then-current `switchboard serve`
 - one command generates the correct MCP server config
 - no provider secrets are written
 - tests cover generated config shape
@@ -399,7 +402,7 @@ Acceptance:
 - existing `serve` behavior remains available for debug/CI
 - no daemon auto-start yet
 
-### Current Slice: Daemon MCP Auto-Start
+### Completed Slice: Daemon MCP Auto-Start
 
 Goal: make `switchboard mcp` usable as a client entrypoint without requiring a
 separate manual daemon start.
@@ -411,6 +414,19 @@ Acceptance:
 - auto-start passes the adapter launch cwd through to the daemon
 - MCP smoke covers auto-start, list, call, and audit
 - install snippets still remain on `serve` until the next install-switch slice
+
+### Current Slice: Daemon-Backed Install Snippets
+
+Goal: make generated Codex and Claude snippets point at the daemon-backed MCP
+adapter now that auto-start is reliable.
+
+Acceptance:
+
+- Codex install dry-run uses `switchboard --cwd <repo> mcp`
+- Claude install dry-run uses `switchboard --cwd <repo> mcp`
+- install docs use `mcp` as the primary path
+- `serve` remains documented as debug/CI fallback
+- Codex and Claude install smokes pass
 
 ## Rules For Future Agents
 

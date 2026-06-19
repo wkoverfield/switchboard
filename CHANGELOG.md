@@ -21,3 +21,4 @@
 - Added initial daemon-backed MCP adapter tool listing through `switchboard mcp`.
 - Added daemon-backed MCP tool-call forwarding with audit logging.
 - Added daemon auto-start for `switchboard mcp`.
+- Switched Codex and Claude install snippets to the daemon-backed `switchboard mcp` adapter.

@@ -19,7 +19,7 @@ The generated snippet uses Claude Code's `mcpServers` JSON shape:
   "mcpServers": {
     "switchboard": {
       "command": "switchboard",
-      "args": ["--cwd", "/path/to/your/repo", "serve"],
+      "args": ["--cwd", "/path/to/your/repo", "mcp"],
       "env": {}
     }
   }
@@ -32,9 +32,12 @@ project, or local/user scope when it should stay machine-specific.
 Claude Code can also register the stdio server with its CLI:
 
 ```bash
-claude mcp add switchboard -- switchboard --cwd /path/to/your/repo serve
+claude mcp add switchboard -- switchboard --cwd /path/to/your/repo mcp
 ```
 
 After installing, run `/mcp` inside Claude Code to verify the server is listed.
+
+For debugging without the daemon-backed adapter, run
+`switchboard --cwd /path/to/your/repo serve`.
 
 Reference: https://code.claude.com/docs/en/mcp
