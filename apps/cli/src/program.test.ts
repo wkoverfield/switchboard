@@ -1054,6 +1054,43 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it("rolls back project-scoped install config at the repo root from nested cwd", async () => {
+    const root = makeTempProject();
+    const nested = join(root, "nested");
+    mkdirSync(nested);
+    writeStdioConfig(root);
+    const targetPath = join(root, ".mcp.json");
+    const backupPath = join(root, "claude.backup.json");
+    writeFileSync(targetPath, '{"current":true}\n');
+    writeFileSync(backupPath, '{"restored":true}\n');
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(
+      [
+        "--cwd",
+        nested,
+        "install",
+        "claude",
+        "--rollback",
+        "claude.backup.json",
+        "--json"
+      ],
+      {
+        from: "user"
+      }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      targetPath: string;
+      restoredFrom: string;
+    };
+    expect(parsed.targetPath).toBe(targetPath);
+    expect(parsed.restoredFrom).toBe(backupPath);
+    expect(readFileSync(targetPath, "utf8")).toBe('{"restored":true}\n');
+    expect(existsSync(join(nested, ".mcp.json"))).toBe(false);
+  });
+
   it("fails install when write and rollback are both requested", async () => {
     const root = makeTempProject();
     writeStdioConfig(root);

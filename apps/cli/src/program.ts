@@ -608,7 +608,7 @@ export function createProgram(io: ProgramIo = {}): Command {
           return;
         }
 
-        const fallbackCwd = globalOptions.cwd ? resolve(globalOptions.cwd) : process.cwd();
+        const rollbackCwd = installTargetCwd(globalOptions.cwd);
         if (options.write && options.rollback) {
           writeErr("error: use either --write or --rollback, not both");
           process.exitCode = 1;
@@ -619,10 +619,10 @@ export function createProgram(io: ProgramIo = {}): Command {
           try {
             const result = await rollbackSwitchboardClientConfig({
               client: supportedClient,
-              cwd: fallbackCwd,
+              cwd: rollbackCwd,
               backupPath: isAbsolute(options.rollback)
                 ? options.rollback
-                : resolve(fallbackCwd, options.rollback)
+                : resolve(rollbackCwd, options.rollback)
             });
             writeOut(
               options.json
@@ -907,6 +907,13 @@ function optionsFromCwd(cwd: string | undefined): LoadConfigOptions &
 
 function messageFromError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function installTargetCwd(cwd: string | undefined): string {
+  const resolvedCwd = cwd ? resolve(cwd) : process.cwd();
+  const repoPaths = resolveRepoConfigPaths(cwd ? { cwd } : {});
+
+  return repoPaths.repoConfigPath ? dirname(repoPaths.repoConfigPath) : resolvedCwd;
 }
 
 function optionsFromRuntimeDir(
