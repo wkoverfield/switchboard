@@ -1,11 +1,12 @@
-import { mkdtemp, stat } from "node:fs/promises";
+import { mkdtemp, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   createJsonlAuditLogger,
   readAuditLogEntries,
-  resolveAuditLogPath
+  resolveAuditLogPath,
+  safeAuditLog
 } from "./audit-log.js";
 
 describe("audit log", () => {
@@ -36,7 +37,8 @@ describe("audit log", () => {
       profileName: "stripe_live",
       namespace: "stripe_live",
       durationMs: 12,
-      error: "failed with token=abc123 and sk-proj-secretvalue"
+      error:
+        'Authorization: Bearer abc.def token=abc123 "apiKey":"json-secret" https://user:pass@example.com and sk-proj-secretvalue ghp_secretvalue xoxb-secretvalue'
     });
 
     await logger.log({
@@ -59,7 +61,8 @@ describe("audit log", () => {
         profileName: "stripe_live",
         namespace: "stripe_live",
         durationMs: 12,
-        error: "failed with token=[redacted] and [redacted]"
+        error:
+          'Authorization: Bearer [redacted] token=[redacted] "apiKey":"[redacted]" https://[redacted]@example.com and [redacted] [redacted] [redacted]'
       },
       {
         version: 1,
@@ -96,5 +99,53 @@ describe("audit log", () => {
     await expect(
       readAuditLogEntries({ path: join(root, "missing.jsonl") })
     ).resolves.toEqual([]);
+  });
+
+  it("skips malformed JSONL lines", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-audit-"));
+    const path = join(root, "switchboard.jsonl");
+    await writeFile(
+      path,
+      [
+        JSON.stringify({
+          version: 1,
+          timestamp: "2026-06-19T14:00:00.000Z",
+          action: "profile_test",
+          status: "ok",
+          profileName: "good"
+        }),
+        "{not-json",
+        JSON.stringify({
+          version: 1,
+          timestamp: "2026-06-19T14:01:00.000Z",
+          action: "profile_test",
+          status: "ok",
+          profileName: "also-good"
+        })
+      ].join("\n")
+    );
+
+    expect(await readAuditLogEntries({ path })).toMatchObject([
+      { profileName: "good" },
+      { profileName: "also-good" }
+    ]);
+  });
+
+  it("safe audit logging swallows logger failures", async () => {
+    const errors: unknown[] = [];
+
+    await expect(
+      safeAuditLog(
+        {
+          async log() {
+            throw new Error("disk is full");
+          }
+        },
+        { action: "profile_test", status: "ok" },
+        { onError: (error) => errors.push(error) }
+      )
+    ).resolves.toBeUndefined();
+
+    expect(errors[0]).toBeInstanceOf(Error);
   });
 });

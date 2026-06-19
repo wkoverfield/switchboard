@@ -330,6 +330,65 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("does not fail profile tests when audit logging fails", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      auditLogger: {
+        async log() {
+          throw new Error("audit unavailable");
+        }
+      },
+      testProfile: async (profile) => ({
+        ok: true,
+        profileName: profile.profileName,
+        namespace: profile.namespace,
+        toolCount: 0,
+        tools: []
+      })
+    });
+    await program.parseAsync(["--cwd", root, "test", "local_echo", "--json"], {
+      from: "user"
+    });
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: true,
+      profileName: "local_echo"
+    });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("still reports profile test failures when audit logging also fails", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      auditLogger: {
+        async log() {
+          throw new Error("audit unavailable");
+        }
+      },
+      testProfile: async () => {
+        throw new Error("upstream failed");
+      }
+    });
+    await program.parseAsync(["--cwd", root, "test", "local_echo", "--json"], {
+      from: "user"
+    });
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      profileName: "local_echo",
+      error: "upstream failed"
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
   it("fails profile test when the profile does not exist", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");

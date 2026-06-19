@@ -98,6 +98,25 @@ describe("GenericMcpRouter", () => {
     }
   });
 
+  it("does not fail successful routed calls when audit logging fails", async () => {
+    const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {
+      auditLogger: {
+        async log() {
+          throw new Error("audit unavailable");
+        }
+      }
+    });
+
+    try {
+      await router.discoverTools();
+      await expect(
+        router.callTool("alpha_tools_echo", { message: "hello" })
+      ).resolves.toBeDefined();
+    } finally {
+      await router.close();
+    }
+  });
+
   it("rejects namespaced collisions within the same namespace", async () => {
     const router = new GenericMcpRouter([
       fixtureProfile("alpha", "shared"),

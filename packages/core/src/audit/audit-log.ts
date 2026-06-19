@@ -33,6 +33,10 @@ export interface ReadAuditLogOptions {
   limit?: number;
 }
 
+export interface SafeAuditLogOptions {
+  onError?: (error: unknown) => void;
+}
+
 export function resolveAuditLogPath(
   options: PathResolutionOptions = {}
 ): string {
@@ -74,6 +78,18 @@ export const noopAuditLogger: AuditLogger = {
   }
 };
 
+export async function safeAuditLog(
+  logger: AuditLogger,
+  entry: Omit<AuditLogEntry, "version" | "timestamp">,
+  options: SafeAuditLogOptions = {}
+): Promise<void> {
+  try {
+    await logger.log(entry);
+  } catch (error) {
+    options.onError?.(error);
+  }
+}
+
 export async function readAuditLogEntries(
   options: ReadAuditLogOptions = {}
 ): Promise<AuditLogEntry[]> {
@@ -93,7 +109,7 @@ export async function readAuditLogEntries(
   const entries = raw
     .split("\n")
     .filter(Boolean)
-    .map((line) => JSON.parse(line) as AuditLogEntry);
+    .flatMap((line) => parseAuditLogLine(line));
 
   if (options.limit === undefined) {
     return entries;
@@ -114,6 +130,28 @@ function redactAuditEntry(
 
 function redactSecretLikeText(value: string): string {
   return value
-    .replace(/(sk-[A-Za-z0-9_-]{8,})/g, "[redacted]")
-    .replace(/(token|secret|password|api[_-]?key)=\S+/gi, "$1=[redacted]");
+    .replace(/https?:\/\/([^/\s:@]+):([^/\s@]+)@/gi, "https://[redacted]@")
+    .replace(/\b(sk-[A-Za-z0-9_-]{8,})\b/g, "[redacted]")
+    .replace(/\b(gh[pousr]_[A-Za-z0-9_]{8,})\b/g, "[redacted]")
+    .replace(/\b(xox[baprs]-[A-Za-z0-9-]{8,})\b/g, "[redacted]")
+    .replace(
+      /\b(authorization\s*:\s*bearer)\s+[A-Za-z0-9._~+/=-]+/gi,
+      "$1 [redacted]"
+    )
+    .replace(
+      /"((?:api[_-]?key|token|secret|password))"\s*:\s*"[^"]+"/gi,
+      '"$1":"[redacted]"'
+    )
+    .replace(
+      /\b(token|secret|password|api[_-]?key)=\S+/gi,
+      "$1=[redacted]"
+    );
+}
+
+function parseAuditLogLine(line: string): AuditLogEntry[] {
+  try {
+    return [JSON.parse(line) as AuditLogEntry];
+  } catch {
+    return [];
+  }
 }

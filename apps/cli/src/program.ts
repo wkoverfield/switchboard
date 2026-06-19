@@ -10,6 +10,7 @@ import {
   readAuditLogEntries,
   renderSwitchboardClientConfig,
   resolveAuditLogPath,
+  safeAuditLog,
   type PathResolutionOptions,
   resolveGlobalConfigPath,
   resolveRepoConfigPaths,
@@ -209,7 +210,8 @@ export function createProgram(io: ProgramIo = {}): Command {
             namespace: upstream.namespace,
             durationMs: Date.now() - startedAt
           } as const;
-          await auditLogger.log(
+          await safeAuditLog(
+            auditLogger,
             result.ok
               ? auditEntry
               : { ...auditEntry, error: "profile test failed" }
@@ -221,7 +223,7 @@ export function createProgram(io: ProgramIo = {}): Command {
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          await auditLogger.log({
+          await safeAuditLog(auditLogger, {
             action: "profile_test",
             status: "error",
             profileName,

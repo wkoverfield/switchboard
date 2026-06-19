@@ -1,4 +1,8 @@
-import { noopAuditLogger, type AuditLogger } from "@switchboard-mcp/core";
+import {
+  noopAuditLogger,
+  safeAuditLog,
+  type AuditLogger
+} from "@switchboard-mcp/core";
 import {
   namespacedToolName,
   toNamespacedTool,
@@ -92,7 +96,8 @@ export class GenericMcpRouter {
         upstreamName: route.upstreamName,
         durationMs: Date.now() - startedAt
       } as const;
-      await this.auditLogger.log(
+      await safeAuditLog(
+        this.auditLogger,
         profile?.namespace ? { ...entry, namespace: profile.namespace } : entry
       );
       return result;
@@ -106,7 +111,8 @@ export class GenericMcpRouter {
         durationMs: Date.now() - startedAt,
         error: error instanceof Error ? error.message : String(error)
       } as const;
-      await this.auditLogger.log(
+      await safeAuditLog(
+        this.auditLogger,
         profile?.namespace ? { ...entry, namespace: profile.namespace } : entry
       );
       throw error;
