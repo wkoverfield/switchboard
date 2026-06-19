@@ -29,4 +29,5 @@ jobs:
       - run: pnpm smoke:cli-status
       - run: pnpm smoke:cli-doctor
       - run: pnpm smoke:repo-config
+      - run: pnpm smoke:profile-test
       - run: pnpm smoke:mcp-serve-session

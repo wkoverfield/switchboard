@@ -12,6 +12,7 @@ This repository is in Milestone 2. It currently ships the TypeScript workspace, 
 pnpm install
 pnpm build
 pnpm --filter @switchboard-mcp/cli switchboard --help
+pnpm smoke:profile-test
 pnpm smoke:mcp-serve-session
 ```
 
@@ -21,6 +22,7 @@ pnpm smoke:mcp-serve-session
 switchboard --help
 switchboard status
 switchboard doctor
+switchboard test <profile>
 switchboard serve
 ```
 
@@ -46,4 +48,4 @@ Precedence, highest to lowest:
 5. global config
 6. built-in defaults
 
-`switchboard serve` exposes configured stdio upstream profiles as one MCP server over stdio. Provider integrations, the MCP daemon, secrets, audit logs, and client installers come in later milestones.
+`switchboard test <profile>` checks that a configured stdio upstream starts and lists tools. `switchboard serve` exposes configured stdio upstream profiles as one MCP server over stdio. Provider integrations, the MCP daemon, secrets, audit logs, and client installers come in later milestones.
