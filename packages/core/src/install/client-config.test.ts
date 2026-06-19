@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  inspectProjectClientConfig,
+  inspectProjectClientConfigs,
   renderSwitchboardClientConfig,
   resolveProjectClientConfigPath,
   rollbackSwitchboardClientConfig,
@@ -263,6 +265,81 @@ describe("rollbackSwitchboardClientConfig", () => {
     expect(readFileSync(result.backupPath ?? "", "utf8")).toBe(
       '{"current":true}\n'
     );
+  });
+});
+
+describe("inspectProjectClientConfig", () => {
+  it("reports missing project client configs", async () => {
+    const root = await makeTempProject();
+
+    await expect(inspectProjectClientConfigs({ cwd: root })).resolves.toEqual([
+      {
+        client: "codex",
+        serverName: "switchboard",
+        targetPath: join(root, ".codex", "config.toml"),
+        status: "missing",
+        message: "Project client config file was not found."
+      },
+      {
+        client: "claude",
+        serverName: "switchboard",
+        targetPath: join(root, ".mcp.json"),
+        status: "missing",
+        message: "Project client config file was not found."
+      }
+    ]);
+  });
+
+  it("reports installed Codex and Claude project configs", async () => {
+    const root = await makeTempProject();
+    await writeSwitchboardClientConfig({ client: "codex", cwd: root });
+    await writeSwitchboardClientConfig({ client: "claude", cwd: root });
+
+    await expect(inspectProjectClientConfigs({ cwd: root })).resolves.toEqual([
+      {
+        client: "codex",
+        serverName: "switchboard",
+        targetPath: join(root, ".codex", "config.toml"),
+        status: "installed",
+        message: "Codex project config routes through switchboard mcp."
+      },
+      {
+        client: "claude",
+        serverName: "switchboard",
+        targetPath: join(root, ".mcp.json"),
+        status: "installed",
+        message: "Claude project config routes through switchboard mcp."
+      }
+    ]);
+  });
+
+  it("reports stale and invalid project client configs", async () => {
+    const root = await makeTempProject();
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      join(root, ".codex", "config.toml"),
+      [
+        "[mcp_servers.switchboard]",
+        'command = "switchboard"',
+        'args = ["--cwd", "/old", "serve"]',
+        'cwd = "/old"'
+      ].join("\n")
+    );
+    writeFileSync(join(root, ".mcp.json"), "{not-json");
+
+    const codex = await inspectProjectClientConfig({
+      client: "codex",
+      cwd: root
+    });
+    const claude = await inspectProjectClientConfig({
+      client: "claude",
+      cwd: root
+    });
+
+    expect(codex.status).toBe("stale");
+    expect(codex.message).toContain("different Switchboard");
+    expect(claude.status).toBe("invalid");
+    expect(claude.message).toContain("JSON");
   });
 });
 

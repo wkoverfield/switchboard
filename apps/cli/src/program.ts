@@ -5,6 +5,7 @@ import {
   type AuditLogger,
   checkLocalConfigIgnored,
   createInitConfigPlan,
+  inspectProjectClientConfigs,
   type LoadConfigOptions,
   loadSwitchboardConfig,
   noopAuditLogger,
@@ -21,6 +22,7 @@ import {
   type SupportedClient,
   validateInitConfigOptions,
   validateSwitchboardClientConfigOptions,
+  type ProjectClientConfigInspection,
   writeSwitchboardClientConfig,
   type RolledBackClientConfig,
   type WrittenClientConfig
@@ -117,11 +119,13 @@ export function createProgram(io: ProgramIo = {}): Command {
     .command("doctor")
     .description("Run basic Switchboard config checks.")
     .option("--json", "print machine-readable JSON")
-    .action((options: { json?: boolean }) => {
+    .action(async (options: { json?: boolean }) => {
       const globalOptions = program.opts<{ cwd?: string }>();
       const configOptions = optionsFromCwd(globalOptions.cwd);
       const loaded = loadSwitchboardConfig(configOptions);
       const localIgnore = checkLocalConfigIgnored(globalOptions.cwd);
+      const cwd = configCwdBase(loaded, globalOptions.cwd);
+      const clientConfigs = await inspectProjectClientConfigs({ cwd });
       const checks = [
         {
           name: "config-schema",
@@ -137,6 +141,11 @@ export function createProgram(io: ProgramIo = {}): Command {
           name: "local-config-gitignore",
           ok: localIgnore.ok,
           message: localIgnore.message
+        },
+        {
+          name: "client-configs",
+          ok: clientConfigs.every((item) => item.status !== "invalid"),
+          message: clientConfigSummary(clientConfigs)
         }
       ];
 
@@ -146,10 +155,12 @@ export function createProgram(io: ProgramIo = {}): Command {
         checks,
         diagnostics: loaded.diagnostics,
         namespaceCollisions: loaded.namespaceCollisions,
+        clientConfigs,
         nextSteps: doctorNextSteps({
           ok,
           loaded,
           localIgnoreOk: localIgnore.ok,
+          clientConfigs,
           cwd: globalOptions.cwd
         })
       };
@@ -735,6 +746,7 @@ function formatDoctor(result: {
   ok: boolean;
   checks: Array<{ name: string; ok: boolean; message: string }>;
   diagnostics: Array<{ level: string; message: string }>;
+  clientConfigs?: ProjectClientConfigInspection[];
   nextSteps: string[];
 }): string {
   const lines = [
@@ -749,6 +761,15 @@ function formatDoctor(result: {
     lines.push(`${diagnostic.level}: ${diagnostic.message}`);
   }
 
+  if (result.clientConfigs && result.clientConfigs.length > 0) {
+    lines.push("", "Client configs:");
+    for (const config of result.clientConfigs) {
+      lines.push(
+        `  ${config.client}: ${config.status} - ${config.message} (${config.targetPath})`
+      );
+    }
+  }
+
   if (result.nextSteps.length > 0) {
     lines.push("", "Next steps:");
     for (const step of result.nextSteps) {
@@ -757,6 +778,17 @@ function formatDoctor(result: {
   }
 
   return lines.join("\n");
+}
+
+function clientConfigSummary(configs: ProjectClientConfigInspection[]): string {
+  const installed = configs.filter((item) => item.status === "installed").length;
+  const invalid = configs.filter((item) => item.status === "invalid").length;
+
+  if (invalid > 0) {
+    return `${invalid} project client config file(s) could not be inspected.`;
+  }
+
+  return `${installed}/${configs.length} project client config(s) route through switchboard mcp.`;
 }
 
 function formatInit(result: {
@@ -954,6 +986,7 @@ function doctorNextSteps(options: {
   ok: boolean;
   loaded: ReturnType<typeof loadSwitchboardConfig>;
   localIgnoreOk: boolean;
+  clientConfigs: ProjectClientConfigInspection[];
   cwd: string | undefined;
 }): string[] {
   const steps: string[] = [];
@@ -984,6 +1017,12 @@ function doctorNextSteps(options: {
     steps.push("fix config diagnostics above, then rerun switchboard doctor");
   }
 
+  for (const config of options.clientConfigs) {
+    if (config.status === "invalid") {
+      steps.push(`fix ${config.targetPath}, then rerun switchboard doctor`);
+    }
+  }
+
   if (placeholderProfiles.length > 0) {
     steps.push("edit .switchboard.yaml and replace the starter upstream args");
   }
@@ -993,8 +1032,11 @@ function doctorNextSteps(options: {
   );
   if (options.ok && readyProfile) {
     steps.push(`switchboard test ${readyProfile.profileName}`);
-    steps.push("switchboard install codex");
-    steps.push("switchboard install claude");
+    for (const config of options.clientConfigs) {
+      if (config.status === "missing" || config.status === "stale") {
+        steps.push(`switchboard install ${config.client} --write`);
+      }
+    }
   } else if (options.ok && placeholderProfiles.length === 0) {
     steps.push("add a stdio upstream profile, then run switchboard test <profile>");
   }

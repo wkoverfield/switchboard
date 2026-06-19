@@ -35,6 +35,9 @@ switchboard install codex
 switchboard install claude
 ```
 
+Doctor also reports project client config state for Codex and Claude as
+`missing`, `installed`, `stale`, or `invalid`.
+
 ## 3. Test One Profile
 
 ```bash

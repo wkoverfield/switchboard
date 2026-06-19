@@ -43,6 +43,20 @@ export interface ClientConfigValidationResult {
   errors: string[];
 }
 
+export type ProjectClientConfigStatus =
+  | "missing"
+  | "installed"
+  | "stale"
+  | "invalid";
+
+export interface ProjectClientConfigInspection {
+  client: SupportedClient;
+  serverName: string;
+  targetPath: string;
+  status: ProjectClientConfigStatus;
+  message: string;
+}
+
 const defaultServerName = "switchboard";
 const defaultCommand = "switchboard";
 
@@ -153,6 +167,62 @@ export function resolveProjectClientConfigPath(
   }
 
   return join(cwd, ".mcp.json");
+}
+
+export async function inspectProjectClientConfig(
+  options: SwitchboardClientConfigOptions
+): Promise<ProjectClientConfigInspection> {
+  const rendered = renderSwitchboardClientConfig(options);
+  const targetPath = resolveProjectClientConfigPath(options.client, options.cwd);
+  const existing = await readOptionalTextFile(targetPath);
+
+  if (existing === null) {
+    return {
+      client: options.client,
+      serverName: rendered.serverName,
+      targetPath,
+      status: "missing",
+      message: "Project client config file was not found."
+    };
+  }
+
+  try {
+    if (options.client === "claude") {
+      return inspectClaudeProjectConfig({
+        existing,
+        renderedContent: rendered.content,
+        targetPath,
+        serverName: rendered.serverName
+      });
+    }
+
+    return inspectCodexProjectConfig({
+      existing,
+      targetPath,
+      serverName: rendered.serverName,
+      command: options.command ?? defaultCommand,
+      cwd: options.cwd
+    });
+  } catch (error) {
+    return {
+      client: options.client,
+      serverName: rendered.serverName,
+      targetPath,
+      status: "invalid",
+      message: messageFromError(error)
+    };
+  }
+}
+
+export async function inspectProjectClientConfigs(options: {
+  cwd: string;
+  serverName?: string;
+  command?: string;
+}): Promise<ProjectClientConfigInspection[]> {
+  return Promise.all([
+    inspectProjectClientConfig({ ...options, client: "codex" }),
+    inspectProjectClientConfig({ ...options, client: "claude" })
+  ]);
 }
 
 export function validateSwitchboardClientConfigOptions(
@@ -305,6 +375,165 @@ function mergeCodexConfigContent(
 
   lines.splice(start, end - start, ...renderedLines);
   return `${lines.join("\n").replace(/\n*$/, "")}\n`;
+}
+
+function inspectClaudeProjectConfig(options: {
+  existing: string;
+  renderedContent: string;
+  targetPath: string;
+  serverName: string;
+}): ProjectClientConfigInspection {
+  const parsed = JSON.parse(options.existing) as Record<string, unknown>;
+  const rendered = JSON.parse(options.renderedContent) as {
+    mcpServers: Record<string, unknown>;
+  };
+  const existingServers =
+    isRecord(parsed.mcpServers) && !Array.isArray(parsed.mcpServers)
+      ? parsed.mcpServers
+      : {};
+  const actual = existingServers[options.serverName];
+  const expected = rendered.mcpServers[options.serverName];
+
+  if (actual === undefined) {
+    return {
+      client: "claude",
+      serverName: options.serverName,
+      targetPath: options.targetPath,
+      status: "missing",
+      message: "Claude project config does not include the Switchboard MCP server."
+    };
+  }
+
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    return {
+      client: "claude",
+      serverName: options.serverName,
+      targetPath: options.targetPath,
+      status: "stale",
+      message: "Claude project config has a different Switchboard MCP server entry."
+    };
+  }
+
+  return {
+    client: "claude",
+    serverName: options.serverName,
+    targetPath: options.targetPath,
+    status: "installed",
+    message: "Claude project config routes through switchboard mcp."
+  };
+}
+
+function inspectCodexProjectConfig(options: {
+  existing: string;
+  targetPath: string;
+  serverName: string;
+  command: string;
+  cwd: string;
+}): ProjectClientConfigInspection {
+  const section = codexMcpServerSection(options.existing, options.serverName);
+
+  if (section === null) {
+    return {
+      client: "codex",
+      serverName: options.serverName,
+      targetPath: options.targetPath,
+      status: "missing",
+      message: "Codex project config does not include the Switchboard MCP server."
+    };
+  }
+
+  const values = parseSimpleTomlAssignments(section);
+  const command = parseTomlString(values.command);
+  const args = parseTomlStringArray(values.args);
+  const cwd = parseTomlString(values.cwd);
+
+  if (
+    command !== options.command ||
+    cwd !== options.cwd ||
+    !args ||
+    args.length !== 3 ||
+    args[0] !== "--cwd" ||
+    args[1] !== options.cwd ||
+    args[2] !== "mcp"
+  ) {
+    return {
+      client: "codex",
+      serverName: options.serverName,
+      targetPath: options.targetPath,
+      status: "stale",
+      message: "Codex project config has a different Switchboard MCP server entry."
+    };
+  }
+
+  return {
+    client: "codex",
+    serverName: options.serverName,
+    targetPath: options.targetPath,
+    status: "installed",
+    message: "Codex project config routes through switchboard mcp."
+  };
+}
+
+function codexMcpServerSection(
+  content: string,
+  serverName: string
+): string[] | null {
+  const lines = content.split(/\r?\n/);
+  const start = lines.findIndex(
+    (line) => codexMcpServerNameFromHeader(line) === serverName
+  );
+
+  if (start === -1) {
+    return null;
+  }
+
+  let end = start + 1;
+  while (end < lines.length && !lines[end]?.trim().startsWith("[")) {
+    end += 1;
+  }
+
+  return lines.slice(start + 1, end);
+}
+
+function parseSimpleTomlAssignments(lines: string[]): Record<string, string> {
+  const values: Record<string, string> = {};
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const separator = trimmed.indexOf("=");
+    if (separator === -1 || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    values[trimmed.slice(0, separator).trim()] = trimmed
+      .slice(separator + 1)
+      .trim();
+  }
+
+  return values;
+}
+
+function parseTomlString(value: string | undefined): string | undefined {
+  if (!value?.startsWith('"')) {
+    return undefined;
+  }
+
+  return JSON.parse(value) as string;
+}
+
+function parseTomlStringArray(value: string | undefined): string[] | undefined {
+  if (!value?.startsWith("[")) {
+    return undefined;
+  }
+
+  const parsed = JSON.parse(value) as unknown;
+  return Array.isArray(parsed) && parsed.every((item) => typeof item === "string")
+    ? parsed
+    : undefined;
+}
+
+function messageFromError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function codexMcpServerNameFromHeader(line: string): string | null {

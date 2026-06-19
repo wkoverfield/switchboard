@@ -75,6 +75,7 @@ Implemented on `main` through PR #17:
 - daemon cwd isolation before MCP attach
 - daemon-backed Codex/Claude install snippets
 - project-scoped Codex/Claude install writes with backups and rollback
+- project Codex/Claude client config detection in `switchboard doctor`
 
 Not started:
 
@@ -434,7 +435,7 @@ Acceptance:
 - `serve` remains documented as debug/CI fallback
 - Codex and Claude install smokes pass
 
-### Current Slice: Project-Scoped Client Installers
+### Completed Slice: Project-Scoped Client Installers
 
 Goal: make Codex and Claude install commands useful without hand-editing config
 while keeping writes repo-local and reversible.
@@ -454,6 +455,19 @@ Deferred from full Milestone 8:
 - interactive conflict diff and confirmation before replacing an existing
   `switchboard` client entry
 - global/user-scope client config writes
+
+### Current Slice: Doctor Client Config Detection
+
+Goal: make `switchboard doctor` aware of whether project-scoped Codex and
+Claude config already route through Switchboard.
+
+Acceptance:
+
+- Doctor JSON includes Codex and Claude project client config status
+- Human doctor output shows installed, missing, stale, or invalid client configs
+- Missing/stale clients produce `switchboard install <client> --write` next steps
+- Installed clients do not keep producing install next steps
+- Invalid project client config is reported without mutating files
 
 ## Rules For Future Agents
 
