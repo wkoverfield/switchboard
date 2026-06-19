@@ -24,3 +24,4 @@
 - Switched Codex and Claude install snippets to the daemon-backed `switchboard mcp` adapter.
 - Added project-scoped `switchboard install <codex|claude> --write` installers with timestamped backups and `--rollback`.
 - Added project Codex/Claude client config detection to `switchboard doctor`.
+- Added existing project MCP server name discovery to `switchboard doctor`.

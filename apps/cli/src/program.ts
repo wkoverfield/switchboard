@@ -764,8 +764,12 @@ function formatDoctor(result: {
   if (result.clientConfigs && result.clientConfigs.length > 0) {
     lines.push("", "Client configs:");
     for (const config of result.clientConfigs) {
+      const otherServers =
+        config.otherServerNames.length > 0
+          ? `; other MCP servers: ${config.otherServerNames.join(", ")}`
+          : "";
       lines.push(
-        `  ${config.client}: ${config.status} - ${config.message} (${config.targetPath})`
+        `  ${config.client}: ${config.status} - ${config.message}${otherServers} (${config.targetPath})`
       );
     }
   }

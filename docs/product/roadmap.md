@@ -76,6 +76,7 @@ Implemented on `main` through PR #17:
 - daemon-backed Codex/Claude install snippets
 - project-scoped Codex/Claude install writes with backups and rollback
 - project Codex/Claude client config detection in `switchboard doctor`
+- existing project MCP server name discovery in `switchboard doctor`
 
 Not started:
 
@@ -456,7 +457,7 @@ Deferred from full Milestone 8:
   `switchboard` client entry
 - global/user-scope client config writes
 
-### Current Slice: Doctor Client Config Detection
+### Completed Slice: Doctor Client Config Detection
 
 Goal: make `switchboard doctor` aware of whether project-scoped Codex and
 Claude config already route through Switchboard.
@@ -468,6 +469,18 @@ Acceptance:
 - Missing/stale clients produce `switchboard install <client> --write` next steps
 - Installed clients do not keep producing install next steps
 - Invalid project client config is reported without mutating files
+
+### Current Slice: Existing MCP Server Discovery
+
+Goal: make `switchboard doctor` surface other MCP servers already present in
+project-scoped Codex and Claude config files before adding import behavior.
+
+Acceptance:
+
+- Doctor JSON includes other MCP server names for Codex and Claude project config
+- Human doctor output shows other MCP server names when present
+- Discovery is read-only and does not import or mutate config
+- Existing missing/installed/stale/invalid client status behavior remains intact
 
 ## Rules For Future Agents
 

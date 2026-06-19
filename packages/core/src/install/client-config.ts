@@ -55,6 +55,7 @@ export interface ProjectClientConfigInspection {
   targetPath: string;
   status: ProjectClientConfigStatus;
   message: string;
+  otherServerNames: string[];
 }
 
 const defaultServerName = "switchboard";
@@ -182,7 +183,8 @@ export async function inspectProjectClientConfig(
       serverName: rendered.serverName,
       targetPath,
       status: "missing",
-      message: "Project client config file was not found."
+      message: "Project client config file was not found.",
+      otherServerNames: []
     };
   }
 
@@ -209,7 +211,8 @@ export async function inspectProjectClientConfig(
       serverName: rendered.serverName,
       targetPath,
       status: "invalid",
-      message: messageFromError(error)
+      message: messageFromError(error),
+      otherServerNames: []
     };
   }
 }
@@ -391,6 +394,9 @@ function inspectClaudeProjectConfig(options: {
     isRecord(parsed.mcpServers) && !Array.isArray(parsed.mcpServers)
       ? parsed.mcpServers
       : {};
+  const otherServerNames = Object.keys(existingServers).filter(
+    (name) => name !== options.serverName
+  );
   const actual = existingServers[options.serverName];
   const expected = rendered.mcpServers[options.serverName];
 
@@ -400,7 +406,8 @@ function inspectClaudeProjectConfig(options: {
       serverName: options.serverName,
       targetPath: options.targetPath,
       status: "missing",
-      message: "Claude project config does not include the Switchboard MCP server."
+      message: "Claude project config does not include the Switchboard MCP server.",
+      otherServerNames
     };
   }
 
@@ -410,7 +417,8 @@ function inspectClaudeProjectConfig(options: {
       serverName: options.serverName,
       targetPath: options.targetPath,
       status: "stale",
-      message: "Claude project config has a different Switchboard MCP server entry."
+      message: "Claude project config has a different Switchboard MCP server entry.",
+      otherServerNames
     };
   }
 
@@ -419,7 +427,8 @@ function inspectClaudeProjectConfig(options: {
     serverName: options.serverName,
     targetPath: options.targetPath,
     status: "installed",
-    message: "Claude project config routes through switchboard mcp."
+    message: "Claude project config routes through switchboard mcp.",
+    otherServerNames
   };
 }
 
@@ -431,6 +440,9 @@ function inspectCodexProjectConfig(options: {
   cwd: string;
 }): ProjectClientConfigInspection {
   const section = codexMcpServerSection(options.existing, options.serverName);
+  const otherServerNames = codexMcpServerNames(options.existing).filter(
+    (name) => name !== options.serverName
+  );
 
   if (section === null) {
     return {
@@ -438,7 +450,8 @@ function inspectCodexProjectConfig(options: {
       serverName: options.serverName,
       targetPath: options.targetPath,
       status: "missing",
-      message: "Codex project config does not include the Switchboard MCP server."
+      message: "Codex project config does not include the Switchboard MCP server.",
+      otherServerNames
     };
   }
 
@@ -461,7 +474,8 @@ function inspectCodexProjectConfig(options: {
       serverName: options.serverName,
       targetPath: options.targetPath,
       status: "stale",
-      message: "Codex project config has a different Switchboard MCP server entry."
+      message: "Codex project config has a different Switchboard MCP server entry.",
+      otherServerNames
     };
   }
 
@@ -470,8 +484,16 @@ function inspectCodexProjectConfig(options: {
     serverName: options.serverName,
     targetPath: options.targetPath,
     status: "installed",
-    message: "Codex project config routes through switchboard mcp."
+    message: "Codex project config routes through switchboard mcp.",
+    otherServerNames
   };
+}
+
+function codexMcpServerNames(content: string): string[] {
+  return content
+    .split(/\r?\n/)
+    .map(codexMcpServerNameFromHeader)
+    .filter((name): name is string => name !== null);
 }
 
 function clientServerEntryRoutesThroughSwitchboard(

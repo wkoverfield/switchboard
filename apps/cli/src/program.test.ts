@@ -217,6 +217,29 @@ describe("switchboard CLI program", () => {
     expect(parsed.nextSteps).toContain("switchboard install codex --write");
   });
 
+  it("prints other project MCP server names in human doctor output", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+    writeFileSync(
+      join(root, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          linear: {
+            command: "linear-mcp"
+          }
+        }
+      })
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "doctor"], {
+      from: "user"
+    });
+
+    expect(output.join("\n")).toContain("other MCP servers: linear");
+  });
+
   it("prints init dry-run JSON without writing config", async () => {
     const root = makeTempProject();
 
