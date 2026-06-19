@@ -146,9 +146,75 @@ describe("switchboard CLI program", () => {
     expect(parsed.ok).toBe(true);
     expect(parsed.nextSteps).toEqual([
       "switchboard test local_echo",
-      "switchboard install codex",
-      "switchboard install claude"
+      "switchboard install codex --write",
+      "switchboard install claude --write"
     ]);
+  });
+
+  it("reports installed project client configs in doctor JSON", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    await createProgram().parseAsync(
+      ["--cwd", root, "install", "codex", "--write"],
+      {
+        from: "user"
+      }
+    );
+    await createProgram().parseAsync(
+      ["--cwd", root, "install", "claude", "--write"],
+      {
+        from: "user"
+      }
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "doctor", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      clientConfigs: Array<{ client: string; status: string }>;
+      nextSteps: string[];
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.clientConfigs).toEqual([
+      expect.objectContaining({ client: "codex", status: "installed" }),
+      expect.objectContaining({ client: "claude", status: "installed" })
+    ]);
+    expect(parsed.nextSteps).toEqual(["switchboard test local_echo"]);
+  });
+
+  it("reports stale project client configs in doctor JSON", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      join(root, ".codex", "config.toml"),
+      [
+        "[mcp_servers.switchboard]",
+        'command = "switchboard"',
+        'args = ["serve"]'
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "doctor", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      clientConfigs: Array<{ client: string; status: string }>;
+      nextSteps: string[];
+    };
+    expect(parsed.clientConfigs[0]).toMatchObject({
+      client: "codex",
+      status: "stale"
+    });
+    expect(parsed.nextSteps).toContain("switchboard install codex --write");
   });
 
   it("prints init dry-run JSON without writing config", async () => {
