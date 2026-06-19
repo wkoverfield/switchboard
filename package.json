@@ -14,6 +14,7 @@
     "smoke:cli-status": "pnpm --filter @switchboard-mcp/cli switchboard status --json",
     "smoke:cli-doctor": "pnpm --filter @switchboard-mcp/cli switchboard doctor --json",
     "smoke:repo-config": "tmpfile=$(mktemp) && pnpm --silent --filter @switchboard-mcp/cli switchboard status --json > \"$tmpfile\" && node scripts/smoke/assert-repo-config.mjs \"$tmpfile\"",
+    "smoke:profile-test": "pnpm exec tsx --conditions source apps/cli/src/index.ts test switchboard_fixture --json",
     "smoke:mcp-serve-session": "pnpm --filter @switchboard-mcp/mcp-runtime smoke:serve-session"
   },
   "devDependencies": {

@@ -9,7 +9,13 @@ profiles:
     environment: local
     namespace: switchboard_fixture
     readOnly: true
-    description: Milestone 0/1 fixture profile for config, schema, and namespace validation.
+    description: Fixture profile for config, schema, namespace validation, and profile testing.
+    upstream:
+      type: stdio
+      command: node
+      args:
+        - packages/mcp-runtime/fixtures/echo-server.mjs
+        - switchboard
 
 workspaces:
   switchboard:
