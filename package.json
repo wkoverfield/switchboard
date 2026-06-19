@@ -15,6 +15,8 @@
     "smoke:cli-doctor": "pnpm --filter @switchboard-mcp/cli switchboard doctor --json",
     "smoke:repo-config": "tmpfile=$(mktemp) && pnpm --silent --filter @switchboard-mcp/cli switchboard status --json > \"$tmpfile\" && node scripts/smoke/assert-repo-config.mjs \"$tmpfile\"",
     "smoke:profile-test": "tmpdir=$(mktemp -d) && repo=$PWD && (cd \"$tmpdir\" && node \"$repo/apps/cli/dist/index.js\" --cwd \"$repo\" test switchboard_fixture --json); status=$?; rm -rf \"$tmpdir\"; exit $status",
+    "smoke:install-codex": "tmpdir=$(mktemp -d) && repo=$PWD && (cd \"$tmpdir\" && node \"$repo/apps/cli/dist/index.js\" --cwd \"$repo\" install codex --json); status=$?; rm -rf \"$tmpdir\"; exit $status",
+    "smoke:install-claude": "tmpdir=$(mktemp -d) && repo=$PWD && (cd \"$tmpdir\" && node \"$repo/apps/cli/dist/index.js\" --cwd \"$repo\" install claude --json); status=$?; rm -rf \"$tmpdir\"; exit $status",
     "smoke:mcp-serve-session": "pnpm --filter @switchboard-mcp/mcp-runtime smoke:serve-session"
   },
   "devDependencies": {
