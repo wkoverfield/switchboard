@@ -40,6 +40,7 @@
   },
   "dependencies": {
     "@switchboard-mcp/core": "workspace:*",
+    "@switchboard-mcp/mcp-runtime": "workspace:*",
     "commander": "^14.0.2",
     "tsx": "^4.21.0"
   }

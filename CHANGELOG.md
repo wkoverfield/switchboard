@@ -7,3 +7,4 @@
 - Added config/profile schemas, config precedence, namespace normalization, and collision detection.
 - Added `switchboard status` and `switchboard doctor`.
 - Started generic stdio MCP upstream mounting with namespaced tool discovery and routed calls.
+- Added a stdio MCP front door through `switchboard serve`.

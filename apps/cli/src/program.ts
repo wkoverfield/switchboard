@@ -8,15 +8,25 @@ import {
   resolveGlobalConfigPath,
   resolveRepoConfigPaths
 } from "@switchboard-mcp/core";
+import {
+  GenericMcpRouter,
+  profileConfigToStdioUpstream,
+  serveSwitchboardMcpStdio,
+  type StdioUpstreamProfile
+} from "@switchboard-mcp/mcp-runtime";
 
 const version = "0.1.0";
 
 export interface ProgramIo {
   writeOut?: (message: string) => void;
+  writeErr?: (message: string) => void;
+  serveMcp?: (profiles: StdioUpstreamProfile[]) => Promise<void>;
 }
 
 export function createProgram(io: ProgramIo = {}): Command {
   const writeOut = io.writeOut ?? ((message: string) => console.log(message));
+  const writeErr = io.writeErr ?? ((message: string) => console.error(message));
+  const serveMcp = io.serveMcp ?? serveProfilesOverStdio;
   const program = new Command();
 
   program
@@ -101,6 +111,34 @@ export function createProgram(io: ProgramIo = {}): Command {
       }
     });
 
+  program
+    .command("serve")
+    .description("Serve configured stdio MCP upstreams through one Switchboard MCP endpoint.")
+    .action(async () => {
+      const globalOptions = program.opts<{ cwd?: string }>();
+      const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
+      const blockingDiagnostics = loaded.diagnostics.filter(
+        (diagnostic) => diagnostic.level === "error"
+      );
+
+      if (blockingDiagnostics.length > 0) {
+        for (const diagnostic of blockingDiagnostics) {
+          writeErr(`error: ${diagnostic.message}`);
+        }
+        process.exitCode = 1;
+        return;
+      }
+
+      const profiles = stdioProfilesFromConfig(loaded.config.profiles);
+      if (profiles.length === 0) {
+        writeErr("error: no stdio upstream profiles are configured");
+        process.exitCode = 1;
+        return;
+      }
+
+      await serveMcp(profiles);
+    });
+
   return program;
 }
 
@@ -163,4 +201,20 @@ function formatDoctor(result: {
 function optionsFromCwd(cwd: string | undefined): LoadConfigOptions &
   PathResolutionOptions {
   return cwd ? { cwd } : {};
+}
+
+function stdioProfilesFromConfig(
+  profiles: ReturnType<typeof loadSwitchboardConfig>["config"]["profiles"]
+): StdioUpstreamProfile[] {
+  return Object.entries(profiles).flatMap(([profileName, profile]) => {
+    const upstream = profileConfigToStdioUpstream(profileName, profile);
+    return upstream ? [upstream] : [];
+  });
+}
+
+async function serveProfilesOverStdio(
+  profiles: StdioUpstreamProfile[]
+): Promise<void> {
+  const router = new GenericMcpRouter(profiles);
+  await serveSwitchboardMcpStdio(router);
 }
