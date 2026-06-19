@@ -2,7 +2,10 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it, vi } from "vitest";
-import { connectSwitchboardMcpServer } from "./front-door-server.js";
+import {
+  connectDaemonBackedSwitchboardMcpServer,
+  connectSwitchboardMcpServer
+} from "./front-door-server.js";
 import { GenericMcpRouter } from "./generic-router.js";
 import type { StdioUpstreamProfile } from "./stdio-upstream.js";
 
@@ -89,6 +92,76 @@ describe("Switchboard MCP front door", () => {
       expect(closeSpy).toHaveBeenCalled();
     } finally {
       await router.close();
+    }
+  });
+
+  it("exposes daemon-discovered tools through the daemon-backed front door", async () => {
+    const client = new Client({ name: "front-door-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await Promise.all([
+        client.connect(clientTransport),
+        connectDaemonBackedSwitchboardMcpServer("/tmp/switchboard-test.sock", serverTransport, {
+          listTools: async () => [
+            {
+              name: "daemon_echo",
+              profileName: "daemon",
+              namespace: "daemon",
+              upstreamName: "echo",
+              description: "Echo from daemon.",
+              inputSchema: { type: "object" }
+            }
+          ]
+        })
+      ]);
+
+      const result = await client.listTools();
+      expect(result.tools).toHaveLength(1);
+      expect(result.tools[0]).toMatchObject({
+        name: "daemon_echo",
+        description: "Echo from daemon.",
+        _meta: {
+          switchboard: {
+            profileName: "daemon",
+            namespace: "daemon",
+            upstreamName: "echo"
+          }
+        }
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("rejects daemon-backed tool calls until call forwarding lands", async () => {
+    const client = new Client({ name: "front-door-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await Promise.all([
+        client.connect(clientTransport),
+        connectDaemonBackedSwitchboardMcpServer("/tmp/switchboard-test.sock", serverTransport, {
+          listTools: async () => [
+            {
+              name: "daemon_echo",
+              profileName: "daemon",
+              namespace: "daemon",
+              upstreamName: "echo",
+              inputSchema: { type: "object" }
+            }
+          ]
+        })
+      ]);
+
+      await expect(
+        client.callTool({
+          name: "daemon_echo",
+          arguments: { message: "later" }
+        })
+      ).rejects.toThrow("Daemon-backed MCP tool calls are not implemented yet");
+    } finally {
+      await client.close();
     }
   });
 });

@@ -11,6 +11,7 @@ import type {
   Tool
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { listDaemonTools } from "../daemon/daemon-client.js";
 import type { GenericMcpRouter } from "./generic-router.js";
 import type { NamespacedTool } from "./namespaced-tools.js";
 import type { UpstreamToolResult } from "./stdio-upstream.js";
@@ -18,6 +19,10 @@ import type { UpstreamToolResult } from "./stdio-upstream.js";
 export interface SwitchboardMcpServerOptions {
   name?: string;
   version?: string;
+}
+
+export interface DaemonBackedMcpServerOptions extends SwitchboardMcpServerOptions {
+  listTools?: () => Promise<NamespacedTool[]>;
 }
 
 export function createSwitchboardMcpServer(
@@ -58,6 +63,44 @@ export function createSwitchboardMcpServer(
   return server;
 }
 
+export function createDaemonBackedSwitchboardMcpServer(
+  socketPath: string,
+  options: DaemonBackedMcpServerOptions = {}
+): Server {
+  const listTools =
+    options.listTools ??
+    (async () => {
+      const response = await listDaemonTools(socketPath);
+      return response.tools;
+    });
+  const server = new Server(
+    {
+      name: options.name ?? "switchboard",
+      version: options.version ?? "0.1.0"
+    },
+    {
+      capabilities: {
+        tools: {}
+      }
+    }
+  );
+
+  server.setRequestHandler(
+    ListToolsRequestSchema,
+    async (): Promise<ListToolsResult> => ({
+      tools: (await listTools()).map(toMcpTool)
+    })
+  );
+
+  server.setRequestHandler(CallToolRequestSchema, async (): Promise<CallToolResult> => {
+    throw new Error(
+      "Daemon-backed MCP tool calls are not implemented yet; use switchboard serve for routed calls."
+    );
+  });
+
+  return server;
+}
+
 export async function connectSwitchboardMcpServer(
   router: GenericMcpRouter,
   transport: Transport,
@@ -68,11 +111,32 @@ export async function connectSwitchboardMcpServer(
   return server;
 }
 
+export async function connectDaemonBackedSwitchboardMcpServer(
+  socketPath: string,
+  transport: Transport,
+  options: DaemonBackedMcpServerOptions = {}
+): Promise<Server> {
+  const server = createDaemonBackedSwitchboardMcpServer(socketPath, options);
+  await server.connect(transport);
+  return server;
+}
+
 export async function serveSwitchboardMcpStdio(
   router: GenericMcpRouter,
   options: SwitchboardMcpServerOptions = {}
 ): Promise<Server> {
   return connectSwitchboardMcpServer(router, new StdioServerTransport(), options);
+}
+
+export async function serveDaemonBackedMcpStdio(
+  socketPath: string,
+  options: DaemonBackedMcpServerOptions = {}
+): Promise<Server> {
+  return connectDaemonBackedSwitchboardMcpServer(
+    socketPath,
+    new StdioServerTransport(),
+    options
+  );
 }
 
 function toCallToolResult(result: UpstreamToolResult): CallToolResult {
@@ -91,7 +155,7 @@ function toCallToolResult(result: UpstreamToolResult): CallToolResult {
   };
 }
 
-function toMcpTool(tool: NamespacedTool): Tool {
+export function toMcpTool(tool: NamespacedTool): Tool {
   const mcpTool: Tool = {
     name: tool.name,
     inputSchema: tool.inputSchema,

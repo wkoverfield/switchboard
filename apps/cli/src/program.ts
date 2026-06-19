@@ -26,6 +26,7 @@ import {
   listDaemonTools,
   pingDaemon,
   profileConfigToStdioUpstream,
+  serveDaemonBackedMcpStdio,
   serveSwitchboardMcpStdio,
   testStdioUpstreamProfile,
   type StdioProfileTestOptions,
@@ -375,6 +376,23 @@ export function createProgram(io: ProgramIo = {}): Command {
         ...optionsFromRuntimeDir(options.runtimeDir),
         ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
       });
+    });
+
+  program
+    .command("mcp")
+    .description("Serve MCP over stdio through the local Switchboard daemon.")
+    .option("--runtime-dir <path>", "override daemon runtime directory")
+    .action(async (options: { runtimeDir?: string }) => {
+      const status = await daemonStatus(optionsFromRuntimeDir(options.runtimeDir));
+      if (status.state !== "running") {
+        writeErr(
+          "error: Switchboard daemon is not running; run switchboard daemon start first"
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      await serveDaemonBackedMcpStdio(status.daemon.socketPath);
     });
 
   program

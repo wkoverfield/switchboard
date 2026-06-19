@@ -32,7 +32,7 @@ use boring:
 
 ## Current State
 
-Implemented on `main` through PR #9:
+Implemented on `main` through PR #12:
 
 - TypeScript pnpm workspace
 - `@switchboard-mcp/cli`
@@ -63,10 +63,14 @@ Implemented on `main` through PR #9:
 - `switchboard logs`
 - `switchboard init`
 - doctor next-step guidance
+- daemon runtime path/state helpers
+- `switchboard daemon status/start/stop/ping/tools`
+- daemon JSON socket protocol
+- daemon-side namespaced tool discovery
 
 Not started:
 
-- stdio adapter that talks to the daemon
+- MCP tool-call forwarding through the daemon
 - policy engine
 - approval broker
 - secrets/keychain
@@ -366,27 +370,28 @@ Acceptance:
 - stale daemon recovery test
 - no provider integrations
 
-### Current Slice: Daemon Tool Discovery Foundation
+### Current Slice: Daemon-Backed MCP List Tools
 
-Goal: let the daemon load active config and discover namespaced stdio upstream
-tools over the structured local socket before forwarding MCP traffic through it.
+Goal: let an MCP client connect to a stdio adapter that asks the daemon for
+namespaced tool metadata, without forwarding tool calls yet.
 
 Acceptance:
 
-- `switchboard daemon tools`
-- daemon reuses config/profile/namespace foundations
-- daemon returns namespaced tool metadata through the JSON socket protocol
-- smoke covers daemon-side discovery against the fixture MCP server
+- `switchboard mcp`
+- stdio adapter connects to a running daemon socket
+- MCP `tools/list` returns daemon-discovered namespaced tool metadata
+- smoke covers MCP client -> adapter -> daemon -> fixture upstream discovery
 - no MCP tool-call forwarding yet
 
-### Then: Adapter To Daemon
+### Then: Daemon Tool Call Forwarding
 
-Goal: move agent-facing stdio traffic through the local daemon.
+Goal: move routed MCP tool calls through the local daemon.
 
 Acceptance:
 
-- stdio adapter connects to daemon socket
-- daemon owns upstream sessions/tool cache
+- daemon protocol accepts namespaced tool-call requests
+- stdio adapter forwards MCP `tools/call` to the daemon
+- daemon owns upstream routing for forwarded calls
 - existing `serve` behavior remains available for debug/CI
 - version mismatch or stale daemon errors are clear
 

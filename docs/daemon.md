@@ -2,8 +2,9 @@
 
 Switchboard has a local daemon lifecycle foundation. The daemon currently proves
 local process, PID/state, socket management, heartbeat, and daemon-side tool
-discovery; MCP clients still use `switchboard serve` directly until the
-adapter-to-daemon routing slice lands.
+discovery. `switchboard mcp` can expose daemon-backed tool listings to MCP
+clients, while `switchboard serve` remains the full routed tool-call path until
+daemon call forwarding lands.
 
 ## Commands
 
@@ -13,6 +14,7 @@ switchboard daemon start
 switchboard daemon ping
 switchboard daemon tools
 switchboard daemon stop
+switchboard mcp
 ```
 
 For automation:
@@ -23,6 +25,7 @@ switchboard daemon start --json
 switchboard daemon ping --json
 switchboard daemon tools --json
 switchboard daemon stop --json
+switchboard mcp --runtime-dir <path>
 ```
 
 ## Runtime Files
@@ -57,10 +60,24 @@ The daemon inherits the repo config root from
 with `switchboard --cwd <repo> serve` and
 `switchboard --cwd <repo> test <profile>`.
 
+## Daemon-Backed MCP Adapter
+
+`switchboard mcp` serves MCP over stdio and asks the running daemon for
+namespaced tool metadata. This proves the adapter-to-daemon list-tools path
+without changing the installed client snippets yet.
+
+The command requires an already-running daemon. For now, use:
+
+```bash
+switchboard --cwd <repo> daemon start
+switchboard mcp
+```
+
 ## Current Limits
 
 - The daemon only supports heartbeat and tool discovery over its local JSON
   socket.
-- `switchboard serve` does not talk to the daemon yet.
-- The daemon does not route MCP tool calls, cache upstream sessions, enforce
-  policy, broker approvals, or read secrets yet.
+- `switchboard mcp` does not forward MCP tool calls yet.
+- `switchboard serve` remains daemonless and is still the full routed call path.
+- The daemon does not cache upstream sessions, enforce policy, broker
+  approvals, or read secrets yet.
