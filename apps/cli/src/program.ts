@@ -23,6 +23,7 @@ import {
 } from "@switchboard-mcp/core";
 import {
   GenericMcpRouter,
+  pingDaemon,
   profileConfigToStdioUpstream,
   serveSwitchboardMcpStdio,
   testStdioUpstreamProfile,
@@ -270,6 +271,51 @@ export function createProgram(io: ProgramIo = {}): Command {
       }
 
       if (!result.ok) {
+        process.exitCode = 1;
+      }
+    });
+
+  daemon
+    .command("ping")
+    .description("Ping the local Switchboard daemon socket.")
+    .option("--json", "print machine-readable JSON")
+    .option("--runtime-dir <path>", "override daemon runtime directory")
+    .action(async (options: { json?: boolean; runtimeDir?: string }) => {
+      const status = await daemonStatus(optionsFromRuntimeDir(options.runtimeDir));
+      if (status.state !== "running") {
+        const result = {
+          ok: false,
+          status,
+          error: "Switchboard daemon is not running."
+        };
+        if (options.json) {
+          writeOut(JSON.stringify(result, null, 2));
+        } else {
+          writeErr(result.error);
+        }
+        process.exitCode = 1;
+        return;
+      }
+
+      try {
+        const response = await pingDaemon(status.daemon.socketPath);
+        const result = { ok: true, status, response };
+        if (options.json) {
+          writeOut(JSON.stringify(result, null, 2));
+        } else {
+          writeOut(`Switchboard daemon ping: ${response.type}`);
+        }
+      } catch (error) {
+        const result = {
+          ok: false,
+          status,
+          error: error instanceof Error ? error.message : String(error)
+        };
+        if (options.json) {
+          writeOut(JSON.stringify(result, null, 2));
+        } else {
+          writeErr(`error: ${result.error}`);
+        }
         process.exitCode = 1;
       }
     });

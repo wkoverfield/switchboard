@@ -3,7 +3,6 @@ import { rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
-import { createConnection } from "node:net";
 import { fileURLToPath, URL } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)), "..");
@@ -21,8 +20,9 @@ try {
   const running = run("status");
   assert(running.state === "running", "daemon should report running");
   assert(typeof running.daemon?.pid === "number", "daemon pid should be present");
-  const heartbeat = await ping(running.paths.socketPath);
-  assert(heartbeat === "pong", "daemon should answer heartbeat ping");
+  const heartbeat = run("ping");
+  assert(heartbeat.ok === true, "daemon ping should succeed");
+  assert(heartbeat.response?.type === "pong", "daemon should answer pong");
 
   const stop = run("stop");
   assert(stop.ok === true, "daemon stop should succeed");
@@ -60,26 +60,4 @@ function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
-}
-
-async function ping(socketPath) {
-  return new Promise((resolve, reject) => {
-    const socket = createConnection(socketPath);
-    let response = "";
-
-    socket.setEncoding("utf8");
-    socket.on("error", reject);
-    socket.on("data", (chunk) => {
-      response += chunk;
-      if (response.includes("\n")) {
-        socket.end();
-      }
-    });
-    socket.on("end", () => {
-      resolve(response.trim());
-    });
-    socket.on("connect", () => {
-      socket.write("ping\n");
-    });
-  });
 }

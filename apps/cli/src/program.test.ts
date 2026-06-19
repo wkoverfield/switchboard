@@ -254,6 +254,25 @@ describe("switchboard CLI program", () => {
     });
   });
 
+  it("fails daemon ping when the daemon is not running", async () => {
+    const root = makeTempProject();
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["daemon", "ping", "--runtime-dir", root, "--json"], {
+      from: "user"
+    });
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      error: "Switchboard daemon is not running.",
+      status: {
+        state: "not-running"
+      }
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
   it("writes init config and refuses accidental overwrite", async () => {
     const root = makeTempProject();
     const output: string[] = [];
