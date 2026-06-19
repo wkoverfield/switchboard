@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -109,6 +109,143 @@ describe("switchboard CLI program", () => {
     };
     expect(parsed.ok).toBe(false);
     expect(parsed.namespaceCollisions[0]?.namespace).toBe("stripe_live");
+  });
+
+  it("prints doctor next steps for an uninitialized repo", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "doctor", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      nextSteps: string[];
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.nextSteps).toContain("switchboard init --write");
+  });
+
+  it("prints doctor next steps for a ready stdio profile", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "doctor", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      nextSteps: string[];
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.nextSteps).toEqual([
+      "switchboard test local_echo",
+      "switchboard install codex",
+      "switchboard install claude"
+    ]);
+  });
+
+  it("prints init dry-run JSON without writing config", async () => {
+    const root = makeTempProject();
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(
+      ["--cwd", root, "init", "--json", "--profile-name", "repo_tools"],
+      {
+        from: "user"
+      }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      path: string;
+      written: boolean;
+      content: string;
+    };
+    expect(parsed.path).toBe(join(root, ".switchboard.yaml"));
+    expect(parsed.written).toBe(false);
+    expect(parsed.content).toContain("repo_tools:");
+    expect(existsSync(join(root, ".switchboard.yaml"))).toBe(false);
+  });
+
+  it("writes init config and refuses accidental overwrite", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message)
+    });
+
+    await program.parseAsync(["--cwd", root, "init", "--write", "--json"], {
+      from: "user"
+    });
+
+    const configPath = join(root, ".switchboard.yaml");
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      path: configPath,
+      written: true,
+      overwritten: false
+    });
+    expect(readFileSync(configPath, "utf8")).toContain("local_example:");
+
+    await program.parseAsync(["--cwd", root, "init", "--write"], {
+      from: "user"
+    });
+
+    expect(errors).toEqual([
+      `error: ${configPath} already exists; use --force to overwrite`
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("doctor treats freshly initialized placeholder profiles as not ready", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "init", "--write", "--json"], {
+      from: "user"
+    });
+
+    await program.parseAsync(["--cwd", root, "doctor", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[1] ?? "{}") as {
+      ok: boolean;
+      nextSteps: string[];
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.nextSteps).toContain(
+      "edit .switchboard.yaml and replace the starter upstream args"
+    );
+    expect(parsed.nextSteps).not.toContain("switchboard install codex");
+    expect(parsed.nextSteps).not.toContain("switchboard install claude");
+  });
+
+  it("fails init for invalid starter config options", async () => {
+    const root = makeTempProject();
+
+    const errors: string[] = [];
+    const program = createProgram({ writeErr: (message) => errors.push(message) });
+    await program.parseAsync(
+      ["--cwd", root, "init", "--profile-name", "!!!", "--command", "node\nbad"],
+      {
+        from: "user"
+      }
+    );
+
+    expect(errors.length).toBeGreaterThan(0);
+    expect(process.exitCode).toBe(1);
+    expect(existsSync(join(root, ".switchboard.yaml"))).toBe(false);
   });
 
   it("fails serve when no stdio upstream profiles are configured", async () => {
