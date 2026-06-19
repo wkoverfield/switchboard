@@ -26,6 +26,7 @@ switchboard doctor
 switchboard test <profile>
 switchboard install <codex|claude>
 switchboard logs
+switchboard daemon <status|start|stop>
 switchboard serve
 ```
 
@@ -56,4 +57,4 @@ Precedence, highest to lowest:
 5. global config
 6. built-in defaults
 
-Start with `docs/install/quickstart.md`. `switchboard init` prints or writes a starter repo config, and `switchboard doctor` tells you the next command to run. `switchboard test <profile>` checks that a configured stdio upstream starts and lists tools. `switchboard serve` exposes configured stdio upstream profiles as one MCP server over stdio. `switchboard install <codex|claude>` prints dry-run client config snippets for the stdio front door. `switchboard logs` reads the local JSONL audit log. Provider integrations, the MCP daemon, secrets, policy enforcement, and write-to-config installers come in later milestones.
+Start with `docs/install/quickstart.md`. `switchboard init` prints or writes a starter repo config, and `switchboard doctor` tells you the next command to run. `switchboard test <profile>` checks that a configured stdio upstream starts and lists tools. `switchboard serve` exposes configured stdio upstream profiles as one MCP server over stdio. `switchboard install <codex|claude>` prints dry-run client config snippets for the stdio front door. `switchboard logs` reads the local JSONL audit log. `switchboard daemon <status|start|stop>` manages the local daemon lifecycle foundation. Provider integrations, secrets, policy enforcement, and write-to-config installers come in later milestones.

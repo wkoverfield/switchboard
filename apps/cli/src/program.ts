@@ -30,6 +30,14 @@ import {
   type StdioProfileTestResult,
   type StdioUpstreamProfile
 } from "@switchboard-mcp/mcp-runtime";
+import {
+  daemonStatus,
+  runDaemon,
+  startDaemon,
+  stopDaemon,
+  type StartDaemonResult,
+  type StopDaemonResult
+} from "./daemon-runtime.js";
 
 const version = "0.1.0";
 
@@ -206,6 +214,72 @@ export function createProgram(io: ProgramIo = {}): Command {
         writeOut(formatInit(result));
       }
     );
+
+  const daemon = program
+    .command("daemon")
+    .description("Manage the local Switchboard daemon.");
+
+  daemon
+    .command("status")
+    .description("Show local daemon status.")
+    .option("--json", "print machine-readable JSON")
+    .option("--runtime-dir <path>", "override daemon runtime directory")
+    .action((options: { json?: boolean; runtimeDir?: string }) => {
+      const status = daemonStatus(optionsFromRuntimeDir(options.runtimeDir));
+      if (options.json) {
+        writeOut(JSON.stringify(status, null, 2));
+        return;
+      }
+
+      writeOut(formatDaemonStatus(status));
+    });
+
+  daemon
+    .command("start")
+    .description("Start the local Switchboard daemon.")
+    .option("--json", "print machine-readable JSON")
+    .option("--runtime-dir <path>", "override daemon runtime directory")
+    .action(async (options: { json?: boolean; runtimeDir?: string }) => {
+      const globalOptions = program.opts<{ cwd?: string }>();
+      const result = await startDaemon({
+        ...optionsFromRuntimeDir(options.runtimeDir),
+        ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
+      });
+      if (options.json) {
+        writeOut(JSON.stringify(result, null, 2));
+      } else {
+        writeOut(formatDaemonStart(result));
+      }
+
+      if (!result.ok) {
+        process.exitCode = 1;
+      }
+    });
+
+  daemon
+    .command("stop")
+    .description("Stop the local Switchboard daemon.")
+    .option("--json", "print machine-readable JSON")
+    .option("--runtime-dir <path>", "override daemon runtime directory")
+    .action(async (options: { json?: boolean; runtimeDir?: string }) => {
+      const result = await stopDaemon(optionsFromRuntimeDir(options.runtimeDir));
+      if (options.json) {
+        writeOut(JSON.stringify(result, null, 2));
+      } else {
+        writeOut(formatDaemonStop(result));
+      }
+
+      if (!result.ok) {
+        process.exitCode = 1;
+      }
+    });
+
+  daemon
+    .command("run", { hidden: true })
+    .option("--runtime-dir <path>", "override daemon runtime directory")
+    .action(async (options: { runtimeDir?: string }) => {
+      await runDaemon(optionsFromRuntimeDir(options.runtimeDir));
+    });
 
   program
     .command("serve")
@@ -492,6 +566,30 @@ function formatInit(result: {
   return [header, "", result.content].join("\n");
 }
 
+function formatDaemonStatus(status: ReturnType<typeof daemonStatus>): string {
+  const lines = [`Switchboard daemon: ${status.state}`];
+  lines.push(`Runtime dir: ${status.paths.runtimeDir}`);
+  lines.push(`Socket: ${status.paths.socketPath}`);
+
+  if ("daemon" in status) {
+    lines.push(`PID: ${status.daemon.pid}`);
+    lines.push(`Started: ${status.daemon.startedAt}`);
+  }
+  if ("error" in status) {
+    lines.push(`Error: ${status.error}`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatDaemonStart(result: StartDaemonResult): string {
+  return [result.message, formatDaemonStatus(result.status)].join("\n");
+}
+
+function formatDaemonStop(result: StopDaemonResult): string {
+  return [result.message, formatDaemonStatus(result.status)].join("\n");
+}
+
 function formatProfileTest(result: StdioProfileTestResult): string {
   const lines = [
     `Switchboard profile test: ${result.ok ? "OK" : "failed"}`,
@@ -563,6 +661,12 @@ function formatInstallSnippet(rendered: {
 function optionsFromCwd(cwd: string | undefined): LoadConfigOptions &
   PathResolutionOptions {
   return cwd ? { cwd } : {};
+}
+
+function optionsFromRuntimeDir(
+  runtimeDir: string | undefined
+): { runtimeDir?: string } {
+  return runtimeDir ? { runtimeDir } : {};
 }
 
 function validateLoadedConfigForCommand(
