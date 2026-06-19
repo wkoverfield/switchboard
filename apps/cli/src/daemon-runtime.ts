@@ -350,7 +350,7 @@ async function listConfiguredTools(
       error: error instanceof Error ? error.message : String(error)
     };
   } finally {
-    await router.close();
+    await router.close().catch(() => undefined);
   }
 }
 
