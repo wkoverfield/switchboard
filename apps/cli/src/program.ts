@@ -5,9 +5,11 @@ import {
   type LoadConfigOptions,
   loadSwitchboardConfig,
   namespacesForProfiles,
+  renderSwitchboardClientConfig,
   type PathResolutionOptions,
   resolveGlobalConfigPath,
-  resolveRepoConfigPaths
+  resolveRepoConfigPaths,
+  type SupportedClient
 } from "@switchboard-mcp/core";
 import {
   GenericMcpRouter,
@@ -215,6 +217,58 @@ export function createProgram(io: ProgramIo = {}): Command {
       }
     );
 
+  program
+    .command("install <client>")
+    .description(
+      "Print a dry-run MCP client config snippet for routing through Switchboard."
+    )
+    .option("--json", "print machine-readable JSON")
+    .option("--server-name <name>", "MCP server name to register", "switchboard")
+    .option("--command <command>", "Switchboard executable command", "switchboard")
+    .action(
+      (
+        client: string,
+        options: { json?: boolean; serverName: string; command: string }
+      ) => {
+        const globalOptions = program.opts<{ cwd?: string }>();
+        const supportedClient = parseSupportedClient(client);
+        if (!supportedClient) {
+          writeErr("error: supported install clients are: codex, claude");
+          process.exitCode = 1;
+          return;
+        }
+
+        const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
+        if (!validateLoadedConfigForCommand(loaded, writeErr)) {
+          return;
+        }
+
+        const profiles = stdioProfilesFromConfig(
+          loaded.config.profiles,
+          configCwdBase(loaded, globalOptions.cwd)
+        );
+        if (profiles.length === 0) {
+          writeErr("error: no stdio upstream profiles are configured");
+          process.exitCode = 1;
+          return;
+        }
+
+        const rendered = renderSwitchboardClientConfig({
+          client: supportedClient,
+          serverName: options.serverName,
+          command: options.command,
+          cwd: configCwdBase(loaded, globalOptions.cwd)
+        });
+
+        if (options.json) {
+          writeOut(JSON.stringify(rendered, null, 2));
+          return;
+        }
+
+        writeOut(formatInstallSnippet(rendered));
+      }
+    );
+
   return program;
 }
 
@@ -292,6 +346,21 @@ function formatProfileTest(result: StdioProfileTestResult): string {
   return lines.join("\n");
 }
 
+function formatInstallSnippet(rendered: {
+  client: SupportedClient;
+  serverName: string;
+  target: string;
+  content: string;
+}): string {
+  return [
+    `Switchboard ${rendered.client} config dry run`,
+    `Server name: ${rendered.serverName}`,
+    `Target: ${rendered.target}`,
+    "",
+    rendered.content
+  ].join("\n");
+}
+
 function optionsFromCwd(cwd: string | undefined): LoadConfigOptions &
   PathResolutionOptions {
   return cwd ? { cwd } : {};
@@ -332,6 +401,14 @@ function parseTimeoutMs(value: string): number | undefined {
   }
 
   return parsed;
+}
+
+function parseSupportedClient(value: string): SupportedClient | undefined {
+  if (value === "codex" || value === "claude") {
+    return value;
+  }
+
+  return undefined;
 }
 
 function stdioProfilesFromConfig(

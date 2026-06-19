@@ -338,6 +338,109 @@ describe("switchboard CLI program", () => {
     expect(errors).toEqual(["error: --timeout-ms must be a positive integer"]);
     expect(process.exitCode).toBe(1);
   });
+
+  it("prints Codex install dry-run JSON for configured stdio profiles", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "install",
+        "codex",
+        "--json",
+        "--server-name",
+        "switchboard-local",
+        "--command",
+        "/opt/bin/switchboard"
+      ],
+      {
+        from: "user"
+      }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      client: string;
+      serverName: string;
+      content: string;
+    };
+    expect(parsed.client).toBe("codex");
+    expect(parsed.serverName).toBe("switchboard-local");
+    expect(parsed.content).toContain('[mcp_servers."switchboard-local"]');
+    expect(parsed.content).toContain('command = "/opt/bin/switchboard"');
+    expect(parsed.content).toContain(`args = ["--cwd", "${root}", "serve"]`);
+  });
+
+  it("prints Claude install dry-run JSON for configured stdio profiles", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "install", "claude", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      client: string;
+      content: string;
+    };
+    expect(parsed.client).toBe("claude");
+    expect(JSON.parse(parsed.content)).toEqual({
+      mcpServers: {
+        switchboard: {
+          command: "switchboard",
+          args: ["--cwd", root, "serve"],
+          env: {}
+        }
+      }
+    });
+  });
+
+  it("fails install for unsupported clients", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    const errors: string[] = [];
+    const program = createProgram({ writeErr: (message) => errors.push(message) });
+    await program.parseAsync(["--cwd", root, "install", "cursor"], {
+      from: "user"
+    });
+
+    expect(errors).toEqual([
+      "error: supported install clients are: codex, claude"
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("fails install when no stdio upstream profiles are configured", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  generic_http:",
+        "    provider: generic",
+        "    upstream:",
+        "      type: http",
+        "      url: http://localhost:3000/mcp"
+      ].join("\n")
+    );
+
+    const errors: string[] = [];
+    const program = createProgram({ writeErr: (message) => errors.push(message) });
+    await program.parseAsync(["--cwd", root, "install", "codex"], {
+      from: "user"
+    });
+
+    expect(errors).toEqual(["error: no stdio upstream profiles are configured"]);
+    expect(process.exitCode).toBe(1);
+  });
 });
 
 function makeTempProject(): string {
@@ -347,4 +450,23 @@ function makeTempProject(): string {
   );
   mkdirSync(root, { recursive: true });
   return root;
+}
+
+function writeStdioConfig(root: string): void {
+  writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+  writeFileSync(
+    join(root, ".switchboard.yaml"),
+    [
+      "version: 1",
+      "profiles:",
+      "  local_echo:",
+      "    provider: generic",
+      "    namespace: echo_tools",
+      "    upstream:",
+      "      type: stdio",
+      "      command: node",
+      "      args:",
+      "        - fixture.mjs"
+    ].join("\n")
+  );
 }
