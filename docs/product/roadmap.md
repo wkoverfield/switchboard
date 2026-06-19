@@ -32,7 +32,7 @@ use boring:
 
 ## Current State
 
-Implemented on `main` through PR #5:
+Implemented on `main` through PR #7:
 
 - TypeScript pnpm workspace
 - `@switchboard-mcp/cli`
@@ -57,18 +57,19 @@ Implemented on `main` through PR #5:
 - end-to-end serve-session smoke
 - `switchboard test <profile>`
 - profile-test smoke from a temp cwd using `--cwd`
+- client config dry-run snippets for Codex and Claude Code
+- `switchboard install <codex|claude>`
 
 Not started:
 
 - local daemon
 - stdio adapter that talks to the daemon
-- audit log
 - policy engine
 - approval broker
 - secrets/keychain
 - provider presets
 - guided onboarding
-- client installers
+- write-to-config client installers
 - Supabase, Stripe, PostHog, or Sentry integrations
 
 ## Milestone Status
@@ -131,7 +132,7 @@ Remaining useful hardening:
 
 ### Milestone 3: Stdio Adapter + Local Daemon
 
-Status: not started.
+Status: foundation in progress.
 
 Original intent:
 
@@ -156,6 +157,15 @@ Original intent:
 - better doctor checks
 - doctor gives next commands, not just failures
 
+Foundation slice:
+
+- JSONL audit writer in core
+- XDG state audit log path
+- profile-test audit entries
+- routed tool-call audit entries
+- `switchboard logs`
+- local-only audit docs
+
 Why it matters soon:
 
 Audit is one of the product's trust pillars and becomes harder to retrofit once
@@ -163,7 +173,7 @@ policy, approval, and provider-specific behavior exist.
 
 ### Milestone 5: Policy Engine + Operating Modes
 
-Status: not started.
+Status: dry-run foundation complete.
 
 Original modes:
 
@@ -220,6 +230,13 @@ Safe near-term slice:
 
 - docs-only Codex/Claude setup using current `switchboard serve`
 - dry-run config generation to stdout
+
+Shipped:
+
+- Codex TOML dry-run snippets
+- Claude Code JSON dry-run snippets
+- validation for client config names/commands
+- CI smoke coverage for both snippets
 
 Risk:
 
@@ -292,7 +309,7 @@ Alpha gate:
 
 ## Recommended Next Sequence
 
-### Next Slice: Product Docs + Client Config Dry Run
+### Completed Slice: Product Docs + Client Config Dry Run
 
 Goal: make current daemonless Switchboard usable from Codex/Claude without
 pretending the daemon exists.
@@ -301,11 +318,11 @@ Acceptance:
 
 - `docs/install/codex.md` reflects current `switchboard serve`
 - `docs/install/claude-code.md` reflects current `switchboard serve`
-- one command or documented snippet generates the correct MCP server config
+- one command generates the correct MCP server config
 - no provider secrets are written
-- tests cover generated config shape if code is added
+- tests cover generated config shape
 
-### Then: Audit Log Foundation
+### Current Slice: Audit Log Foundation
 
 Goal: start the trust layer before policy/provider complexity.
 

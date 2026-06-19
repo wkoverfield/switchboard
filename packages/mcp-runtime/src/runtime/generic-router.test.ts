@@ -49,6 +49,55 @@ describe("GenericMcpRouter", () => {
     }
   });
 
+  it("audits routed namespaced tool calls", async () => {
+    const auditEntries: unknown[] = [];
+    const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {
+      auditLogger: {
+        async log(entry) {
+          auditEntries.push(entry);
+        }
+      }
+    });
+
+    try {
+      await router.discoverTools();
+      await router.callTool("alpha_tools_echo", { message: "hello" });
+
+      expect(auditEntries).toMatchObject([
+        {
+          action: "tool_call",
+          status: "ok",
+          profileName: "alpha",
+          namespace: "alpha_tools",
+          toolName: "alpha_tools_echo",
+          upstreamName: "echo"
+        }
+      ]);
+    } finally {
+      await router.close();
+    }
+  });
+
+  it("does not audit unknown local routes", async () => {
+    const auditEntries: unknown[] = [];
+    const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {
+      auditLogger: {
+        async log(entry) {
+          auditEntries.push(entry);
+        }
+      }
+    });
+
+    try {
+      await router.discoverTools();
+      await expect(router.callTool("alpha_tools_missing")).rejects.toThrow();
+
+      expect(auditEntries).toEqual([]);
+    } finally {
+      await router.close();
+    }
+  });
+
   it("rejects namespaced collisions within the same namespace", async () => {
     const router = new GenericMcpRouter([
       fixtureProfile("alpha", "shared"),

@@ -1,11 +1,15 @@
 import { Command } from "commander";
 import { dirname, resolve } from "node:path";
 import {
+  type AuditLogger,
   checkLocalConfigIgnored,
   type LoadConfigOptions,
   loadSwitchboardConfig,
+  noopAuditLogger,
   namespacesForProfiles,
+  readAuditLogEntries,
   renderSwitchboardClientConfig,
+  resolveAuditLogPath,
   type PathResolutionOptions,
   resolveGlobalConfigPath,
   resolveRepoConfigPaths,
@@ -27,7 +31,12 @@ const version = "0.1.0";
 export interface ProgramIo {
   writeOut?: (message: string) => void;
   writeErr?: (message: string) => void;
-  serveMcp?: (profiles: StdioUpstreamProfile[]) => Promise<void>;
+  auditLogger?: AuditLogger;
+  auditLogPath?: string;
+  serveMcp?: (
+    profiles: StdioUpstreamProfile[],
+    options?: { auditLogger?: AuditLogger }
+  ) => Promise<void>;
   testProfile?: (
     profile: StdioUpstreamProfile,
     options?: StdioProfileTestOptions
@@ -39,6 +48,7 @@ export function createProgram(io: ProgramIo = {}): Command {
   const writeErr = io.writeErr ?? ((message: string) => console.error(message));
   const serveMcp = io.serveMcp ?? serveProfilesOverStdio;
   const testProfile = io.testProfile ?? testStdioUpstreamProfile;
+  const auditLogger = io.auditLogger ?? noopAuditLogger;
   const program = new Command();
 
   program
@@ -144,7 +154,7 @@ export function createProgram(io: ProgramIo = {}): Command {
         return;
       }
 
-      await serveMcp(profiles);
+      await serveMcp(profiles, { auditLogger });
     });
 
   program
@@ -190,7 +200,20 @@ export function createProgram(io: ProgramIo = {}): Command {
         }
 
         try {
+          const startedAt = Date.now();
           const result = await testProfile(upstream, { timeoutMs });
+          const auditEntry = {
+            action: "profile_test",
+            status: result.ok ? "ok" : "error",
+            profileName,
+            namespace: upstream.namespace,
+            durationMs: Date.now() - startedAt
+          } as const;
+          await auditLogger.log(
+            result.ok
+              ? auditEntry
+              : { ...auditEntry, error: "profile test failed" }
+          );
           if (options.json) {
             writeOut(JSON.stringify(result, null, 2));
           } else {
@@ -198,6 +221,13 @@ export function createProgram(io: ProgramIo = {}): Command {
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
+          await auditLogger.log({
+            action: "profile_test",
+            status: "error",
+            profileName,
+            namespace: upstream.namespace,
+            error: message
+          });
           if (options.json) {
             writeOut(
               JSON.stringify(
@@ -217,6 +247,29 @@ export function createProgram(io: ProgramIo = {}): Command {
         }
       }
     );
+
+  program
+    .command("logs")
+    .description("Show local Switchboard audit log entries.")
+    .option("--json", "print machine-readable JSON")
+    .option("--limit <count>", "maximum entries to print", "20")
+    .action(async (options: { json?: boolean; limit: string }) => {
+      const limit = parsePositiveInteger(options.limit);
+      if (limit === undefined) {
+        writeErr("error: --limit must be a positive integer");
+        process.exitCode = 1;
+        return;
+      }
+
+      const path = io.auditLogPath ?? resolveAuditLogPath();
+      const entries = await readAuditLogEntries({ path, limit });
+      if (options.json) {
+        writeOut(JSON.stringify({ path, entries }, null, 2));
+        return;
+      }
+
+      writeOut(formatAuditLogs(path, entries));
+    });
 
   program
     .command("install <client>")
@@ -359,6 +412,41 @@ function formatProfileTest(result: StdioProfileTestResult): string {
   return lines.join("\n");
 }
 
+function formatAuditLogs(
+  path: string,
+  entries: Awaited<ReturnType<typeof readAuditLogEntries>>
+): string {
+  const lines = ["Switchboard audit logs", `Path: ${path}`];
+
+  if (entries.length === 0) {
+    lines.push("", "No audit entries found.");
+    return lines.join("\n");
+  }
+
+  lines.push("");
+  for (const entry of entries) {
+    const labelParts = [
+      entry.timestamp,
+      entry.status,
+      entry.action,
+      entry.profileName ?? "unknown-profile"
+    ];
+    if (entry.toolName) {
+      labelParts.push(entry.toolName);
+    }
+    if (entry.durationMs !== undefined) {
+      labelParts.push(`${entry.durationMs}ms`);
+    }
+
+    lines.push(labelParts.join(" "));
+    if (entry.error) {
+      lines.push(`  error: ${entry.error}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 function formatInstallSnippet(rendered: {
   client: SupportedClient;
   serverName: string;
@@ -408,6 +496,10 @@ function validateLoadedConfigForCommand(
 }
 
 function parseTimeoutMs(value: string): number | undefined {
+  return parsePositiveInteger(value);
+}
+
+function parsePositiveInteger(value: string): number | undefined {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     return undefined;
@@ -437,9 +529,13 @@ function stdioProfilesFromConfig(
 }
 
 async function serveProfilesOverStdio(
-  profiles: StdioUpstreamProfile[]
+  profiles: StdioUpstreamProfile[],
+  options: { auditLogger?: AuditLogger } = {}
 ): Promise<void> {
-  const router = new GenericMcpRouter(profiles);
+  const router = new GenericMcpRouter(
+    profiles,
+    options.auditLogger ? { auditLogger: options.auditLogger } : {}
+  );
   await serveSwitchboardMcpStdio(router);
 }
 

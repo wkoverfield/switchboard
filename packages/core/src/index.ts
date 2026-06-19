@@ -1,3 +1,4 @@
+export * from "./audit/audit-log.js";
 export * from "./config/load-config.js";
 export * from "./config/gitignore.js";
 export * from "./config/paths.js";

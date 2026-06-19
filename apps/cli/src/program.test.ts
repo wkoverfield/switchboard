@@ -238,8 +238,14 @@ describe("switchboard CLI program", () => {
 
     const output: string[] = [];
     const testedProfiles: unknown[] = [];
+    const auditEntries: unknown[] = [];
     const program = createProgram({
       writeOut: (message) => output.push(message),
+      auditLogger: {
+        async log(entry) {
+          auditEntries.push(entry);
+        }
+      },
       testProfile: async (profile, options) => {
         testedProfiles.push({ profile, options });
         return {
@@ -276,6 +282,52 @@ describe("switchboard CLI program", () => {
       namespace: "echo_tools",
       toolCount: 2
     });
+    expect(auditEntries).toMatchObject([
+      {
+        action: "profile_test",
+        status: "ok",
+        profileName: "local_echo",
+        namespace: "echo_tools"
+      }
+    ]);
+  });
+
+  it("audits failed profile tests", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    const auditEntries: unknown[] = [];
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      auditLogger: {
+        async log(entry) {
+          auditEntries.push(entry);
+        }
+      },
+      testProfile: async () => {
+        throw new Error("token=secret-value failed");
+      }
+    });
+    await program.parseAsync(["--cwd", root, "test", "local_echo", "--json"], {
+      from: "user"
+    });
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      profileName: "local_echo",
+      error: "token=secret-value failed"
+    });
+    expect(auditEntries).toMatchObject([
+      {
+        action: "profile_test",
+        status: "error",
+        profileName: "local_echo",
+        namespace: "echo_tools",
+        error: "token=secret-value failed"
+      }
+    ]);
+    expect(process.exitCode).toBe(1);
   });
 
   it("fails profile test when the profile does not exist", async () => {
@@ -469,6 +521,54 @@ describe("switchboard CLI program", () => {
       "error: command must not be empty"
     ]);
     expect(process.exitCode).toBe(1);
+  });
+
+  it("prints local audit logs as JSON", async () => {
+    const root = makeTempProject();
+    const logPath = join(root, "switchboard.jsonl");
+    writeFileSync(
+      logPath,
+      [
+        JSON.stringify({
+          version: 1,
+          timestamp: "2026-06-19T14:00:00.000Z",
+          action: "profile_test",
+          status: "ok",
+          profileName: "one"
+        }),
+        JSON.stringify({
+          version: 1,
+          timestamp: "2026-06-19T14:01:00.000Z",
+          action: "tool_call",
+          status: "ok",
+          profileName: "two",
+          toolName: "two_echo"
+        })
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      auditLogPath: logPath
+    });
+    await program.parseAsync(["logs", "--json", "--limit", "1"], {
+      from: "user"
+    });
+
+    expect(JSON.parse(output[0] ?? "{}")).toEqual({
+      path: logPath,
+      entries: [
+        {
+          version: 1,
+          timestamp: "2026-06-19T14:01:00.000Z",
+          action: "tool_call",
+          status: "ok",
+          profileName: "two",
+          toolName: "two_echo"
+        }
+      ]
+    });
   });
 });
 

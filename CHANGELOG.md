@@ -11,3 +11,5 @@
 - Added an end-to-end smoke check for a real `switchboard serve` MCP session.
 - Added `switchboard test <profile>` for validating one configured stdio upstream.
 - Added `switchboard install <codex|claude>` dry-run snippets for client MCP config.
+- Added local JSONL audit logging for profile tests and routed tool calls.
+- Added `switchboard logs` for reading local audit entries.
