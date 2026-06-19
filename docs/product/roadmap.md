@@ -32,7 +32,7 @@ use boring:
 
 ## Current State
 
-Implemented on `main` through PR #13:
+Implemented on `main` through PR #14:
 
 - TypeScript pnpm workspace
 - `@switchboard-mcp/cli`
@@ -69,6 +69,8 @@ Implemented on `main` through PR #13:
 - daemon-side namespaced tool discovery
 - `switchboard mcp`
 - daemon-backed MCP `tools/list`
+- daemon-backed MCP `tools/call`
+- daemon-routed tool-call audit logging
 
 Not started:
 
@@ -384,7 +386,7 @@ Acceptance:
 - smoke covers MCP client -> adapter -> daemon -> fixture upstream discovery
 - no MCP tool-call forwarding yet
 
-### Current Slice: Daemon Tool Call Forwarding
+### Completed Slice: Daemon Tool Call Forwarding
 
 Goal: move routed MCP tool calls through the local daemon.
 
@@ -396,6 +398,19 @@ Acceptance:
 - daemon-routed calls preserve local audit logging
 - existing `serve` behavior remains available for debug/CI
 - no daemon auto-start yet
+
+### Current Slice: Daemon MCP Auto-Start
+
+Goal: make `switchboard mcp` usable as a client entrypoint without requiring a
+separate manual daemon start.
+
+Acceptance:
+
+- `switchboard mcp` starts the daemon when it is not running or state is stale
+- `switchboard mcp --no-auto-start` preserves fail-fast behavior
+- auto-start passes the adapter launch cwd through to the daemon
+- MCP smoke covers auto-start, list, call, and audit
+- install snippets still remain on `serve` until the next install-switch slice
 
 ## Rules For Future Agents
 

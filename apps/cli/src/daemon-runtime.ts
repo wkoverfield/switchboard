@@ -141,14 +141,19 @@ export async function runDaemon(
   options: DaemonCommandOptions = {}
 ): Promise<void> {
   const paths = resolveDaemonPaths(options);
+  const daemonCwd = resolve(options.cwd ?? process.cwd());
   await mkdir(paths.runtimeDir, { recursive: true, mode: 0o700 });
   await rm(paths.socketPath, { force: true });
 
-  const socketContext = options.cwd ? { cwd: options.cwd } : {};
+  const socketContext = { cwd: daemonCwd };
   const server = createServer((socket) => handleDaemonSocket(socket, socketContext));
   await listen(server, paths.socketPath);
   await writeDaemonState(
-    createDaemonState({ pid: process.pid, socketPath: paths.socketPath }),
+    createDaemonState({
+      pid: process.pid,
+      socketPath: paths.socketPath,
+      cwd: daemonCwd
+    }),
     paths
   );
 

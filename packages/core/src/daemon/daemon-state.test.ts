@@ -43,7 +43,8 @@ describe("daemon state", () => {
       createDaemonState({
         pid: process.pid,
         socketPath: paths.socketPath,
-        startedAt: new Date("2026-06-19T15:00:00.000Z")
+        startedAt: new Date("2026-06-19T15:00:00.000Z"),
+        cwd: "/tmp/switchboard-project"
       }),
       paths
     );
@@ -54,7 +55,8 @@ describe("daemon state", () => {
       daemon: {
         pid: process.pid,
         startedAt: "2026-06-19T15:00:00.000Z",
-        socketPath: paths.socketPath
+        socketPath: paths.socketPath,
+        cwd: "/tmp/switchboard-project"
       }
     });
     expect((await stat(paths.statePath)).mode & 0o777).toBe(0o600);
