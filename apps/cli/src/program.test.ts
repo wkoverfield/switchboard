@@ -292,6 +292,21 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("fails daemon-backed mcp when the daemon is not running", async () => {
+    const root = makeTempProject();
+
+    const errors: string[] = [];
+    const program = createProgram({ writeErr: (message) => errors.push(message) });
+    await program.parseAsync(["mcp", "--runtime-dir", root], {
+      from: "user"
+    });
+
+    expect(errors).toEqual([
+      "error: Switchboard daemon is not running; run switchboard daemon start first"
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
   it("writes init config and refuses accidental overwrite", async () => {
     const root = makeTempProject();
     const output: string[] = [];

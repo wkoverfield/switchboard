@@ -15,6 +15,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "smoke:daemon-mcp-list-tools": "node scripts/smoke-daemon-mcp-list-tools.mjs",
     "smoke:serve-session": "node scripts/smoke-serve-session.mjs"
   },
   "dependencies": {

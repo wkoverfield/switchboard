@@ -18,3 +18,4 @@
 - Added `switchboard daemon status/start/stop` lifecycle foundation.
 - Added daemon socket ping protocol and `switchboard daemon ping`.
 - Added daemon-side namespaced tool discovery and `switchboard daemon tools`.
+- Added initial daemon-backed MCP adapter tool listing through `switchboard mcp`.
