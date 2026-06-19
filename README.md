@@ -4,7 +4,7 @@ One local MCP endpoint for every account, project, and environment.
 
 Switchboard is a local-first MCP profile router for developers using Codex, Claude Code, Cursor, VS Code, and other MCP-compatible agents. It is designed to make multi-account, multi-project, and dev/staging/prod tool access explicit, namespaced, policy-aware, and locally auditable.
 
-This repository is in Milestone 0/1. It currently ships the TypeScript workspace, CLI shell, config/profile schemas, namespace normalization, collision detection, `switchboard status`, and `switchboard doctor`.
+This repository is entering Milestone 2. It currently ships the TypeScript workspace, CLI shell, config/profile schemas, namespace normalization, collision detection, `switchboard status`, `switchboard doctor`, and early generic stdio MCP upstream mounting tests.
 
 ## Install From Source
 
