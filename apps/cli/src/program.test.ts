@@ -137,6 +137,46 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("fails serve on namespace collisions before starting MCP", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  alpha-tools:",
+        "    provider: generic",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "  alpha_tools:",
+        "    provider: generic",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node"
+      ].join("\n")
+    );
+
+    const errors: string[] = [];
+    const servedProfiles: unknown[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message),
+      serveMcp: async (profiles) => {
+        servedProfiles.push(...profiles);
+      }
+    });
+    await program.parseAsync(["--cwd", root, "serve"], {
+      from: "user"
+    });
+
+    expect(errors).toEqual([
+      'error: namespace "alpha_tools" is used by profiles: alpha-tools, alpha_tools'
+    ]);
+    expect(servedProfiles).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
   it("passes configured stdio upstream profiles to serve", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");

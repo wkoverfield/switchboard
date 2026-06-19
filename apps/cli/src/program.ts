@@ -121,6 +121,16 @@ export function createProgram(io: ProgramIo = {}): Command {
         (diagnostic) => diagnostic.level === "error"
       );
 
+      if (loaded.namespaceCollisions.length > 0) {
+        for (const collision of loaded.namespaceCollisions) {
+          writeErr(
+            `error: namespace "${collision.namespace}" is used by profiles: ${collision.profiles.join(", ")}`
+          );
+        }
+        process.exitCode = 1;
+        return;
+      }
+
       if (blockingDiagnostics.length > 0) {
         for (const diagnostic of blockingDiagnostics) {
           writeErr(`error: ${diagnostic.message}`);

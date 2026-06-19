@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { connectSwitchboardMcpServer } from "./front-door-server.js";
 import { GenericMcpRouter } from "./generic-router.js";
 import type { StdioUpstreamProfile } from "./stdio-upstream.js";
@@ -67,6 +67,27 @@ describe("Switchboard MCP front door", () => {
       expect(textContent(result)).toBe("beta:front-door");
     } finally {
       await client.close();
+      await router.close();
+    }
+  });
+
+  it("closes upstream router connections when the front-door connection closes", async () => {
+    const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")]);
+    const closeSpy = vi.spyOn(router, "close");
+    const client = new Client({ name: "front-door-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await Promise.all([
+        client.connect(clientTransport),
+        connectSwitchboardMcpServer(router, serverTransport)
+      ]);
+
+      await client.listTools();
+      await client.close();
+
+      expect(closeSpy).toHaveBeenCalled();
+    } finally {
       await router.close();
     }
   });

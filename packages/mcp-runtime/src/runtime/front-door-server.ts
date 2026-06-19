@@ -51,6 +51,10 @@ export function createSwitchboardMcpServer(
       )
   );
 
+  server.onclose = () => {
+    void router.close();
+  };
+
   return server;
 }
 
