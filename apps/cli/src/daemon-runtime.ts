@@ -1,16 +1,24 @@
 import { spawn } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
+import { dirname, resolve } from "node:path";
 import {
   createDaemonState,
   getDaemonStatus,
+  loadSwitchboardConfig,
   removeDaemonState,
   resolveDaemonPaths,
   writeDaemonState,
   type DaemonPaths,
   type DaemonStatus
 } from "@switchboard-mcp/core";
-import { pingDaemon } from "@switchboard-mcp/mcp-runtime";
+import {
+  GenericMcpRouter,
+  pingDaemon,
+  profileConfigToStdioUpstream,
+  type NamespacedTool,
+  type StdioUpstreamProfile
+} from "@switchboard-mcp/mcp-runtime";
 
 export interface DaemonCommandOptions {
   runtimeDir?: string;
@@ -135,7 +143,8 @@ export async function runDaemon(
   await mkdir(paths.runtimeDir, { recursive: true, mode: 0o700 });
   await rm(paths.socketPath, { force: true });
 
-  const server = createServer((socket) => handleDaemonSocket(socket));
+  const socketContext = options.cwd ? { cwd: options.cwd } : {};
+  const server = createServer((socket) => handleDaemonSocket(socket, socketContext));
   await listen(server, paths.socketPath);
   await writeDaemonState(
     createDaemonState({ pid: process.pid, socketPath: paths.socketPath }),
@@ -193,8 +202,13 @@ async function daemonHeartbeat(socketPath: string): Promise<boolean> {
     .catch(() => false);
 }
 
-function handleDaemonSocket(socket: Socket): void {
+interface DaemonSocketContext {
+  cwd?: string;
+}
+
+function handleDaemonSocket(socket: Socket, context: DaemonSocketContext): void {
   let buffered = "";
+  let answered = false;
 
   socket.setEncoding("utf8");
   socket.on("error", () => {
@@ -212,6 +226,11 @@ function handleDaemonSocket(socket: Socket): void {
         continue;
       }
 
+      if (answered) {
+        return;
+      }
+      answered = true;
+
       if (request === "ping") {
         socket.write(
           `${JSON.stringify({
@@ -225,20 +244,34 @@ function handleDaemonSocket(socket: Socket): void {
         return;
       }
 
-      socket.write(`${JSON.stringify(handleDaemonRequest(request))}\n`);
-      socket.end();
+      void handleDaemonRequest(request, context)
+        .then((response) => {
+          socket.write(`${JSON.stringify(response)}\n`);
+          socket.end();
+        })
+        .catch((error: unknown) => {
+          socket.write(
+            `${JSON.stringify({
+              id: "unknown",
+              ok: false,
+              error: error instanceof Error ? error.message : String(error)
+            })}\n`
+          );
+          socket.end();
+        });
       return;
     }
   });
 }
 
-function handleDaemonRequest(raw: string): {
+async function handleDaemonRequest(raw: string, context: DaemonSocketContext): Promise<{
   id: string;
   ok: boolean;
-  type?: "pong";
+  type?: "pong" | "tools";
   version?: string;
+  tools?: NamespacedTool[];
   error?: string;
-} {
+}> {
   try {
     const request = JSON.parse(raw) as { id?: unknown; type?: unknown };
     const id = typeof request.id === "string" ? request.id : "unknown";
@@ -249,6 +282,9 @@ function handleDaemonRequest(raw: string): {
         type: "pong",
         version: daemonProtocolVersion
       };
+    }
+    if (request.type === "list_tools") {
+      return listConfiguredTools(id, context);
     }
 
     return {
@@ -263,6 +299,110 @@ function handleDaemonRequest(raw: string): {
       error: "Invalid daemon request."
     };
   }
+}
+
+async function listConfiguredTools(
+  id: string,
+  context: DaemonSocketContext
+): Promise<{
+  id: string;
+  ok: boolean;
+  type?: "tools";
+  version?: string;
+  tools?: NamespacedTool[];
+  error?: string;
+}> {
+  const loaded = loadSwitchboardConfig(optionsFromCwd(context.cwd));
+  const validationError = loadedConfigError(loaded);
+  if (validationError) {
+    return {
+      id,
+      ok: false,
+      error: validationError
+    };
+  }
+
+  const profiles = stdioProfilesFromConfig(
+    loaded.config.profiles,
+    configCwdBase(loaded, context.cwd)
+  );
+  if (profiles.length === 0) {
+    return {
+      id,
+      ok: false,
+      error: "No stdio upstream profiles are configured."
+    };
+  }
+
+  const router = new GenericMcpRouter(profiles);
+  try {
+    return {
+      id,
+      ok: true,
+      type: "tools",
+      version: daemonProtocolVersion,
+      tools: await router.discoverTools()
+    };
+  } catch (error) {
+    return {
+      id,
+      ok: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  } finally {
+    await router.close().catch(() => undefined);
+  }
+}
+
+function loadedConfigError(
+  loaded: ReturnType<typeof loadSwitchboardConfig>
+): string | undefined {
+  if (loaded.namespaceCollisions.length > 0) {
+    return loaded.namespaceCollisions
+      .map(
+        (collision) =>
+          `Namespace "${collision.namespace}" is used by profiles: ${collision.profiles.join(", ")}`
+      )
+      .join("; ");
+  }
+
+  const errors = loaded.diagnostics.filter(
+    (diagnostic) => diagnostic.level === "error"
+  );
+  return errors.length > 0
+    ? errors.map((diagnostic) => diagnostic.message).join("; ")
+    : undefined;
+}
+
+function stdioProfilesFromConfig(
+  profiles: ReturnType<typeof loadSwitchboardConfig>["config"]["profiles"],
+  cwdBase: string
+): StdioUpstreamProfile[] {
+  return Object.entries(profiles).flatMap(([profileName, profile]) => {
+    const upstream = profileConfigToStdioUpstream(profileName, profile, {
+      cwdBase
+    });
+    return upstream ? [upstream] : [];
+  });
+}
+
+function optionsFromCwd(cwd: string | undefined): { cwd?: string } {
+  return cwd ? { cwd } : {};
+}
+
+function configCwdBase(
+  loaded: ReturnType<typeof loadSwitchboardConfig>,
+  cwd: string | undefined
+): string {
+  const repoSource = loaded.sources.find(
+    (source) => source.kind === "repo" && source.loaded && source.path
+  );
+
+  if (repoSource?.path) {
+    return dirname(repoSource.path);
+  }
+
+  return cwd ? resolve(cwd) : process.cwd();
 }
 
 async function listen(server: Server, socketPath: string): Promise<void> {

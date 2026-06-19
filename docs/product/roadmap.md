@@ -366,18 +366,18 @@ Acceptance:
 - stale daemon recovery test
 - no provider integrations
 
-### Current Slice: Daemon Client Protocol Foundation
+### Current Slice: Daemon Tool Discovery Foundation
 
-Goal: give future adapters a structured daemon socket protocol before forwarding
-MCP traffic through it.
+Goal: let the daemon load active config and discover namespaced stdio upstream
+tools over the structured local socket before forwarding MCP traffic through it.
 
 Acceptance:
 
-- reusable daemon client helper
-- JSON socket ping request/response
-- `switchboard daemon ping`
-- lifecycle smoke covers the protocol
-- no MCP forwarding yet
+- `switchboard daemon tools`
+- daemon reuses config/profile/namespace foundations
+- daemon returns namespaced tool metadata through the JSON socket protocol
+- smoke covers daemon-side discovery against the fixture MCP server
+- no MCP tool-call forwarding yet
 
 ### Then: Adapter To Daemon
 

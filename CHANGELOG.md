@@ -17,3 +17,4 @@
 - Added doctor next-step guidance for first-run onboarding.
 - Added `switchboard daemon status/start/stop` lifecycle foundation.
 - Added daemon socket ping protocol and `switchboard daemon ping`.
+- Added daemon-side namespaced tool discovery and `switchboard daemon tools`.

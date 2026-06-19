@@ -23,6 +23,7 @@ import {
 } from "@switchboard-mcp/core";
 import {
   GenericMcpRouter,
+  listDaemonTools,
   pingDaemon,
   profileConfigToStdioUpstream,
   serveSwitchboardMcpStdio,
@@ -321,10 +322,59 @@ export function createProgram(io: ProgramIo = {}): Command {
     });
 
   daemon
+    .command("tools")
+    .description("List tools discovered by the local Switchboard daemon.")
+    .option("--json", "print machine-readable JSON")
+    .option("--runtime-dir <path>", "override daemon runtime directory")
+    .action(async (options: { json?: boolean; runtimeDir?: string }) => {
+      const status = await daemonStatus(optionsFromRuntimeDir(options.runtimeDir));
+      if (status.state !== "running") {
+        const result = {
+          ok: false,
+          status,
+          error: "Switchboard daemon is not running."
+        };
+        if (options.json) {
+          writeOut(JSON.stringify(result, null, 2));
+        } else {
+          writeErr(result.error);
+        }
+        process.exitCode = 1;
+        return;
+      }
+
+      try {
+        const response = await listDaemonTools(status.daemon.socketPath);
+        const result = { ok: true, status, response };
+        if (options.json) {
+          writeOut(JSON.stringify(result, null, 2));
+        } else {
+          writeOut(formatDaemonTools(response.tools));
+        }
+      } catch (error) {
+        const result = {
+          ok: false,
+          status,
+          error: error instanceof Error ? error.message : String(error)
+        };
+        if (options.json) {
+          writeOut(JSON.stringify(result, null, 2));
+        } else {
+          writeErr(`error: ${result.error}`);
+        }
+        process.exitCode = 1;
+      }
+    });
+
+  daemon
     .command("run", { hidden: true })
     .option("--runtime-dir <path>", "override daemon runtime directory")
     .action(async (options: { runtimeDir?: string }) => {
-      await runDaemon(optionsFromRuntimeDir(options.runtimeDir));
+      const globalOptions = program.opts<{ cwd?: string }>();
+      await runDaemon({
+        ...optionsFromRuntimeDir(options.runtimeDir),
+        ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
+      });
     });
 
   program
@@ -634,6 +684,21 @@ function formatDaemonStart(result: StartDaemonResult): string {
 
 function formatDaemonStop(result: StopDaemonResult): string {
   return [result.message, formatDaemonStatus(result.status)].join("\n");
+}
+
+function formatDaemonTools(
+  tools: Awaited<ReturnType<typeof listDaemonTools>>["tools"]
+): string {
+  const lines = ["Switchboard daemon tools", `Tools: ${tools.length}`];
+
+  if (tools.length > 0) {
+    lines.push("");
+    for (const tool of tools) {
+      lines.push(`  ${tool.name} (${tool.profileName})`);
+    }
+  }
+
+  return lines.join("\n");
 }
 
 function formatProfileTest(result: StdioProfileTestResult): string {
