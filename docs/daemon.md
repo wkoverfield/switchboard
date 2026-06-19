@@ -4,8 +4,7 @@ Switchboard has a local daemon lifecycle foundation. The daemon currently proves
 local process, PID/state, socket management, heartbeat, and daemon-side tool
 discovery. `switchboard mcp` can expose daemon-backed tool listings to MCP
 clients and route tool calls through the daemon, while `switchboard serve`
-remains the daemonless debug/installer fallback until the daemon-backed install
-slice lands.
+remains the daemonless debug and CI fallback.
 
 ## Commands
 
@@ -81,7 +80,6 @@ running.
 
 - The daemon supports heartbeat, tool discovery, and tool-call routing over its
   local JSON socket.
-- `switchboard serve` remains daemonless and is still the installer target until
-  the daemon-backed install slice lands.
+- `switchboard serve` remains daemonless for debugging and CI.
 - The daemon does not cache upstream sessions, enforce policy, broker
   approvals, or read secrets yet.

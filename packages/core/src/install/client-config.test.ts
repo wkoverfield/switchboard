@@ -5,7 +5,7 @@ import {
 } from "./client-config.js";
 
 describe("renderSwitchboardClientConfig", () => {
-  it("renders Codex TOML for the Switchboard stdio front door", () => {
+  it("renders Codex TOML for the daemon-backed Switchboard MCP adapter", () => {
     const rendered = renderSwitchboardClientConfig({
       client: "codex",
       cwd: "/repo/switchboard"
@@ -18,7 +18,7 @@ describe("renderSwitchboardClientConfig", () => {
       content: [
         '[mcp_servers."switchboard"]',
         'command = "switchboard"',
-        'args = ["--cwd", "/repo/switchboard", "serve"]',
+        'args = ["--cwd", "/repo/switchboard", "mcp"]',
         'cwd = "/repo/switchboard"',
         "startup_timeout_sec = 20",
         "tool_timeout_sec = 60"
@@ -26,7 +26,7 @@ describe("renderSwitchboardClientConfig", () => {
     });
   });
 
-  it("renders Claude Code JSON for the Switchboard stdio front door", () => {
+  it("renders Claude Code JSON for the daemon-backed Switchboard MCP adapter", () => {
     const rendered = renderSwitchboardClientConfig({
       client: "claude",
       cwd: "/repo/switchboard"
@@ -36,7 +36,7 @@ describe("renderSwitchboardClientConfig", () => {
       mcpServers: {
         switchboard: {
           command: "switchboard",
-          args: ["--cwd", "/repo/switchboard", "serve"],
+          args: ["--cwd", "/repo/switchboard", "mcp"],
           env: {}
         }
       }
@@ -56,7 +56,7 @@ describe("renderSwitchboardClientConfig", () => {
       'command = "/usr/local/bin/switchboard"'
     );
     expect(rendered.content).toContain(
-      'args = ["--cwd", "/repo/with spaces", "serve"]'
+      'args = ["--cwd", "/repo/with spaces", "mcp"]'
     );
   });
 

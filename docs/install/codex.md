@@ -18,7 +18,7 @@ The generated snippet targets `~/.codex/config.toml` or project-local
 ```toml
 [mcp_servers."switchboard"]
 command = "switchboard"
-args = ["--cwd", "/path/to/your/repo", "serve"]
+args = ["--cwd", "/path/to/your/repo", "mcp"]
 cwd = "/path/to/your/repo"
 startup_timeout_sec = 20
 tool_timeout_sec = 60
@@ -33,9 +33,12 @@ switchboard install codex --json
 Codex also supports registering stdio MCP servers with its CLI:
 
 ```bash
-codex mcp add switchboard -- switchboard --cwd /path/to/your/repo serve
+codex mcp add switchboard -- switchboard --cwd /path/to/your/repo mcp
 ```
 
 After installing, run `/mcp` inside Codex to verify the server is listed.
+
+For debugging without the daemon-backed adapter, run
+`switchboard --cwd /path/to/your/repo serve`.
 
 Reference: https://developers.openai.com/codex/mcp

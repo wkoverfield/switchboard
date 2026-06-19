@@ -880,7 +880,7 @@ describe("switchboard CLI program", () => {
     expect(parsed.serverName).toBe("switchboard-local");
     expect(parsed.content).toContain('[mcp_servers."switchboard-local"]');
     expect(parsed.content).toContain('command = "/opt/bin/switchboard"');
-    expect(parsed.content).toContain(`args = ["--cwd", "${root}", "serve"]`);
+    expect(parsed.content).toContain(`args = ["--cwd", "${root}", "mcp"]`);
   });
 
   it("prints Claude install dry-run JSON for configured stdio profiles", async () => {
@@ -902,7 +902,7 @@ describe("switchboard CLI program", () => {
       mcpServers: {
         switchboard: {
           command: "switchboard",
-          args: ["--cwd", root, "serve"],
+          args: ["--cwd", root, "mcp"],
           env: {}
         }
       }
