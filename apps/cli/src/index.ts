@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { createJsonlAuditLogger } from "@switchboard-mcp/core";
 import { createProgram } from "./program.js";
 
-await createProgram().parseAsync(process.argv);
+await createProgram({ auditLogger: createJsonlAuditLogger() }).parseAsync(
+  process.argv
+);

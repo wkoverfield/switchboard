@@ -30,6 +30,7 @@ jobs:
       - run: pnpm smoke:cli-doctor
       - run: pnpm smoke:repo-config
       - run: pnpm smoke:profile-test
+      - run: pnpm smoke:audit-profile-test
       - run: pnpm smoke:install-codex
       - run: pnpm smoke:install-claude
       - run: pnpm smoke:mcp-serve-session

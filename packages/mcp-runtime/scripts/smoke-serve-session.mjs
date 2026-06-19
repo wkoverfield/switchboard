@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
@@ -50,6 +50,10 @@ const transport = new StdioClientTransport({
   command: process.execPath,
   args: [cliEntryPath, "--cwd", tmpRoot, "serve"],
   cwd: repoRoot,
+  env: {
+    ...process.env,
+    XDG_STATE_HOME: tmpRoot
+  },
   stderr: "pipe"
 });
 
@@ -68,6 +72,21 @@ try {
     arguments: { message: "ok" }
   });
   assert(textContent(result) === "smoke:ok", "expected routed echo result");
+
+  const auditLogPath = join(tmpRoot, "switchboard", "logs", "switchboard.jsonl");
+  const auditEntries = readFileSync(auditLogPath, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  assert(
+    auditEntries.some(
+      (entry) =>
+        entry.action === "tool_call" &&
+        entry.status === "ok" &&
+        entry.toolName === "smoke_echo_echo"
+    ),
+    "expected routed tool call audit entry"
+  );
 } finally {
   await client.close();
   rmSync(tmpRoot, { recursive: true, force: true });
