@@ -26,6 +26,11 @@ switchboard test <profile>
 switchboard serve
 ```
 
+## Product Roadmap
+
+The current working roadmap lives at `docs/product/roadmap.md`. Original
+planning-thread source docs are preserved in `docs/product/source/`.
+
 ## Config Files
 
 Switchboard reads layered YAML config:
