@@ -135,9 +135,19 @@ export function createDaemonState(options: {
 
 function parseDaemonState(raw: string): DaemonState {
   const parsed = JSON.parse(raw) as Partial<DaemonState>;
+  if (parsed.version !== 1) {
+    throw new Error("Daemon state file is invalid.");
+  }
+
   if (
-    parsed.version !== 1 ||
     typeof parsed.pid !== "number" ||
+    !Number.isSafeInteger(parsed.pid) ||
+    parsed.pid <= 0
+  ) {
+    throw new Error("Daemon state file has an invalid pid.");
+  }
+
+  if (
     typeof parsed.startedAt !== "string" ||
     typeof parsed.socketPath !== "string"
   ) {

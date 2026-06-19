@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtempSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
@@ -8,7 +8,11 @@ import { fileURLToPath, URL } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)), "..");
 const cliPath = resolve(repoRoot, "apps", "cli", "dist", "index.js");
-const runtimeDir = mkdtempSync(join("/tmp", "switchboard-daemon-smoke-"));
+const runtimeRoot = join(
+  "/tmp",
+  `switchboard-daemon-smoke-${Date.now()}-${Math.random().toString(16).slice(2)}`
+);
+const runtimeDir = join(runtimeRoot, "nested", "runtime");
 
 try {
   const start = run("start");
@@ -27,7 +31,7 @@ try {
   assert(stopped.state === "not-running", "daemon should report not-running");
 } finally {
   run("stop", { allowFailure: true });
-  rmSync(runtimeDir, { recursive: true, force: true });
+  rmSync(runtimeRoot, { recursive: true, force: true });
 }
 
 function run(command, options = {}) {

@@ -224,6 +224,36 @@ describe("switchboard CLI program", () => {
     expect(existsSync(join(root, "daemon.json"))).toBe(false);
   });
 
+  it("does not trust daemon status without a heartbeat", async () => {
+    const root = makeTempProject();
+    writeFileSync(
+      join(root, "daemon.json"),
+      JSON.stringify({
+        version: 1,
+        pid: process.pid,
+        startedAt: "2026-06-19T15:00:00.000Z",
+        socketPath: join(root, "daemon.sock")
+      })
+    );
+    writeFileSync(join(root, "daemon.sock"), "");
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(
+      ["daemon", "status", "--runtime-dir", root, "--json"],
+      {
+        from: "user"
+      }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      state: "stale",
+      daemon: {
+        pid: process.pid
+      }
+    });
+  });
+
   it("writes init config and refuses accidental overwrite", async () => {
     const root = makeTempProject();
     const output: string[] = [];

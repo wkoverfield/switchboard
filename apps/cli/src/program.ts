@@ -224,8 +224,8 @@ export function createProgram(io: ProgramIo = {}): Command {
     .description("Show local daemon status.")
     .option("--json", "print machine-readable JSON")
     .option("--runtime-dir <path>", "override daemon runtime directory")
-    .action((options: { json?: boolean; runtimeDir?: string }) => {
-      const status = daemonStatus(optionsFromRuntimeDir(options.runtimeDir));
+    .action(async (options: { json?: boolean; runtimeDir?: string }) => {
+      const status = await daemonStatus(optionsFromRuntimeDir(options.runtimeDir));
       if (options.json) {
         writeOut(JSON.stringify(status, null, 2));
         return;
@@ -566,7 +566,7 @@ function formatInit(result: {
   return [header, "", result.content].join("\n");
 }
 
-function formatDaemonStatus(status: ReturnType<typeof daemonStatus>): string {
+function formatDaemonStatus(status: Awaited<ReturnType<typeof daemonStatus>>): string {
   const lines = [`Switchboard daemon: ${status.state}`];
   lines.push(`Runtime dir: ${status.paths.runtimeDir}`);
   lines.push(`Socket: ${status.paths.socketPath}`);

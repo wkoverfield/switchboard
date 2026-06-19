@@ -82,6 +82,27 @@ describe("daemon state", () => {
     await removeDaemonState(paths);
     expect(getDaemonStatus(paths)).toMatchObject({ state: "not-running" });
   });
+
+  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
+    "reports invalid state for unsafe pid %s",
+    async (pid) => {
+      const paths = resolveDaemonPaths({ runtimeDir: await makeTempDir() });
+      await writeFile(
+        paths.statePath,
+        JSON.stringify({
+          version: 1,
+          pid,
+          startedAt: "2026-06-19T15:00:00.000Z",
+          socketPath: paths.socketPath
+        })
+      );
+
+      expect(getDaemonStatus(paths)).toMatchObject({
+        state: "invalid",
+        error: "Daemon state file has an invalid pid."
+      });
+    }
+  );
 });
 
 async function makeTempDir(): Promise<string> {

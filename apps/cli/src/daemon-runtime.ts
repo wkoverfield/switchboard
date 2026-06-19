@@ -1,6 +1,11 @@
 import { spawn } from "node:child_process";
-import { rm } from "node:fs/promises";
-import { createServer, type Server, type Socket } from "node:net";
+import { mkdir, rm } from "node:fs/promises";
+import {
+  createConnection,
+  createServer,
+  type Server,
+  type Socket
+} from "node:net";
 import {
   createDaemonState,
   getDaemonStatus,
@@ -28,15 +33,17 @@ export interface StopDaemonResult {
   message: string;
 }
 
-export function daemonStatus(options: DaemonCommandOptions = {}): DaemonStatus {
-  return getDaemonStatus(resolveDaemonPaths(options));
+export async function daemonStatus(
+  options: DaemonCommandOptions = {}
+): Promise<DaemonStatus> {
+  return verifiedDaemonStatus(resolveDaemonPaths(options));
 }
 
 export async function startDaemon(
   options: DaemonCommandOptions = {}
 ): Promise<StartDaemonResult> {
   const paths = resolveDaemonPaths(options);
-  const current = getDaemonStatus(paths);
+  const current = await verifiedDaemonStatus(paths);
   if (current.state === "running") {
     return { ok: true, status: current, message: "Switchboard daemon is already running." };
   }
@@ -49,7 +56,7 @@ export async function startDaemon(
   if (!entrypoint) {
     return {
       ok: false,
-      status: getDaemonStatus(paths),
+      status: await verifiedDaemonStatus(paths),
       message: "Cannot determine CLI entrypoint for daemon start."
     };
   }
@@ -81,7 +88,7 @@ export async function stopDaemon(
   options: DaemonCommandOptions = {}
 ): Promise<StopDaemonResult> {
   const paths = resolveDaemonPaths(options);
-  const current = getDaemonStatus(paths);
+  const current = await verifiedDaemonStatus(paths);
   if (current.state === "not-running") {
     return { ok: true, status: current, message: "Switchboard daemon is not running." };
   }
@@ -90,7 +97,7 @@ export async function stopDaemon(
     await removeDaemonState(paths);
     return {
       ok: true,
-      status: getDaemonStatus(paths),
+      status: await verifiedDaemonStatus(paths),
       message: "Removed stale Switchboard daemon state."
     };
   }
@@ -109,7 +116,7 @@ export async function stopDaemon(
 
   return {
     ok: true,
-    status: getDaemonStatus(paths),
+    status: await verifiedDaemonStatus(paths),
     message: "Switchboard daemon stopped."
   };
 }
@@ -127,6 +134,7 @@ export async function runDaemon(
   options: DaemonCommandOptions = {}
 ): Promise<void> {
   const paths = resolveDaemonPaths(options);
+  await mkdir(paths.runtimeDir, { recursive: true, mode: 0o700 });
   await rm(paths.socketPath, { force: true });
 
   const server = createServer((socket) => handleDaemonSocket(socket));
@@ -158,9 +166,9 @@ async function waitForStatus(
   timeoutMs: number
 ): Promise<DaemonStatus> {
   const startedAt = Date.now();
-  let status = getDaemonStatus(paths);
+  let status = await verifiedDaemonStatus(paths);
   while (Date.now() - startedAt < timeoutMs) {
-    status = getDaemonStatus(paths);
+    status = await verifiedDaemonStatus(paths);
     if (status.state === state) {
       return status;
     }
@@ -170,11 +178,53 @@ async function waitForStatus(
   return status;
 }
 
+async function verifiedDaemonStatus(paths: DaemonPaths): Promise<DaemonStatus> {
+  const status = getDaemonStatus(paths);
+  if (status.state !== "running") {
+    return status;
+  }
+
+  return (await daemonHeartbeat(status.daemon.socketPath))
+    ? status
+    : { state: "stale", paths, daemon: status.daemon };
+}
+
+async function daemonHeartbeat(socketPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection(socketPath);
+    let response = "";
+    const timeout = setTimeout(() => {
+      socket.destroy();
+      resolve(false);
+    }, 500);
+
+    socket.setEncoding("utf8");
+    socket.on("error", () => {
+      clearTimeout(timeout);
+      resolve(false);
+    });
+    socket.on("data", (chunk) => {
+      response += chunk;
+      if (response.includes("\n")) {
+        socket.end();
+      }
+    });
+    socket.on("end", () => {
+      clearTimeout(timeout);
+      resolve(response.trim() === "pong");
+    });
+    socket.on("connect", () => {
+      socket.write("ping\n");
+    });
+  });
+}
+
 function handleDaemonSocket(socket: Socket): void {
   socket.setEncoding("utf8");
   socket.on("data", (chunk) => {
     if (chunk.toString().trim() === "ping") {
       socket.write("pong\n");
+      socket.end();
     }
   });
 }
