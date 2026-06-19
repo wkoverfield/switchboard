@@ -32,6 +32,9 @@ importers:
       '@switchboard-mcp/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@switchboard-mcp/mcp-runtime':
+        specifier: workspace:*
+        version: link:../../packages/mcp-runtime
       commander:
         specifier: ^14.0.2
         version: 14.0.3

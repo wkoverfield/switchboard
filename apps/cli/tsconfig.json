@@ -6,12 +6,18 @@
     "composite": true,
     "baseUrl": ".",
     "paths": {
-      "@switchboard-mcp/core": ["../../packages/core/src/index.ts"]
+      "@switchboard-mcp/core": ["../../packages/core/src/index.ts"],
+      "@switchboard-mcp/mcp-runtime": [
+        "../../packages/mcp-runtime/src/index.ts"
+      ]
     }
   },
   "references": [
     {
       "path": "../../packages/core"
+    },
+    {
+      "path": "../../packages/mcp-runtime"
     }
   ],
   "include": ["src/**/*.ts"]

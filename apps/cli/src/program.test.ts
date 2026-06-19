@@ -110,6 +110,111 @@ describe("switchboard CLI program", () => {
     expect(parsed.ok).toBe(false);
     expect(parsed.namespaceCollisions[0]?.namespace).toBe("stripe_live");
   });
+
+  it("fails serve when no stdio upstream profiles are configured", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  generic_http:",
+        "    provider: generic",
+        "    upstream:",
+        "      type: http",
+        "      url: http://localhost:3000/mcp"
+      ].join("\n")
+    );
+
+    const errors: string[] = [];
+    const program = createProgram({ writeErr: (message) => errors.push(message) });
+    await program.parseAsync(["--cwd", root, "serve"], {
+      from: "user"
+    });
+
+    expect(errors).toEqual(["error: no stdio upstream profiles are configured"]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("fails serve on namespace collisions before starting MCP", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  alpha-tools:",
+        "    provider: generic",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "  alpha_tools:",
+        "    provider: generic",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node"
+      ].join("\n")
+    );
+
+    const errors: string[] = [];
+    const servedProfiles: unknown[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message),
+      serveMcp: async (profiles) => {
+        servedProfiles.push(...profiles);
+      }
+    });
+    await program.parseAsync(["--cwd", root, "serve"], {
+      from: "user"
+    });
+
+    expect(errors).toEqual([
+      'error: namespace "alpha_tools" is used by profiles: alpha-tools, alpha_tools'
+    ]);
+    expect(servedProfiles).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("passes configured stdio upstream profiles to serve", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  local_echo:",
+        "    provider: generic",
+        "    namespace: echo_tools",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "      args:",
+        "        - fixture.mjs"
+      ].join("\n")
+    );
+
+    const servedProfiles: unknown[] = [];
+    const program = createProgram({
+      serveMcp: async (profiles) => {
+        servedProfiles.push(...profiles);
+      }
+    });
+    await program.parseAsync(["--cwd", root, "serve"], {
+      from: "user"
+    });
+
+    expect(servedProfiles).toEqual([
+      {
+        profileName: "local_echo",
+        namespace: "echo_tools",
+        command: "node",
+        args: ["fixture.mjs"]
+      }
+    ]);
+  });
 });
 
 function makeTempProject(): string {
