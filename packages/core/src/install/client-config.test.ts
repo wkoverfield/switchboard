@@ -313,6 +313,42 @@ describe("inspectProjectClientConfig", () => {
     ]);
   });
 
+  it("reports semantically equivalent project configs as installed", async () => {
+    const root = await makeTempProject();
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      join(root, ".codex", "config.toml"),
+      [
+        '[mcp_servers."switchboard"]',
+        'command = "switchboard"',
+        `args = ["--cwd", "${root}", "mcp"]`
+      ].join("\n")
+    );
+    writeFileSync(
+      join(root, ".mcp.json"),
+      JSON.stringify(
+        {
+          mcpServers: {
+            switchboard: {
+              env: {
+                EXTRA: "ok"
+              },
+              args: ["--cwd", root, "mcp"],
+              command: "switchboard"
+            }
+          }
+        },
+        null,
+        2
+      )
+    );
+
+    await expect(inspectProjectClientConfigs({ cwd: root })).resolves.toEqual([
+      expect.objectContaining({ client: "codex", status: "installed" }),
+      expect.objectContaining({ client: "claude", status: "installed" })
+    ]);
+  });
+
   it("reports stale and invalid project client configs", async () => {
     const root = await makeTempProject();
     mkdirSync(join(root, ".codex"));

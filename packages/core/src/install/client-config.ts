@@ -404,7 +404,7 @@ function inspectClaudeProjectConfig(options: {
     };
   }
 
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+  if (!clientServerEntryRoutesThroughSwitchboard(actual, expected)) {
     return {
       client: "claude",
       serverName: options.serverName,
@@ -449,7 +449,7 @@ function inspectCodexProjectConfig(options: {
 
   if (
     command !== options.command ||
-    cwd !== options.cwd ||
+    (cwd !== undefined && cwd !== options.cwd) ||
     !args ||
     args.length !== 3 ||
     args[0] !== "--cwd" ||
@@ -472,6 +472,20 @@ function inspectCodexProjectConfig(options: {
     status: "installed",
     message: "Codex project config routes through switchboard mcp."
   };
+}
+
+function clientServerEntryRoutesThroughSwitchboard(
+  actual: unknown,
+  expected: unknown
+): boolean {
+  if (!isRecord(actual) || !isRecord(expected)) {
+    return false;
+  }
+
+  return (
+    actual.command === expected.command &&
+    JSON.stringify(actual.args) === JSON.stringify(expected.args)
+  );
 }
 
 function codexMcpServerSection(
