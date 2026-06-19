@@ -1,4 +1,8 @@
 import { createConnection } from "node:net";
+import {
+  CallToolResultSchema,
+  type CallToolResult
+} from "@modelcontextprotocol/sdk/types.js";
 import type { NamespacedTool } from "../runtime/namespaced-tools.js";
 
 export interface DaemonPingResponse {
@@ -16,6 +20,14 @@ export interface DaemonToolsResponse {
   tools: NamespacedTool[];
 }
 
+export interface DaemonToolCallResponse {
+  id: string;
+  ok: true;
+  type: "tool_result";
+  version: string;
+  result: CallToolResult;
+}
+
 export interface DaemonErrorResponse {
   id: string;
   ok: false;
@@ -25,7 +37,18 @@ export interface DaemonErrorResponse {
 export type DaemonResponse =
   | DaemonPingResponse
   | DaemonToolsResponse
+  | DaemonToolCallResponse
   | DaemonErrorResponse;
+
+export type DaemonRequest =
+  | { id: string; type: "ping" }
+  | { id: string; type: "list_tools" }
+  | {
+      id: string;
+      type: "call_tool";
+      name: string;
+      arguments?: Record<string, unknown>;
+    };
 
 export interface DaemonClientOptions {
   timeoutMs?: number;
@@ -81,9 +104,41 @@ export async function listDaemonTools(
   return response;
 }
 
+export async function callDaemonTool(
+  socketPath: string,
+  name: string,
+  args?: Record<string, unknown>,
+  options: DaemonClientOptions = {}
+): Promise<DaemonToolCallResponse> {
+  const id = randomRequestId();
+  const request: DaemonRequest = {
+    id,
+    type: "call_tool",
+    name
+  };
+  if (args !== undefined) {
+    request.arguments = args;
+  }
+  const response = await requestDaemon(socketPath, request, {
+    timeoutMs: options.timeoutMs ?? 60000
+  });
+
+  if (response.id !== id) {
+    throw new Error("Daemon response id did not match request id.");
+  }
+  if (!response.ok) {
+    throw new Error(response.error);
+  }
+  if (response.type !== "tool_result") {
+    throw new Error("Unexpected daemon response.");
+  }
+
+  return response;
+}
+
 export async function requestDaemon(
   socketPath: string,
-  request: { id: string; type: string },
+  request: DaemonRequest,
   options: DaemonClientOptions = {}
 ): Promise<DaemonResponse> {
   const timeoutMs = options.timeoutMs ?? 500;
@@ -157,6 +212,24 @@ export function parseDaemonResponse(raw: string): DaemonResponse {
         type: "tools",
         version: parsed.version,
         tools: parsed.tools.map(parseNamespacedTool)
+      };
+    }
+
+    if (parsed.type === "tool_result") {
+      if (!("result" in parsed)) {
+        throw new Error("Daemon tool result response result is missing.");
+      }
+      const result = CallToolResultSchema.safeParse(parsed.result);
+      if (!result.success) {
+        throw new Error("Daemon tool result response result is invalid.");
+      }
+
+      return {
+        id: parsed.id,
+        ok: true,
+        type: "tool_result",
+        version: parsed.version,
+        result: result.data
       };
     }
 

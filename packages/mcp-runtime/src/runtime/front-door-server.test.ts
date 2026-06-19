@@ -134,9 +134,17 @@ describe("Switchboard MCP front door", () => {
     }
   });
 
-  it("returns a tool error for daemon-backed tool calls until call forwarding lands", async () => {
+  it("routes daemon-backed tool calls through the daemon client", async () => {
     const client = new Client({ name: "front-door-test", version: "0.1.0" });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const callTool = vi.fn(async () => ({
+      content: [
+        {
+          type: "text" as const,
+          text: "daemon:later"
+        }
+      ]
+    }));
 
     try {
       await Promise.all([
@@ -150,7 +158,8 @@ describe("Switchboard MCP front door", () => {
               upstreamName: "echo",
               inputSchema: { type: "object" }
             }
-          ]
+          ],
+          callTool
         })
       ]);
 
@@ -158,10 +167,8 @@ describe("Switchboard MCP front door", () => {
         name: "daemon_echo",
         arguments: { message: "later" }
       });
-      expect(result.isError).toBe(true);
-      expect(textContent(result)).toContain(
-        "Daemon-backed MCP tool calls are not implemented yet"
-      );
+      expect(textContent(result)).toBe("daemon:later");
+      expect(callTool).toHaveBeenCalledWith("daemon_echo", { message: "later" });
     } finally {
       await client.close();
     }

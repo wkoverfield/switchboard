@@ -11,7 +11,7 @@ import type {
   Tool
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { listDaemonTools } from "../daemon/daemon-client.js";
+import { callDaemonTool, listDaemonTools } from "../daemon/daemon-client.js";
 import type { GenericMcpRouter } from "./generic-router.js";
 import type { NamespacedTool } from "./namespaced-tools.js";
 import type { UpstreamToolResult } from "./stdio-upstream.js";
@@ -23,6 +23,10 @@ export interface SwitchboardMcpServerOptions {
 
 export interface DaemonBackedMcpServerOptions extends SwitchboardMcpServerOptions {
   listTools?: () => Promise<NamespacedTool[]>;
+  callTool?: (
+    name: string,
+    args?: Record<string, unknown>
+  ) => Promise<CallToolResult>;
 }
 
 export function createSwitchboardMcpServer(
@@ -73,6 +77,12 @@ export function createDaemonBackedSwitchboardMcpServer(
       const response = await listDaemonTools(socketPath);
       return response.tools;
     });
+  const callTool =
+    options.callTool ??
+    (async (name: string, args?: Record<string, unknown>) => {
+      const response = await callDaemonTool(socketPath, name, args);
+      return response.result;
+    });
   const server = new Server(
     {
       name: options.name ?? "switchboard",
@@ -94,15 +104,8 @@ export function createDaemonBackedSwitchboardMcpServer(
 
   server.setRequestHandler(
     CallToolRequestSchema,
-    async (): Promise<CallToolResult> => ({
-      isError: true,
-      content: [
-        {
-          type: "text",
-          text: "Daemon-backed MCP tool calls are not implemented yet; use switchboard serve for routed calls."
-        }
-      ]
-    })
+    async (request): Promise<CallToolResult> =>
+      callTool(request.params.name, request.params.arguments)
   );
 
   return server;
