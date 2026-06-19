@@ -4,7 +4,7 @@ One local MCP endpoint for every account, project, and environment.
 
 Switchboard is a local-first MCP profile router for developers using Codex, Claude Code, Cursor, VS Code, and other MCP-compatible agents. It is designed to make multi-account, multi-project, and dev/staging/prod tool access explicit, namespaced, policy-aware, and locally auditable.
 
-This repository is in Milestone 4 foundation work. It currently ships the TypeScript workspace, CLI shell, config/profile schemas, namespace normalization, collision detection, `switchboard status`, `switchboard doctor`, generic stdio MCP upstream mounting, namespaced tool routing, a stdio MCP front door, client config dry-run snippets, local audit logs, and end-to-end MCP smoke checks.
+This repository is in Milestone 4 foundation work. It currently ships the TypeScript workspace, CLI shell, config/profile schemas, namespace normalization, collision detection, `switchboard status`, `switchboard doctor`, generic stdio MCP upstream mounting, namespaced tool routing, a stdio MCP front door, client config dry-run snippets, local audit logs, daemon lifecycle commands, daemon-side tool discovery, and end-to-end MCP smoke checks.
 
 ## Install From Source
 
@@ -26,7 +26,7 @@ switchboard doctor
 switchboard test <profile>
 switchboard install <codex|claude>
 switchboard logs
-switchboard daemon <status|start|ping|stop>
+switchboard daemon <status|start|ping|tools|stop>
 switchboard serve
 ```
 
@@ -57,4 +57,4 @@ Precedence, highest to lowest:
 5. global config
 6. built-in defaults
 
-Start with `docs/install/quickstart.md`. `switchboard init` prints or writes a starter repo config, and `switchboard doctor` tells you the next command to run. `switchboard test <profile>` checks that a configured stdio upstream starts and lists tools. `switchboard serve` exposes configured stdio upstream profiles as one MCP server over stdio. `switchboard install <codex|claude>` prints dry-run client config snippets for the stdio front door. `switchboard logs` reads the local JSONL audit log. `switchboard daemon <status|start|ping|stop>` manages the local daemon lifecycle foundation. Provider integrations, secrets, policy enforcement, and write-to-config installers come in later milestones.
+Start with `docs/install/quickstart.md`. `switchboard init` prints or writes a starter repo config, and `switchboard doctor` tells you the next command to run. `switchboard test <profile>` checks that a configured stdio upstream starts and lists tools. `switchboard serve` exposes configured stdio upstream profiles as one MCP server over stdio. `switchboard install <codex|claude>` prints dry-run client config snippets for the stdio front door. `switchboard logs` reads the local JSONL audit log. `switchboard daemon <status|start|ping|tools|stop>` manages the local daemon lifecycle foundation and daemon-side tool discovery. Provider integrations, secrets, policy enforcement, and write-to-config installers come in later milestones.
