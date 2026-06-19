@@ -608,12 +608,7 @@ export function createProgram(io: ProgramIo = {}): Command {
           return;
         }
 
-        const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
-        if (!validateLoadedConfigForCommand(loaded, writeErr)) {
-          return;
-        }
-
-        const cwd = configCwdBase(loaded, globalOptions.cwd);
+        const fallbackCwd = globalOptions.cwd ? resolve(globalOptions.cwd) : process.cwd();
         if (options.write && options.rollback) {
           writeErr("error: use either --write or --rollback, not both");
           process.exitCode = 1;
@@ -624,10 +619,10 @@ export function createProgram(io: ProgramIo = {}): Command {
           try {
             const result = await rollbackSwitchboardClientConfig({
               client: supportedClient,
-              cwd,
+              cwd: fallbackCwd,
               backupPath: isAbsolute(options.rollback)
                 ? options.rollback
-                : resolve(cwd, options.rollback)
+                : resolve(fallbackCwd, options.rollback)
             });
             writeOut(
               options.json
@@ -641,6 +636,12 @@ export function createProgram(io: ProgramIo = {}): Command {
           return;
         }
 
+        const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
+        if (!validateLoadedConfigForCommand(loaded, writeErr)) {
+          return;
+        }
+
+        const cwd = configCwdBase(loaded, globalOptions.cwd);
         const profiles = stdioProfilesFromConfig(loaded.config.profiles, cwd);
         if (profiles.length === 0) {
           writeErr("error: no stdio upstream profiles are configured");

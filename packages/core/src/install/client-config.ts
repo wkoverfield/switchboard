@@ -287,9 +287,10 @@ function mergeCodexConfigContent(
     return `${renderedContent}\n`;
   }
 
-  const sectionHeader = `[mcp_servers.${tomlKey(serverName)}]`;
   const lines = existing.split(/\r?\n/);
-  const start = lines.findIndex((line) => line.trim() === sectionHeader);
+  const start = lines.findIndex(
+    (line) => codexMcpServerNameFromHeader(line) === serverName
+  );
   const renderedLines = renderedContent.split("\n");
 
   if (start === -1) {
@@ -304,6 +305,24 @@ function mergeCodexConfigContent(
 
   lines.splice(start, end - start, ...renderedLines);
   return `${lines.join("\n").replace(/\n*$/, "")}\n`;
+}
+
+function codexMcpServerNameFromHeader(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("[mcp_servers.") || !trimmed.endsWith("]")) {
+    return null;
+  }
+
+  const rawKey = trimmed.slice("[mcp_servers.".length, -1).trim();
+  if (rawKey.startsWith('"') && rawKey.endsWith('"')) {
+    try {
+      return JSON.parse(rawKey) as string;
+    } catch {
+      return null;
+    }
+  }
+
+  return rawKey;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

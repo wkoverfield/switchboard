@@ -448,6 +448,12 @@ Acceptance:
 - existing Codex/Claude config entries outside the Switchboard server are preserved
 - CI smokes cover write and rollback for both clients
 
+Deferred from full Milestone 8:
+
+- interactive conflict diff and confirmation before replacing an existing
+  `switchboard` client entry
+- global/user-scope client config writes
+
 ## Rules For Future Agents
 
 - Read `docs/product/roadmap.md` and the relevant source docs before building.

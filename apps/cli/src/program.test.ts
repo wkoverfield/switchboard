@@ -1018,6 +1018,42 @@ describe("switchboard CLI program", () => {
     expect(readFileSync(targetPath, "utf8")).toBe('{"restored":true}\n');
   });
 
+  it("rolls back project-scoped install config when Switchboard config is invalid", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(join(root, ".switchboard.yaml"), "version: nope\n");
+    const targetPath = join(root, ".mcp.json");
+    const backupPath = join(root, "claude.backup.json");
+    writeFileSync(targetPath, '{"current":true}\n');
+    writeFileSync(backupPath, '{"restored":true}\n');
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "install",
+        "claude",
+        "--rollback",
+        "claude.backup.json",
+        "--json"
+      ],
+      {
+        from: "user"
+      }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      targetPath: string;
+      restoredFrom: string;
+    };
+    expect(parsed.targetPath).toBe(targetPath);
+    expect(parsed.restoredFrom).toBe(backupPath);
+    expect(readFileSync(targetPath, "utf8")).toBe('{"restored":true}\n');
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it("fails install when write and rollback are both requested", async () => {
     const root = makeTempProject();
     writeStdioConfig(root);

@@ -170,6 +170,30 @@ describe("writeSwitchboardClientConfig", () => {
     );
   });
 
+  it("updates an existing Codex section with an unquoted server name", async () => {
+    const root = await makeTempProject();
+    const targetPath = resolveProjectClientConfigPath("codex", root);
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      targetPath,
+      [
+        "[mcp_servers.switchboard]",
+        'command = "old"',
+        'args = ["serve"]'
+      ].join("\n")
+    );
+
+    await writeSwitchboardClientConfig({
+      client: "codex",
+      cwd: root
+    });
+
+    const content = readFileSync(targetPath, "utf8");
+    expect(content).not.toContain("[mcp_servers.switchboard]");
+    expect(content).toContain('[mcp_servers."switchboard"]');
+    expect(content).toContain(`args = ["--cwd", "${root}", "mcp"]`);
+  });
+
   it("merges Claude project config and backs up the previous file", async () => {
     const root = await makeTempProject();
     const targetPath = resolveProjectClientConfigPath("claude", root);
