@@ -1,4 +1,7 @@
 import { fileURLToPath } from "node:url";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   profileConfigToStdioUpstream,
@@ -8,6 +11,9 @@ import {
 
 const fixtureServerPath = fileURLToPath(
   new URL("../../fixtures/echo-server.mjs", import.meta.url)
+);
+const hangServerPath = fileURLToPath(
+  new URL("../../fixtures/hang-server.mjs", import.meta.url)
 );
 
 describe("profileConfigToStdioUpstream", () => {
@@ -51,6 +57,27 @@ describe("profileConfigToStdioUpstream", () => {
     ).toBeUndefined();
   });
 
+  it("resolves relative upstream cwd against a supplied base directory", () => {
+    expect(
+      profileConfigToStdioUpstream(
+        "relative_cwd",
+        {
+          provider: "generic",
+          readOnly: false,
+          upstream: {
+            type: "stdio",
+            command: "node",
+            cwd: "tools",
+            args: ["server.mjs"]
+          }
+        },
+        { cwdBase: "/repo" }
+      )
+    ).toMatchObject({
+      cwd: "/repo/tools"
+    });
+  });
+
   it("tests a stdio upstream profile by listing tools", async () => {
     const result = await testStdioUpstreamProfile(
       fixtureProfile("profile_test", "profile_test_tools"),
@@ -68,6 +95,30 @@ describe("profileConfigToStdioUpstream", () => {
       "whoami"
     ]);
   });
+
+  it("times out and cleans up a profile that never initializes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "switchboard-hang-"));
+    const pidFile = join(root, "pid");
+
+    try {
+      await expect(
+        testStdioUpstreamProfile(
+          {
+            profileName: "hang",
+            namespace: "hang",
+            command: process.execPath,
+            args: [hangServerPath, pidFile]
+          },
+          { timeoutMs: 500 }
+        )
+      ).rejects.toThrow();
+
+      const pid = Number(readFileSync(pidFile, "utf8"));
+      await expectProcessToExit(pid);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 function fixtureProfile(label: string, namespace: string): StdioUpstreamProfile {
@@ -77,4 +128,25 @@ function fixtureProfile(label: string, namespace: string): StdioUpstreamProfile 
     command: process.execPath,
     args: [fixtureServerPath, label]
   };
+}
+
+async function expectProcessToExit(pid: number): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  throw new Error(`Expected process ${pid} to exit`);
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }

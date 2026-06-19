@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { dirname, resolve } from "node:path";
 import {
   checkLocalConfigIgnored,
   type LoadConfigOptions,
@@ -130,7 +131,10 @@ export function createProgram(io: ProgramIo = {}): Command {
         return;
       }
 
-      const profiles = stdioProfilesFromConfig(loaded.config.profiles);
+      const profiles = stdioProfilesFromConfig(
+        loaded.config.profiles,
+        configCwdBase(loaded, globalOptions.cwd)
+      );
       if (profiles.length === 0) {
         writeErr("error: no stdio upstream profiles are configured");
         process.exitCode = 1;
@@ -171,7 +175,9 @@ export function createProgram(io: ProgramIo = {}): Command {
           return;
         }
 
-        const upstream = profileConfigToStdioUpstream(profileName, profile);
+        const upstream = profileConfigToStdioUpstream(profileName, profile, {
+          cwdBase: configCwdBase(loaded, globalOptions.cwd)
+        });
         if (!upstream) {
           writeErr(
             `error: profile "${profileName}" does not define a stdio upstream`
@@ -329,10 +335,13 @@ function parseTimeoutMs(value: string): number | undefined {
 }
 
 function stdioProfilesFromConfig(
-  profiles: ReturnType<typeof loadSwitchboardConfig>["config"]["profiles"]
+  profiles: ReturnType<typeof loadSwitchboardConfig>["config"]["profiles"],
+  cwdBase: string
 ): StdioUpstreamProfile[] {
   return Object.entries(profiles).flatMap(([profileName, profile]) => {
-    const upstream = profileConfigToStdioUpstream(profileName, profile);
+    const upstream = profileConfigToStdioUpstream(profileName, profile, {
+      cwdBase
+    });
     return upstream ? [upstream] : [];
   });
 }
@@ -342,4 +351,19 @@ async function serveProfilesOverStdio(
 ): Promise<void> {
   const router = new GenericMcpRouter(profiles);
   await serveSwitchboardMcpStdio(router);
+}
+
+function configCwdBase(
+  loaded: ReturnType<typeof loadSwitchboardConfig>,
+  cwd: string | undefined
+): string {
+  const repoSource = loaded.sources.find(
+    (source) => source.kind === "repo" && source.loaded && source.path
+  );
+
+  if (repoSource?.path) {
+    return dirname(repoSource.path);
+  }
+
+  return cwd ? resolve(cwd) : process.cwd();
 }

@@ -4,6 +4,7 @@ import {
   type StdioServerParameters
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import { isAbsolute, resolve } from "node:path";
 import { Readable } from "node:stream";
 import {
   namespaceForProfile,
@@ -31,9 +32,14 @@ export interface StdioProfileTestOptions {
   timeoutMs?: number;
 }
 
+export interface ProfileConfigToStdioOptions {
+  cwdBase?: string;
+}
+
 export function profileConfigToStdioUpstream(
   profileName: string,
-  profile: ProfileConfig
+  profile: ProfileConfig,
+  options: ProfileConfigToStdioOptions = {}
 ): StdioUpstreamProfile | undefined {
   if (!isStdioUpstreamConfig(profile.upstream)) {
     return undefined;
@@ -50,7 +56,9 @@ export function profileConfigToStdioUpstream(
     upstream.args = profile.upstream.args;
   }
   if (profile.upstream.cwd) {
-    upstream.cwd = profile.upstream.cwd;
+    upstream.cwd = resolveProfileCwd(profile.upstream.cwd, options.cwdBase);
+  } else if (options.cwdBase) {
+    upstream.cwd = options.cwdBase;
   }
   if (profile.upstream.env) {
     upstream.env = profile.upstream.env;
@@ -106,12 +114,12 @@ export class StdioUpstreamConnection {
     }
   }
 
-  async connect(): Promise<void> {
+  async connect(options?: RequestOptions): Promise<void> {
     if (this.connected) {
       return;
     }
 
-    await this.client.connect(this.transport);
+    await this.client.connect(this.transport, options);
     this.connected = true;
   }
 
@@ -122,7 +130,7 @@ export class StdioUpstreamConnection {
   }
 
   async listToolsWithOptions(options?: RequestOptions): Promise<UpstreamTool[]> {
-    await this.connect();
+    await this.connect(options);
     const result = await this.client.listTools(undefined, options);
     return result.tools;
   }
@@ -139,10 +147,6 @@ export class StdioUpstreamConnection {
   }
 
   async close(): Promise<void> {
-    if (!this.connected) {
-      return;
-    }
-
     await this.transport.close();
     this.connected = false;
   }
@@ -179,4 +183,12 @@ export async function testStdioUpstreamProfile(
   } finally {
     await connection.close();
   }
+}
+
+function resolveProfileCwd(cwd: string, cwdBase: string | undefined): string {
+  if (!cwdBase || isAbsolute(cwd)) {
+    return cwd;
+  }
+
+  return resolve(cwdBase, cwd);
 }

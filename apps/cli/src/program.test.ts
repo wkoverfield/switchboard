@@ -211,7 +211,8 @@ describe("switchboard CLI program", () => {
         profileName: "local_echo",
         namespace: "echo_tools",
         command: "node",
-        args: ["fixture.mjs"]
+        args: ["fixture.mjs"],
+        cwd: root
       }
     ]);
   });
@@ -263,7 +264,8 @@ describe("switchboard CLI program", () => {
           profileName: "local_echo",
           namespace: "echo_tools",
           command: "node",
-          args: ["fixture.mjs"]
+          args: ["fixture.mjs"],
+          cwd: root
         },
         options: { timeoutMs: 1234 }
       }
