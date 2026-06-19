@@ -92,11 +92,18 @@ export function createDaemonBackedSwitchboardMcpServer(
     })
   );
 
-  server.setRequestHandler(CallToolRequestSchema, async (): Promise<CallToolResult> => {
-    throw new Error(
-      "Daemon-backed MCP tool calls are not implemented yet; use switchboard serve for routed calls."
-    );
-  });
+  server.setRequestHandler(
+    CallToolRequestSchema,
+    async (): Promise<CallToolResult> => ({
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: "Daemon-backed MCP tool calls are not implemented yet; use switchboard serve for routed calls."
+        }
+      ]
+    })
+  );
 
   return server;
 }
