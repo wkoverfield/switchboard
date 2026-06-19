@@ -32,7 +32,8 @@ Before changing MCP config manually, run:
 ```bash
 switchboard status
 switchboard doctor
-switchboard link
 ```
+
+`switchboard link` is planned for a later milestone; do not suggest it as available until it exists in the CLI.
 
 Do not put provider tokens in repo config or agent MCP config. Use Switchboard profiles and local secret storage once those milestones exist.

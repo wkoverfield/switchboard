@@ -1,0 +1,6 @@
+version: 1
+
+# Copy to .switchboard.local.yaml for machine-specific overrides.
+# The real .switchboard.local.yaml file is gitignored.
+defaults:
+  activeProfile: switchboard_fixture

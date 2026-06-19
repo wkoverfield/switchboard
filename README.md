@@ -33,6 +33,8 @@ $XDG_CONFIG_HOME/switchboard/config.yaml
 .switchboard.local.yaml
 ```
 
+This repo includes a safe `.switchboard.yaml` fixture so `switchboard status` and `switchboard doctor` exercise repo config discovery. Copy `.switchboard.local.example.yaml` to `.switchboard.local.yaml` for local-only overrides; the real local override file is gitignored.
+
 Precedence, highest to lowest:
 
 1. CLI overrides
