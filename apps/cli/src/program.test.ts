@@ -337,7 +337,8 @@ describe("switchboard CLI program", () => {
               version: 1,
               pid: process.pid,
               startedAt: "2026-06-19T16:00:00.000Z",
-              socketPath
+              socketPath,
+              cwd: root
             }
           }
         };

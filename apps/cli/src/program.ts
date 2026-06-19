@@ -424,6 +424,13 @@ export function createProgram(io: ProgramIo = {}): Command {
           return;
         }
         status = started.status;
+        if (status.daemon.cwd !== desiredCwd) {
+          writeErr(
+            `error: Switchboard daemon is running for ${status.daemon.cwd ?? "an unknown cwd"}; stop it or use --runtime-dir for a separate daemon before serving ${desiredCwd}`
+          );
+          process.exitCode = 1;
+          return;
+        }
       }
 
       await serveDaemonMcp(status.daemon.socketPath);
