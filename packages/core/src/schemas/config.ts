@@ -24,6 +24,36 @@ export const enforcementLevelSchema = z.enum([
   "advisory"
 ]);
 
+export const stdioUpstreamSchema = z
+  .object({
+    type: z.literal("stdio"),
+    command: z.string().min(1, "stdio upstream command is required"),
+    args: z.array(z.string()).optional(),
+    cwd: z.string().min(1).optional(),
+    env: z.record(z.string(), z.string()).optional()
+  })
+  .passthrough();
+
+export const upstreamSchema = z
+  .object({
+    type: z.string().min(1),
+    command: z.string().optional(),
+    args: z.array(z.string()).optional(),
+    cwd: z.string().min(1).optional(),
+    env: z.record(z.string(), z.string()).optional(),
+    url: z.string().url().optional()
+  })
+  .passthrough()
+  .superRefine((upstream, context) => {
+    if (upstream.type === "stdio" && !upstream.command) {
+      context.addIssue({
+        code: "custom",
+        path: ["command"],
+        message: "stdio upstream command is required"
+      });
+    }
+  });
+
 export const profileSchema = z
   .object({
     provider: z.string().min(1, "profile.provider is required"),
@@ -42,15 +72,7 @@ export const profileSchema = z
       })
       .passthrough()
       .optional(),
-    upstream: z
-      .object({
-        type: z.string().min(1),
-        command: z.string().optional(),
-        args: z.array(z.string()).optional(),
-        url: z.string().url().optional()
-      })
-      .passthrough()
-      .optional()
+    upstream: upstreamSchema.optional()
   })
   .passthrough();
 
@@ -104,6 +126,8 @@ export const switchboardConfigSchema = z
 export type SwitchboardConfig = z.infer<typeof switchboardConfigSchema>;
 export type ProfileConfig = z.infer<typeof profileSchema>;
 export type ProfileConfigInput = z.input<typeof profileSchema>;
+export type UpstreamConfig = z.infer<typeof upstreamSchema>;
+export type StdioUpstreamConfig = z.infer<typeof stdioUpstreamSchema>;
 export type WorkspaceConfig = z.infer<typeof workspaceSchema>;
 export type PolicyConfig = z.infer<typeof policySchema>;
 

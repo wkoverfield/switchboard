@@ -89,6 +89,57 @@ describe("loadSwitchboardConfig", () => {
     expect(loaded.diagnostics[0]?.message).toContain("provider");
   });
 
+  it("validates stdio upstream command requirements", () => {
+    const root = makeTempProject();
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  fixture:",
+        "    provider: generic",
+        "    upstream:",
+        "      type: stdio"
+      ].join("\n")
+    );
+
+    const loaded = loadSwitchboardConfig({ cwd: root, env: {}, homeDir: root });
+
+    expect(loaded.diagnostics[0]?.message).toContain("command");
+  });
+
+  it("accepts valid stdio upstream profile shape", () => {
+    const root = makeTempProject();
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  fixture:",
+        "    provider: generic",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "      args:",
+        "        - fixture.mjs",
+        "      cwd: .",
+        "      env:",
+        "        FIXTURE: ok"
+      ].join("\n")
+    );
+
+    const loaded = loadSwitchboardConfig({ cwd: root, env: {}, homeDir: root });
+
+    expect(loaded.diagnostics).toEqual([]);
+    expect(loaded.config.profiles.fixture?.upstream).toMatchObject({
+      type: "stdio",
+      command: "node",
+      args: ["fixture.mjs"],
+      cwd: ".",
+      env: { FIXTURE: "ok" }
+    });
+  });
+
   it("detects namespace collisions after normalization", () => {
     const root = makeTempProject();
     writeFileSync(

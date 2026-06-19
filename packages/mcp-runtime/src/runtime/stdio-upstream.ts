@@ -3,6 +3,11 @@ import {
   StdioClientTransport,
   type StdioServerParameters
 } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Readable } from "node:stream";
+import {
+  namespaceForProfile,
+  type ProfileConfig
+} from "@switchboard-mcp/core";
 
 export interface StdioUpstreamProfile {
   profileName: string;
@@ -11,6 +16,44 @@ export interface StdioUpstreamProfile {
   args?: string[];
   cwd?: string;
   env?: Record<string, string>;
+}
+
+export function profileConfigToStdioUpstream(
+  profileName: string,
+  profile: ProfileConfig
+): StdioUpstreamProfile | undefined {
+  if (!isStdioUpstreamConfig(profile.upstream)) {
+    return undefined;
+  }
+
+  const namespace = namespaceForProfile(profileName, profile).namespace;
+  const upstream: StdioUpstreamProfile = {
+    profileName,
+    namespace,
+    command: profile.upstream.command
+  };
+
+  if (profile.upstream.args) {
+    upstream.args = profile.upstream.args;
+  }
+  if (profile.upstream.cwd) {
+    upstream.cwd = profile.upstream.cwd;
+  }
+  if (profile.upstream.env) {
+    upstream.env = profile.upstream.env;
+  }
+
+  return upstream;
+}
+
+function isStdioUpstreamConfig(
+  upstream: ProfileConfig["upstream"]
+): upstream is NonNullable<ProfileConfig["upstream"]> & { type: "stdio"; command: string } {
+  return (
+    upstream?.type === "stdio" &&
+    typeof upstream.command === "string" &&
+    upstream.command.length > 0
+  );
 }
 
 export type UpstreamTool = Awaited<
@@ -44,6 +87,10 @@ export class StdioUpstreamConnection {
       version: "0.1.0"
     });
     this.transport = new StdioClientTransport(serverParameters);
+    const stderr = this.transport.stderr;
+    if (stderr instanceof Readable) {
+      stderr.resume();
+    }
   }
 
   async connect(): Promise<void> {

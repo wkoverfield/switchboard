@@ -59,6 +59,9 @@ describe("GenericMcpRouter", () => {
       await expect(router.discoverTools()).rejects.toThrow(
         "Duplicate namespaced tool: shared_echo"
       );
+      await expect(router.callTool("shared_echo", { message: "still?" })).rejects.toThrow(
+        'Unknown namespaced tool "shared_echo". Run discoverTools() first.'
+      );
     } finally {
       await router.close();
     }

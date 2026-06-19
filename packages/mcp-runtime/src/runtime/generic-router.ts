@@ -12,7 +12,7 @@ import {
 
 export class GenericMcpRouter {
   private readonly connections = new Map<string, StdioUpstreamConnection>();
-  private readonly routes = new Map<string, ToolRoute>();
+  private routes = new Map<string, ToolRoute>();
 
   constructor(private readonly profiles: StdioUpstreamProfile[]) {
     for (const profile of profiles) {
@@ -29,7 +29,7 @@ export class GenericMcpRouter {
 
   async discoverTools(): Promise<NamespacedTool[]> {
     const tools: NamespacedTool[] = [];
-    this.routes.clear();
+    const routes = new Map<string, ToolRoute>();
 
     for (const profile of this.profiles) {
       const connection = this.connectionForProfile(profile.profileName);
@@ -37,11 +37,11 @@ export class GenericMcpRouter {
 
       for (const tool of upstreamTools) {
         const namespacedName = namespacedToolName(profile.namespace, tool.name);
-        if (this.routes.has(namespacedName)) {
+        if (routes.has(namespacedName)) {
           throw new Error(`Duplicate namespaced tool: ${namespacedName}`);
         }
 
-        this.routes.set(namespacedName, {
+        routes.set(namespacedName, {
           namespacedName,
           profileName: profile.profileName,
           upstreamName: tool.name
@@ -50,6 +50,7 @@ export class GenericMcpRouter {
       }
     }
 
+    this.routes = routes;
     return tools;
   }
 
