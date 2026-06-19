@@ -1,8 +1,8 @@
 # Claude Code Install
 
-Switchboard can run as a stdio MCP server behind Claude Code. Full
-write-to-config installer support is planned for a later milestone; today the
-CLI prints a dry-run snippet you can inspect before adding it to Claude Code.
+Switchboard can run as a stdio MCP server behind Claude Code. The CLI defaults
+to a dry-run snippet and can write project-scoped Claude Code config when you
+pass `--write`.
 
 ## Dry Run
 
@@ -28,6 +28,21 @@ The generated snippet uses Claude Code's `mcpServers` JSON shape:
 
 Use project scope when the Switchboard repo config should travel with the
 project, or local/user scope when it should stay machine-specific.
+
+## Write Project Config
+
+Write `.mcp.json` for the current repo:
+
+```bash
+switchboard install claude --write
+```
+
+If `.mcp.json` already exists, Switchboard creates a timestamped backup next to
+it before writing. Restore one with:
+
+```bash
+switchboard install claude --rollback .mcp.json.switchboard-backup-<timestamp>
+```
 
 Claude Code can also register the stdio server with its CLI:
 

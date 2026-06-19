@@ -1,7 +1,14 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   renderSwitchboardClientConfig,
-  validateSwitchboardClientConfigOptions
+  resolveProjectClientConfigPath,
+  rollbackSwitchboardClientConfig,
+  validateSwitchboardClientConfigOptions,
+  writeSwitchboardClientConfig
 } from "./client-config.js";
 
 describe("renderSwitchboardClientConfig", () => {
@@ -90,3 +97,175 @@ describe("renderSwitchboardClientConfig", () => {
     );
   });
 });
+
+describe("writeSwitchboardClientConfig", () => {
+  it("writes a new project-scoped Codex config without a backup", async () => {
+    const root = await makeTempProject();
+
+    const result = await writeSwitchboardClientConfig({
+      client: "codex",
+      cwd: root
+    });
+
+    const targetPath = join(root, ".codex", "config.toml");
+    expect(result).toEqual({
+      client: "codex",
+      serverName: "switchboard",
+      targetPath,
+      backupPath: null,
+      action: "created"
+    });
+    expect(readFileSync(targetPath, "utf8")).toContain(
+      'args = ["--cwd", "' + root + '", "mcp"]'
+    );
+  });
+
+  it("updates an existing Codex section and preserves other sections", async () => {
+    const root = await makeTempProject();
+    const targetPath = resolveProjectClientConfigPath("codex", root);
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      targetPath,
+      [
+        '[mcp_servers."other"]',
+        'command = "other"',
+        "",
+        '[mcp_servers."switchboard"]',
+        'command = "old"',
+        'args = ["serve"]',
+        "",
+        "[profiles.default]",
+        'model = "gpt-5"'
+      ].join("\n")
+    );
+
+    const result = await writeSwitchboardClientConfig({
+      client: "codex",
+      cwd: root,
+      now: new Date("2026-06-19T16:00:00.000Z")
+    });
+
+    expect(result.action).toBe("updated");
+    expect(result.backupPath).toBe(
+      `${targetPath}.switchboard-backup-20260619-160000000Z`
+    );
+    const content = readFileSync(targetPath, "utf8");
+    expect(content).toContain('[mcp_servers."other"]');
+    expect(content).toContain('[mcp_servers."switchboard"]');
+    expect(content).toContain(`args = ["--cwd", "${root}", "mcp"]`);
+    expect(content).not.toContain('args = ["serve"]');
+    expect(content).toContain("[profiles.default]");
+    expect(readFileSync(result.backupPath ?? "", "utf8")).toContain(
+      'command = "old"'
+    );
+
+    const secondResult = await writeSwitchboardClientConfig({
+      client: "codex",
+      cwd: root,
+      now: new Date("2026-06-19T16:00:00.000Z")
+    });
+
+    expect(secondResult.backupPath).toBe(
+      `${targetPath}.switchboard-backup-20260619-160000000Z-1`
+    );
+  });
+
+  it("updates an existing Codex section with an unquoted server name", async () => {
+    const root = await makeTempProject();
+    const targetPath = resolveProjectClientConfigPath("codex", root);
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      targetPath,
+      [
+        "[mcp_servers.switchboard]",
+        'command = "old"',
+        'args = ["serve"]'
+      ].join("\n")
+    );
+
+    await writeSwitchboardClientConfig({
+      client: "codex",
+      cwd: root
+    });
+
+    const content = readFileSync(targetPath, "utf8");
+    expect(content).not.toContain("[mcp_servers.switchboard]");
+    expect(content).toContain('[mcp_servers."switchboard"]');
+    expect(content).toContain(`args = ["--cwd", "${root}", "mcp"]`);
+  });
+
+  it("merges Claude project config and backs up the previous file", async () => {
+    const root = await makeTempProject();
+    const targetPath = resolveProjectClientConfigPath("claude", root);
+    writeFileSync(
+      targetPath,
+      JSON.stringify(
+        {
+          otherSetting: true,
+          mcpServers: {
+            existing: {
+              command: "existing"
+            }
+          }
+        },
+        null,
+        2
+      )
+    );
+
+    const result = await writeSwitchboardClientConfig({
+      client: "claude",
+      cwd: root,
+      now: new Date("2026-06-19T16:01:00.000Z")
+    });
+
+    expect(result.backupPath).toBe(
+      `${targetPath}.switchboard-backup-20260619-160100000Z`
+    );
+    expect(JSON.parse(readFileSync(targetPath, "utf8"))).toEqual({
+      otherSetting: true,
+      mcpServers: {
+        existing: {
+          command: "existing"
+        },
+        switchboard: {
+          command: "switchboard",
+          args: ["--cwd", root, "mcp"],
+          env: {}
+        }
+      }
+    });
+  });
+});
+
+describe("rollbackSwitchboardClientConfig", () => {
+  it("restores a project client config from a backup", async () => {
+    const root = await makeTempProject();
+    const targetPath = resolveProjectClientConfigPath("claude", root);
+    const backupPath = join(root, "claude.backup.json");
+    writeFileSync(targetPath, '{"current":true}\n');
+    writeFileSync(backupPath, '{"restored":true}\n');
+
+    const result = await rollbackSwitchboardClientConfig({
+      client: "claude",
+      cwd: root,
+      backupPath,
+      now: new Date("2026-06-19T16:02:00.000Z")
+    });
+
+    expect(result).toEqual({
+      client: "claude",
+      targetPath,
+      restoredFrom: backupPath,
+      backupPath: `${targetPath}.switchboard-backup-20260619-160200000Z`
+    });
+    expect(readFileSync(targetPath, "utf8")).toBe('{"restored":true}\n');
+    expect(readFileSync(result.backupPath ?? "", "utf8")).toBe(
+      '{"current":true}\n'
+    );
+  });
+});
+
+async function makeTempProject(): Promise<string> {
+  return mkdtemp(join(tmpdir(), "switchboard-install-"));
+}

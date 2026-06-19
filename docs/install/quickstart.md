@@ -1,7 +1,7 @@
 # Quickstart
 
-Use this path for the local daemon-backed setup. Provider presets and
-write-mode installers are still future milestones.
+Use this path for the local daemon-backed setup. Provider presets are still a
+future milestone.
 
 ## 1. Create Starter Config
 
@@ -53,8 +53,21 @@ switchboard install codex
 switchboard install claude
 ```
 
-Switchboard does not write Codex or Claude config files yet. Copy the dry-run
-snippet into the client config you choose.
+Copy the dry-run snippet into the client config you choose, or write
+project-scoped config:
+
+```bash
+switchboard install codex --write
+switchboard install claude --write
+```
+
+Every update to an existing client config creates a timestamped backup. Restore
+one with:
+
+```bash
+switchboard install codex --rollback <backup>
+switchboard install claude --rollback <backup>
+```
 
 The generated snippets run `switchboard --cwd <repo> mcp`, which auto-starts
 the local daemon and routes MCP traffic through it. Use `switchboard serve`

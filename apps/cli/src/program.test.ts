@@ -909,6 +909,215 @@ describe("switchboard CLI program", () => {
     });
   });
 
+  it("writes project-scoped Codex install config as JSON", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(
+      ["--cwd", root, "install", "codex", "--write", "--json"],
+      {
+        from: "user"
+      }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      client: string;
+      targetPath: string;
+      backupPath: string | null;
+      action: string;
+    };
+    const targetPath = join(root, ".codex", "config.toml");
+    expect(parsed).toMatchObject({
+      client: "codex",
+      targetPath,
+      backupPath: null,
+      action: "created"
+    });
+    expect(readFileSync(targetPath, "utf8")).toContain(
+      `args = ["--cwd", "${root}", "mcp"]`
+    );
+  });
+
+  it("writes project-scoped Claude config and backs up updates", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+    writeFileSync(
+      join(root, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          switchboard: {
+            command: "old",
+            args: ["serve"]
+          }
+        }
+      })
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(
+      ["--cwd", root, "install", "claude", "--write", "--json"],
+      {
+        from: "user"
+      }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      action: string;
+      backupPath: string | null;
+    };
+    expect(parsed.action).toBe("updated");
+    expect(parsed.backupPath).toContain(".mcp.json.switchboard-backup-");
+    expect(JSON.parse(readFileSync(join(root, ".mcp.json"), "utf8"))).toEqual({
+      mcpServers: {
+        switchboard: {
+          command: "switchboard",
+          args: ["--cwd", root, "mcp"],
+          env: {}
+        }
+      }
+    });
+    expect(readFileSync(parsed.backupPath ?? "", "utf8")).toContain("old");
+  });
+
+  it("rolls back project-scoped install config from a backup", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+    const targetPath = join(root, ".mcp.json");
+    const backupPath = join(root, "claude.backup.json");
+    writeFileSync(targetPath, '{"current":true}\n');
+    writeFileSync(backupPath, '{"restored":true}\n');
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "install",
+        "claude",
+        "--rollback",
+        "claude.backup.json",
+        "--json"
+      ],
+      {
+        from: "user"
+      }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      targetPath: string;
+      restoredFrom: string;
+      backupPath: string | null;
+    };
+    expect(parsed.targetPath).toBe(targetPath);
+    expect(parsed.restoredFrom).toBe(backupPath);
+    expect(parsed.backupPath).toContain(".mcp.json.switchboard-backup-");
+    expect(readFileSync(targetPath, "utf8")).toBe('{"restored":true}\n');
+  });
+
+  it("rolls back project-scoped install config when Switchboard config is invalid", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(join(root, ".switchboard.yaml"), "version: nope\n");
+    const targetPath = join(root, ".mcp.json");
+    const backupPath = join(root, "claude.backup.json");
+    writeFileSync(targetPath, '{"current":true}\n');
+    writeFileSync(backupPath, '{"restored":true}\n');
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "install",
+        "claude",
+        "--rollback",
+        "claude.backup.json",
+        "--json"
+      ],
+      {
+        from: "user"
+      }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      targetPath: string;
+      restoredFrom: string;
+    };
+    expect(parsed.targetPath).toBe(targetPath);
+    expect(parsed.restoredFrom).toBe(backupPath);
+    expect(readFileSync(targetPath, "utf8")).toBe('{"restored":true}\n');
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("rolls back project-scoped install config at the repo root from nested cwd", async () => {
+    const root = makeTempProject();
+    const nested = join(root, "nested");
+    mkdirSync(nested);
+    writeStdioConfig(root);
+    const targetPath = join(root, ".mcp.json");
+    const backupPath = join(root, "claude.backup.json");
+    writeFileSync(targetPath, '{"current":true}\n');
+    writeFileSync(backupPath, '{"restored":true}\n');
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(
+      [
+        "--cwd",
+        nested,
+        "install",
+        "claude",
+        "--rollback",
+        "claude.backup.json",
+        "--json"
+      ],
+      {
+        from: "user"
+      }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      targetPath: string;
+      restoredFrom: string;
+    };
+    expect(parsed.targetPath).toBe(targetPath);
+    expect(parsed.restoredFrom).toBe(backupPath);
+    expect(readFileSync(targetPath, "utf8")).toBe('{"restored":true}\n');
+    expect(existsSync(join(nested, ".mcp.json"))).toBe(false);
+  });
+
+  it("fails install when write and rollback are both requested", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    const errors: string[] = [];
+    const program = createProgram({ writeErr: (message) => errors.push(message) });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "install",
+        "claude",
+        "--write",
+        "--rollback",
+        join(root, "backup.json")
+      ],
+      {
+        from: "user"
+      }
+    );
+
+    expect(errors).toEqual([
+      "error: use either --write or --rollback, not both"
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
   it("fails install for unsupported clients", async () => {
     const root = makeTempProject();
     writeStdioConfig(root);

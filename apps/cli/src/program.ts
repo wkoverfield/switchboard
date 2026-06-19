@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import {
   type AuditLogger,
   checkLocalConfigIgnored,
@@ -12,6 +12,7 @@ import {
   readAuditLogEntries,
   renderSwitchboardClientConfig,
   resolveAuditLogPath,
+  rollbackSwitchboardClientConfig,
   safeAuditLog,
   type PathResolutionOptions,
   resolveGlobalConfigPath,
@@ -19,7 +20,10 @@ import {
   starterUpstreamArgPlaceholder,
   type SupportedClient,
   validateInitConfigOptions,
-  validateSwitchboardClientConfigOptions
+  validateSwitchboardClientConfigOptions,
+  writeSwitchboardClientConfig,
+  type RolledBackClientConfig,
+  type WrittenClientConfig
 } from "@switchboard-mcp/core";
 import {
   GenericMcpRouter,
@@ -578,15 +582,23 @@ export function createProgram(io: ProgramIo = {}): Command {
   program
     .command("install <client>")
     .description(
-      "Print a dry-run MCP client config snippet for routing through Switchboard."
+      "Print or write an MCP client config snippet for routing through Switchboard."
     )
     .option("--json", "print machine-readable JSON")
+    .option("--write", "write project-scoped client config")
+    .option("--rollback <backup>", "restore project-scoped client config backup")
     .option("--server-name <name>", "MCP server name to register", "switchboard")
     .option("--command <command>", "Switchboard executable command", "switchboard")
     .action(
-      (
+      async (
         client: string,
-        options: { json?: boolean; serverName: string; command: string }
+        options: {
+          json?: boolean;
+          write?: boolean;
+          rollback?: string;
+          serverName: string;
+          command: string;
+        }
       ) => {
         const globalOptions = program.opts<{ cwd?: string }>();
         const supportedClient = parseSupportedClient(client);
@@ -596,22 +608,47 @@ export function createProgram(io: ProgramIo = {}): Command {
           return;
         }
 
+        const rollbackCwd = installTargetCwd(globalOptions.cwd);
+        if (options.write && options.rollback) {
+          writeErr("error: use either --write or --rollback, not both");
+          process.exitCode = 1;
+          return;
+        }
+
+        if (options.rollback) {
+          try {
+            const result = await rollbackSwitchboardClientConfig({
+              client: supportedClient,
+              cwd: rollbackCwd,
+              backupPath: isAbsolute(options.rollback)
+                ? options.rollback
+                : resolve(rollbackCwd, options.rollback)
+            });
+            writeOut(
+              options.json
+                ? JSON.stringify(result, null, 2)
+                : formatInstallRollback(result)
+            );
+          } catch (error) {
+            writeErr(`error: ${messageFromError(error)}`);
+            process.exitCode = 1;
+          }
+          return;
+        }
+
         const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
         if (!validateLoadedConfigForCommand(loaded, writeErr)) {
           return;
         }
 
-        const profiles = stdioProfilesFromConfig(
-          loaded.config.profiles,
-          configCwdBase(loaded, globalOptions.cwd)
-        );
+        const cwd = configCwdBase(loaded, globalOptions.cwd);
+        const profiles = stdioProfilesFromConfig(loaded.config.profiles, cwd);
         if (profiles.length === 0) {
           writeErr("error: no stdio upstream profiles are configured");
           process.exitCode = 1;
           return;
         }
 
-        const cwd = configCwdBase(loaded, globalOptions.cwd);
         const clientConfigOptions = {
           client: supportedClient,
           serverName: options.serverName,
@@ -629,6 +666,22 @@ export function createProgram(io: ProgramIo = {}): Command {
         }
 
         const rendered = renderSwitchboardClientConfig(clientConfigOptions);
+
+        if (options.write) {
+          try {
+            const result =
+              await writeSwitchboardClientConfig(clientConfigOptions);
+            writeOut(
+              options.json
+                ? JSON.stringify(result, null, 2)
+                : formatInstallWrite(result)
+            );
+          } catch (error) {
+            writeErr(`error: ${messageFromError(error)}`);
+            process.exitCode = 1;
+          }
+          return;
+        }
 
         if (options.json) {
           writeOut(JSON.stringify(rendered, null, 2));
@@ -828,9 +881,39 @@ function formatInstallSnippet(rendered: {
   ].join("\n");
 }
 
+function formatInstallWrite(result: WrittenClientConfig): string {
+  return [
+    `Installed Switchboard ${result.client} config`,
+    `Server name: ${result.serverName}`,
+    `Target: ${result.targetPath}`,
+    `Action: ${result.action}`,
+    `Backup: ${result.backupPath ?? "none"}`
+  ].join("\n");
+}
+
+function formatInstallRollback(result: RolledBackClientConfig): string {
+  return [
+    `Rolled back Switchboard ${result.client} config`,
+    `Target: ${result.targetPath}`,
+    `Restored from: ${result.restoredFrom}`,
+    `Current backup: ${result.backupPath ?? "none"}`
+  ].join("\n");
+}
+
 function optionsFromCwd(cwd: string | undefined): LoadConfigOptions &
   PathResolutionOptions {
   return cwd ? { cwd } : {};
+}
+
+function messageFromError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function installTargetCwd(cwd: string | undefined): string {
+  const resolvedCwd = cwd ? resolve(cwd) : process.cwd();
+  const repoPaths = resolveRepoConfigPaths(cwd ? { cwd } : {});
+
+  return repoPaths.repoConfigPath ? dirname(repoPaths.repoConfigPath) : resolvedCwd;
 }
 
 function optionsFromRuntimeDir(

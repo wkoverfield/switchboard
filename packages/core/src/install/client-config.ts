@@ -1,3 +1,12 @@
+import { constants } from "node:fs";
+import {
+  copyFile,
+  mkdir,
+  readFile,
+  writeFile
+} from "node:fs/promises";
+import { dirname, join } from "node:path";
+
 export type SupportedClient = "codex" | "claude";
 
 export interface SwitchboardClientConfigOptions {
@@ -12,6 +21,21 @@ export interface RenderedClientConfig {
   serverName: string;
   target: string;
   content: string;
+}
+
+export interface WrittenClientConfig {
+  client: SupportedClient;
+  serverName: string;
+  targetPath: string;
+  backupPath: string | null;
+  action: "created" | "updated";
+}
+
+export interface RolledBackClientConfig {
+  client: SupportedClient;
+  targetPath: string;
+  restoredFrom: string;
+  backupPath: string | null;
 }
 
 export interface ClientConfigValidationResult {
@@ -67,6 +91,70 @@ export function renderSwitchboardClientConfig(
   };
 }
 
+export async function writeSwitchboardClientConfig(
+  options: SwitchboardClientConfigOptions & { now?: Date }
+): Promise<WrittenClientConfig> {
+  const rendered = renderSwitchboardClientConfig(options);
+  const targetPath = resolveProjectClientConfigPath(options.client, options.cwd);
+  const existing = await readOptionalTextFile(targetPath);
+  const nextContent = mergeClientConfigContent({
+    client: options.client,
+    existing,
+    renderedContent: rendered.content,
+    serverName: rendered.serverName
+  });
+
+  await mkdir(dirname(targetPath), { recursive: true });
+  const backupPath = existing
+    ? await backupExistingFile(targetPath, options.now)
+    : null;
+
+  await writeFile(targetPath, nextContent, "utf8");
+
+  return {
+    client: options.client,
+    serverName: rendered.serverName,
+    targetPath,
+    backupPath,
+    action: existing ? "updated" : "created"
+  };
+}
+
+export async function rollbackSwitchboardClientConfig(options: {
+  client: SupportedClient;
+  cwd: string;
+  backupPath: string;
+  now?: Date;
+}): Promise<RolledBackClientConfig> {
+  const targetPath = resolveProjectClientConfigPath(options.client, options.cwd);
+  const backupContent = await readFile(options.backupPath, "utf8");
+  const existing = await readOptionalTextFile(targetPath);
+
+  await mkdir(dirname(targetPath), { recursive: true });
+  const currentBackupPath = existing
+    ? await backupExistingFile(targetPath, options.now)
+    : null;
+  await writeFile(targetPath, backupContent, "utf8");
+
+  return {
+    client: options.client,
+    targetPath,
+    restoredFrom: options.backupPath,
+    backupPath: currentBackupPath
+  };
+}
+
+export function resolveProjectClientConfigPath(
+  client: SupportedClient,
+  cwd: string
+): string {
+  if (client === "codex") {
+    return join(cwd, ".codex", "config.toml");
+  }
+
+  return join(cwd, ".mcp.json");
+}
+
 export function validateSwitchboardClientConfigOptions(
   options: SwitchboardClientConfigOptions
 ): ClientConfigValidationResult {
@@ -98,6 +186,147 @@ function containsControlCharacter(value: string): boolean {
     const codePoint = character.codePointAt(0);
     return codePoint !== undefined && (codePoint < 32 || codePoint === 127);
   });
+}
+
+async function readOptionalTextFile(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+async function backupExistingFile(path: string, now?: Date): Promise<string> {
+  const baseBackupPath = `${path}.switchboard-backup-${backupTimestamp(now)}`;
+
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const backupPath =
+      attempt === 0 ? baseBackupPath : `${baseBackupPath}-${attempt}`;
+    try {
+      await copyFile(path, backupPath, constants.COPYFILE_EXCL);
+      return backupPath;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "EEXIST"
+      ) {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new Error(`could not create a unique backup path for ${path}`);
+}
+
+function backupTimestamp(now: Date = new Date()): string {
+  return now.toISOString().replaceAll(/[-:.]/g, "").replace("T", "-");
+}
+
+function mergeClientConfigContent(options: {
+  client: SupportedClient;
+  existing: string | null;
+  renderedContent: string;
+  serverName: string;
+}): string {
+  if (options.client === "claude") {
+    return mergeClaudeConfigContent(options.existing, options.renderedContent);
+  }
+
+  return mergeCodexConfigContent(
+    options.existing,
+    options.renderedContent,
+    options.serverName
+  );
+}
+
+function mergeClaudeConfigContent(
+  existing: string | null,
+  renderedContent: string
+): string {
+  const rendered = JSON.parse(renderedContent) as {
+    mcpServers: Record<string, unknown>;
+  };
+  const parsed = existing?.trim()
+    ? (JSON.parse(existing) as Record<string, unknown>)
+    : {};
+  const existingServers =
+    isRecord(parsed.mcpServers) && !Array.isArray(parsed.mcpServers)
+      ? parsed.mcpServers
+      : {};
+
+  return `${JSON.stringify(
+    {
+      ...parsed,
+      mcpServers: {
+        ...existingServers,
+        ...rendered.mcpServers
+      }
+    },
+    null,
+    2
+  )}\n`;
+}
+
+function mergeCodexConfigContent(
+  existing: string | null,
+  renderedContent: string,
+  serverName: string
+): string {
+  if (!existing?.trim()) {
+    return `${renderedContent}\n`;
+  }
+
+  const lines = existing.split(/\r?\n/);
+  const start = lines.findIndex(
+    (line) => codexMcpServerNameFromHeader(line) === serverName
+  );
+  const renderedLines = renderedContent.split("\n");
+
+  if (start === -1) {
+    const separator = existing.endsWith("\n") ? "\n" : "\n\n";
+    return `${existing}${separator}${renderedContent}\n`;
+  }
+
+  let end = start + 1;
+  while (end < lines.length && !lines[end]?.trim().startsWith("[")) {
+    end += 1;
+  }
+
+  lines.splice(start, end - start, ...renderedLines);
+  return `${lines.join("\n").replace(/\n*$/, "")}\n`;
+}
+
+function codexMcpServerNameFromHeader(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("[mcp_servers.") || !trimmed.endsWith("]")) {
+    return null;
+  }
+
+  const rawKey = trimmed.slice("[mcp_servers.".length, -1).trim();
+  if (rawKey.startsWith('"') && rawKey.endsWith('"')) {
+    try {
+      return JSON.parse(rawKey) as string;
+    } catch {
+      return null;
+    }
+  }
+
+  return rawKey;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function renderCodexConfig(options: {
