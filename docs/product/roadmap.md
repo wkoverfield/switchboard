@@ -149,7 +149,8 @@ Foundation slice:
 - `switchboard daemon status`
 - `switchboard daemon start`
 - `switchboard daemon stop`
-- local socket heartbeat
+- `switchboard daemon ping`
+- local JSON socket heartbeat
 - stale daemon cleanup
 - lifecycle smoke test
 
@@ -354,7 +355,7 @@ Acceptance:
 - quickstart docs
 - smoke coverage for starter config generation
 
-### Current Slice: Daemon Lifecycle Spike
+### Completed Slice: Daemon Lifecycle Spike
 
 Goal: prove lifecycle before approvals/secrets.
 
@@ -364,6 +365,19 @@ Acceptance:
 - local socket
 - stale daemon recovery test
 - no provider integrations
+
+### Current Slice: Daemon Client Protocol Foundation
+
+Goal: give future adapters a structured daemon socket protocol before forwarding
+MCP traffic through it.
+
+Acceptance:
+
+- reusable daemon client helper
+- JSON socket ping request/response
+- `switchboard daemon ping`
+- lifecycle smoke covers the protocol
+- no MCP forwarding yet
 
 ### Then: Adapter To Daemon
 

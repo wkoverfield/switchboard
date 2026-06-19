@@ -9,6 +9,7 @@ local process, PID/state, and socket management; MCP clients still use
 ```bash
 switchboard daemon status
 switchboard daemon start
+switchboard daemon ping
 switchboard daemon stop
 ```
 
@@ -17,6 +18,7 @@ For automation:
 ```bash
 switchboard daemon status --json
 switchboard daemon start --json
+switchboard daemon ping --json
 switchboard daemon stop --json
 ```
 
@@ -42,7 +44,7 @@ permissions. `switchboard daemon stop` removes stale or invalid state.
 
 ## Current Limits
 
-- The daemon exposes only a minimal local socket heartbeat.
+- The daemon exposes only a minimal local JSON socket heartbeat.
 - `switchboard serve` does not talk to the daemon yet.
 - The daemon does not own upstream MCP sessions, policy, approvals, or secrets
   yet.

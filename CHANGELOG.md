@@ -16,3 +16,4 @@
 - Added `switchboard init` for starter repo config previews and safe writes.
 - Added doctor next-step guidance for first-run onboarding.
 - Added `switchboard daemon status/start/stop` lifecycle foundation.
+- Added daemon socket ping protocol and `switchboard daemon ping`.

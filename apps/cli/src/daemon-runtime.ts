@@ -1,11 +1,6 @@
 import { spawn } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
-import {
-  createConnection,
-  createServer,
-  type Server,
-  type Socket
-} from "node:net";
+import { createServer, type Server, type Socket } from "node:net";
 import {
   createDaemonState,
   getDaemonStatus,
@@ -15,6 +10,7 @@ import {
   type DaemonPaths,
   type DaemonStatus
 } from "@switchboard-mcp/core";
+import { pingDaemon } from "@switchboard-mcp/mcp-runtime";
 
 export interface DaemonCommandOptions {
   runtimeDir?: string;
@@ -32,6 +28,8 @@ export interface StopDaemonResult {
   status: DaemonStatus;
   message: string;
 }
+
+const daemonProtocolVersion = "0.1.0";
 
 export async function daemonStatus(
   options: DaemonCommandOptions = {}
@@ -190,43 +188,64 @@ async function verifiedDaemonStatus(paths: DaemonPaths): Promise<DaemonStatus> {
 }
 
 async function daemonHeartbeat(socketPath: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = createConnection(socketPath);
-    let response = "";
-    const timeout = setTimeout(() => {
-      socket.destroy();
-      resolve(false);
-    }, 500);
-
-    socket.setEncoding("utf8");
-    socket.on("error", () => {
-      clearTimeout(timeout);
-      resolve(false);
-    });
-    socket.on("data", (chunk) => {
-      response += chunk;
-      if (response.includes("\n")) {
-        socket.end();
-      }
-    });
-    socket.on("end", () => {
-      clearTimeout(timeout);
-      resolve(response.trim() === "pong");
-    });
-    socket.on("connect", () => {
-      socket.write("ping\n");
-    });
-  });
+  return pingDaemon(socketPath, { timeoutMs: 500 })
+    .then(() => true)
+    .catch(() => false);
 }
 
 function handleDaemonSocket(socket: Socket): void {
   socket.setEncoding("utf8");
   socket.on("data", (chunk) => {
-    if (chunk.toString().trim() === "ping") {
-      socket.write("pong\n");
+    const request = chunk.toString().trim();
+    if (request === "ping") {
+      socket.write(
+        `${JSON.stringify({
+          id: "legacy",
+          ok: true,
+          type: "pong",
+          version: daemonProtocolVersion
+        })}\n`
+      );
       socket.end();
+      return;
     }
+
+    socket.write(`${JSON.stringify(handleDaemonRequest(request))}\n`);
+    socket.end();
   });
+}
+
+function handleDaemonRequest(raw: string): {
+  id: string;
+  ok: boolean;
+  type?: "pong";
+  version?: string;
+  error?: string;
+} {
+  try {
+    const request = JSON.parse(raw) as { id?: unknown; type?: unknown };
+    const id = typeof request.id === "string" ? request.id : "unknown";
+    if (request.type === "ping") {
+      return {
+        id,
+        ok: true,
+        type: "pong",
+        version: daemonProtocolVersion
+      };
+    }
+
+    return {
+      id,
+      ok: false,
+      error: `Unsupported daemon request: ${String(request.type)}`
+    };
+  } catch {
+    return {
+      id: "unknown",
+      ok: false,
+      error: "Invalid daemon request."
+    };
+  }
 }
 
 async function listen(server: Server, socketPath: string): Promise<void> {
