@@ -27,6 +27,7 @@ import {
   GenericMcpRouter,
   pingDaemon,
   profileConfigToStdioUpstream,
+  type DaemonApprovalRequired,
   type NamespacedTool,
   type StdioUpstreamProfile
 } from "@switchboard-mcp/mcp-runtime";
@@ -316,6 +317,7 @@ export async function handleDaemonRequest(
   tools?: NamespacedTool[];
   result?: unknown;
   error?: string;
+  approvalRequired?: DaemonApprovalRequired;
 }> {
   try {
     const request = JSON.parse(raw) as {
@@ -469,6 +471,7 @@ async function callConfiguredTool(
   version?: string;
   result?: unknown;
   error?: string;
+  approvalRequired?: DaemonApprovalRequired;
 }> {
   const routerResult = await routerForConfiguredProfiles(context, mandateId);
   if (!routerResult.ok) {
@@ -633,6 +636,16 @@ async function callConfiguredTool(
         return {
           id,
           ok: false,
+          ...("approvalRequired" in policyDecision && approvalRequestId
+            ? {
+                approvalRequired: approvalRequiredPayload({
+                  mandate: routerResult.mandate,
+                  toolName: name,
+                  approvalRequestId,
+                  approvalGate: policyDecision.approvalGate
+                })
+              }
+            : {}),
           error: approvalRequestId
             ? `${policyDecision.reason}; approval request ${approvalRequestId} is pending. Run "switchboard approvals" and "switchboard approve ${approvalRequestId}", then retry this tool call.`
             : policyDecision.reason
@@ -657,6 +670,35 @@ async function callConfiguredTool(
   } finally {
     await router.close().catch(() => undefined);
   }
+}
+
+function approvalRequiredPayload(options: {
+  mandate: MandateWithStatus;
+  toolName: string;
+  approvalRequestId: string;
+  approvalGate: MandateWithStatus["approvalGates"][number];
+}): DaemonApprovalRequired {
+  return {
+    approvalRequestId: options.approvalRequestId,
+    mandateId: options.mandate.id,
+    repoPath: options.mandate.repoPath,
+    branch: options.mandate.branch,
+    task: options.mandate.task,
+    agentRole: options.mandate.agentRole,
+    toolName: options.toolName,
+    approvalGateId: options.approvalGate.id,
+    approvalGatePattern: options.approvalGate.toolPattern,
+    ...(options.approvalGate.reason
+      ? { approvalGateReason: options.approvalGate.reason }
+      : {}),
+    ...(options.approvalGate.risk
+      ? { approvalGateRisk: options.approvalGate.risk }
+      : {}),
+    ...(options.approvalGate.labels && options.approvalGate.labels.length > 0
+      ? { approvalGateLabels: options.approvalGate.labels }
+      : {}),
+    expiresAt: options.mandate.expiresAt
+  };
 }
 
 async function waitForApprovalDecision(options: {

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  DaemonRequestError,
   callDaemonTool,
   daemonToolCallTimeoutMs,
   listDaemonTools,
@@ -97,6 +98,52 @@ describe("daemon client response validation", () => {
             text: "ok"
           }
         ]
+      }
+    });
+  });
+
+  it("preserves structured approval-required error metadata", () => {
+    expect(
+      parseDaemonResponse(
+        JSON.stringify({
+          id: "call",
+          ok: false,
+          error: "approval required",
+          approvalRequired: {
+            approvalRequestId: "approval-1",
+            mandateId: "fix-ci",
+            repoPath: "/repo",
+            branch: "fix/ci",
+            task: "fix-ci",
+            agentRole: "implementer",
+            toolName: "github_findu_echo",
+            approvalGateId: "gate-1",
+            approvalGatePattern: "github_findu_echo",
+            approvalGateReason: "remote state",
+            approvalGateRisk: "high",
+            approvalGateLabels: ["remote-state", "ci"],
+            expiresAt: "2026-06-20T22:00:00.000Z"
+          }
+        })
+      )
+    ).toEqual({
+      id: "call",
+      ok: false,
+      error: "approval required",
+      approvalRequired: {
+        approvalRequestId: "approval-1",
+        mandateId: "fix-ci",
+        repoPath: "/repo",
+        branch: "fix/ci",
+        task: "fix-ci",
+        agentRole: "implementer",
+        toolName: "github_findu_echo",
+        approvalGateId: "gate-1",
+        approvalGatePattern: "github_findu_echo",
+        approvalGateReason: "remote state",
+        approvalGateRisk: "high",
+        approvalGateLabels: ["remote-state", "ci"],
+        expiresAt: "2026-06-20T22:00:00.000Z"
       }
     });
   });
@@ -217,6 +264,45 @@ describe("daemon client response validation", () => {
     }
   });
 
+  it("throws daemon request errors with approval metadata", async () => {
+    const { socketPath, server } = await startCaptureDaemon({
+      response: {
+        ok: false,
+        error: "approval required",
+        approvalRequired: {
+          approvalRequestId: "approval-1",
+          mandateId: "fix-ci",
+          repoPath: "/repo",
+          branch: "fix/ci",
+          task: "fix-ci",
+          agentRole: "implementer",
+          toolName: "github_findu_echo",
+          approvalGateId: "gate-1",
+          approvalGatePattern: "github_findu_echo",
+          expiresAt: "2026-06-20T22:00:00.000Z"
+        }
+      }
+    });
+    try {
+      await expect(
+        callDaemonTool(socketPath, "github_findu_echo")
+      ).rejects.toMatchObject({
+        name: "DaemonRequestError",
+        response: {
+          approvalRequired: {
+            approvalRequestId: "approval-1",
+            mandateId: "fix-ci"
+          }
+        }
+      });
+      await expect(callDaemonTool(socketPath, "github_findu_echo")).rejects.toBeInstanceOf(
+        DaemonRequestError
+      );
+    } finally {
+      await closeServer(server);
+    }
+  });
+
   it("keeps a full tool-call timeout budget after approval waits", () => {
     expect(daemonToolCallTimeoutMs()).toBe(60_000);
     expect(daemonToolCallTimeoutMs({ approvalWaitMs: 30_000 })).toBe(90_000);
@@ -224,7 +310,9 @@ describe("daemon client response validation", () => {
   });
 });
 
-async function startCaptureDaemon(): Promise<{
+async function startCaptureDaemon(options: {
+  response?: Record<string, unknown>;
+} = {}): Promise<{
   socketPath: string;
   server: Server;
   requests: unknown[];
@@ -233,7 +321,7 @@ async function startCaptureDaemon(): Promise<{
   const socketPath = join(root, "daemon.sock");
   const requests: unknown[] = [];
   const server = createServer((socket) => {
-    handleCaptureSocket(socket, requests);
+    handleCaptureSocket(socket, requests, options.response);
   });
   await listen(server, socketPath);
   server.on("close", () => {
@@ -243,7 +331,11 @@ async function startCaptureDaemon(): Promise<{
   return { socketPath, server, requests };
 }
 
-function handleCaptureSocket(socket: Socket, requests: unknown[]): void {
+function handleCaptureSocket(
+  socket: Socket,
+  requests: unknown[],
+  response: Record<string, unknown> | undefined
+): void {
   let buffer = "";
   socket.setEncoding("utf8");
   socket.on("data", (chunk) => {
@@ -259,6 +351,15 @@ function handleCaptureSocket(socket: Socket, requests: unknown[]): void {
       ok: true,
       version: "0.1.0"
     };
+    if (response) {
+      socket.end(
+        `${JSON.stringify({
+          id: base.id,
+          ...response
+        })}\n`
+      );
+      return;
+    }
     if (request.type === "list_tools") {
       socket.end(
         `${JSON.stringify({
