@@ -517,6 +517,9 @@ async function callConfiguredTool(
             toolName: name,
             approvalGateId: policyDecision.approvalGate.id,
             approvalGatePattern: policyDecision.approvalGate.toolPattern,
+            ...(policyDecision.approvalGate.reason
+              ? { approvalGateReason: policyDecision.approvalGate.reason }
+              : {}),
             expiresAt: routerResult.mandate.expiresAt
           });
           approvalRequestId = request.id;

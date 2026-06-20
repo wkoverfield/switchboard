@@ -231,7 +231,8 @@ describe("daemon runtime mandate context", () => {
         id: "approval-1",
         runtimeStatus: "pending",
         toolName: "github_findu_echo",
-        approvalGateId: "gate-1"
+        approvalGateId: "gate-1",
+        approvalGateReason: "rerunning CI changes remote state"
       }
     ]);
     await expect(
@@ -678,7 +679,12 @@ async function makeBrokenApprovalRepo(): Promise<string> {
     agentRole: "implementer",
     profiles: ["github_findu"],
     allowedTools: ["github_findu_*"],
-    approvalRequiredTools: ["github_findu_echo"],
+    approvalRequiredTools: [
+      {
+        toolPattern: "github_findu_echo",
+        reason: "rerunning CI changes remote state"
+      }
+    ],
     lease: "2h"
   });
 
@@ -712,7 +718,12 @@ async function makeApprovalRepo(): Promise<string> {
     agentRole: "implementer",
     profiles: ["github_findu"],
     allowedTools: ["github_findu_*"],
-    approvalRequiredTools: ["github_findu_echo"],
+    approvalRequiredTools: [
+      {
+        toolPattern: "github_findu_echo",
+        reason: "rerunning CI changes remote state"
+      }
+    ],
     lease: "2h"
   });
 

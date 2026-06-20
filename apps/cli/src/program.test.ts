@@ -512,6 +512,8 @@ describe("switchboard CLI program", () => {
         "*_deploy_prod",
         "--require-approval-tool",
         "github_findu_checks_rerun",
+        "--require-approval-reason",
+        "rerunning CI changes remote state",
         "--json"
       ],
       { from: "user" }
@@ -1550,6 +1552,8 @@ describe("switchboard CLI program", () => {
         "*_deploy_prod",
         "--require-approval-tool",
         "github_findu_checks_rerun",
+        "--require-approval-reason",
+        "rerunning CI changes remote state",
         "--json"
       ],
       {
@@ -1570,7 +1574,11 @@ describe("switchboard CLI program", () => {
         allowedTools: ["github_findu_*"],
         deniedTools: ["*_deploy_prod"],
         approvalGates: [
-          { id: "gate-1", toolPattern: "github_findu_checks_rerun" }
+          {
+            id: "gate-1",
+            toolPattern: "github_findu_checks_rerun",
+            reason: "rerunning CI changes remote state"
+          }
         ],
         lease: "2h",
         runtimeStatus: "active"
@@ -1592,7 +1600,11 @@ describe("switchboard CLI program", () => {
           allowedTools: ["github_findu_*"],
           deniedTools: ["*_deploy_prod"],
           approvalGates: [
-            { id: "gate-1", toolPattern: "github_findu_checks_rerun" }
+            {
+              id: "gate-1",
+              toolPattern: "github_findu_checks_rerun",
+              reason: "rerunning CI changes remote state"
+            }
           ],
           runtimeStatus: "active"
         }
@@ -1604,7 +1616,45 @@ describe("switchboard CLI program", () => {
     });
     expect(output[2]).toContain("allow:github_findu_*");
     expect(output[2]).toContain("deny:*_deploy_prod");
-    expect(output[2]).toContain("approval:gate-1:github_findu_checks_rerun");
+    expect(output[2]).toContain(
+      "approval:gate-1:github_findu_checks_rerun(rerunning CI changes remote state)"
+    );
+  });
+
+  it("rejects mismatched approval gate reason counts", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const errors: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message),
+      mandateStorePath: join(root, "state", "mandates.json")
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--require-approval-reason",
+        "needs a human"
+      ],
+      { from: "user" }
+    );
+
+    expect(errors).toEqual([
+      "error: --require-approval-reason must be provided once for each --require-approval-tool"
+    ]);
+    expect(process.exitCode).toBe(1);
   });
 
   it("fails mandate status for a missing id", async () => {
@@ -1753,6 +1803,7 @@ describe("switchboard CLI program", () => {
       toolName: "github_findu_deploy",
       approvalGateId: "gate-1",
       approvalGatePattern: "github_findu_deploy",
+      approvalGateReason: "preview deploy touches remote state",
       expiresAt: futureExpiresAt
     });
     await createApprovalRequest({
@@ -1822,6 +1873,7 @@ describe("switchboard CLI program", () => {
     expect(output[1]).toContain(
       "next: switchboard approve approval-1 or switchboard deny approval-1; then retry github_findu_deploy"
     );
+    expect(output[1]).toContain("reason:preview deploy touches remote state");
     expect(output[1]).toContain(
       "next: retry the original gated tool call to create a fresh approval request"
     );
@@ -1836,9 +1888,11 @@ describe("switchboard CLI program", () => {
         id: "approval-1",
         status: "approved",
         runtimeStatus: "approved",
+        approvalGateReason: "preview deploy touches remote state",
         decisionReason: "preview deploy"
       }
     });
+    expect(output[2]).toContain("preview deploy touches remote state");
 
     await program.parseAsync(
       ["--cwd", root, "approvals", "--status", "approved"],

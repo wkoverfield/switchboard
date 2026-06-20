@@ -71,7 +71,8 @@ describe("approval requests", () => {
       await listApprovalRequests({
         path,
         repoPath: join(root, "repo"),
-        mandateId: "fix-ci"
+        mandateId: "fix-ci",
+        now: () => new Date("2026-06-20T15:02:00.000Z")
       })
     ).toEqual([expect.objectContaining({ id: "approval-1" })]);
     expect(
@@ -79,7 +80,8 @@ describe("approval requests", () => {
         path,
         repoPath: join(root, "repo"),
         mandateId: "fix-ci",
-        status: "pending"
+        status: "pending",
+        now: () => new Date("2026-06-20T15:02:00.000Z")
       })
     ).toEqual([expect.objectContaining({ id: "approval-1" })]);
     expect(await readApprovalRequestStore({ path })).toMatchObject({
@@ -362,7 +364,12 @@ describe("approval requests", () => {
         decisionReason: "daemon restarted"
       }
     ]);
-    await expect(listApprovalRequests({ path })).resolves.toMatchObject([
+    await expect(
+      listApprovalRequests({
+        path,
+        now: () => new Date("2026-06-20T15:05:00.000Z")
+      })
+    ).resolves.toMatchObject([
       { id: "approval-1", runtimeStatus: "stale" },
       { id: "approval-2", runtimeStatus: "pending" },
       { id: "approval-3", runtimeStatus: "approved" }

@@ -143,6 +143,7 @@ Implemented in the current codebase:
 - optional bounded approval waits with `switchboard mcp --approval-wait <duration>`
 - stale approval request status for disconnected approval waits
 - daemon-start invalidation for leftover pending approval requests
+- approval gate reason metadata in mandates and approval requests
 
 Not started:
 
@@ -719,10 +720,26 @@ Acceptance:
 - no secrets broker
 - no remote service
 
+### Current Slice: Approval Reason Metadata
+
+Goal: make approval requests easier to evaluate by carrying the reason a gate
+exists into mandate and approval surfaces.
+
+Acceptance:
+
+- `switchboard mandate create --require-approval-reason <reason>` stores gate
+  reasons alongside `--require-approval-tool`
+- mandate status displays approval gate reasons
+- daemon-created approval requests copy the gate reason
+- `switchboard approvals` and approval decisions display gate reasons
+- no provider presets
+- no secrets broker
+- no remote service
+
 Follow-up slice:
 
 - client elicitation research before implementing client-specific approval UX
-- richer approval reasons and policy labels
+- policy labels/risk classes beyond free-form reasons
 
 ## Rules For Future Agents
 

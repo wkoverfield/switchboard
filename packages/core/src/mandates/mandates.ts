@@ -19,6 +19,11 @@ export interface MandateApprovalGate {
   toolPattern: string;
   reason?: string | undefined;
 }
+export interface CreateMandateApprovalGate {
+  id?: string | undefined;
+  toolPattern: string;
+  reason?: string | undefined;
+}
 
 export type MandateToolPolicyDecision =
   | { allowed: true; approvalRequestId?: string | undefined }
@@ -80,7 +85,7 @@ export interface CreateMandateOptions {
   lease: string;
   allowedTools?: string[];
   deniedTools?: string[];
-  approvalRequiredTools?: string[];
+  approvalRequiredTools?: Array<string | CreateMandateApprovalGate>;
   path?: string;
   now?: () => Date;
 }
@@ -463,7 +468,7 @@ function uniqueTrimmed(values: string[]): string[] {
 }
 
 function normalizeApprovalGates(
-  gates: Array<string | MandateApprovalGate>
+  gates: Array<string | CreateMandateApprovalGate>
 ): MandateApprovalGate[] {
   const seen = new Set<string>();
   const result: MandateApprovalGate[] = [];
@@ -477,11 +482,14 @@ function normalizeApprovalGates(
 
     seen.add(toolPattern);
     const id =
-      typeof gate === "string" || !gate.id.trim()
+      typeof gate === "string" || !gate.id?.trim()
         ? `gate-${result.length + 1}`
         : gate.id.trim();
     const reason =
       typeof gate === "string" ? undefined : gate.reason?.trim() || undefined;
+    if (reason && hasControlCharacters(reason)) {
+      throw new Error("approval gate reason must not contain control characters");
+    }
     result.push({
       id,
       toolPattern,
@@ -490,6 +498,13 @@ function normalizeApprovalGates(
   }
 
   return result;
+}
+
+function hasControlCharacters(value: string): boolean {
+  return [...value].some((char) => {
+    const codePoint = char.codePointAt(0);
+    return codePoint !== undefined && (codePoint < 32 || codePoint === 127);
+  });
 }
 
 function matchesAnyToolPattern(toolName: string, patterns: string[]): boolean {
