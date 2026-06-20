@@ -177,7 +177,20 @@ describe("GenericMcpRouter", () => {
 
     try {
       const tools = await router.discoverTools();
-      expect(tools.map((tool) => tool.name)).toEqual(["alpha_tools_whoami"]);
+      expect(tools.map((tool) => tool.name).sort()).toEqual([
+        "alpha_tools_echo",
+        "alpha_tools_whoami"
+      ]);
+      expect(tools.find((tool) => tool.name === "alpha_tools_echo")).toMatchObject({
+        _meta: {
+          switchboard: {
+            approvalRequired: {
+              gateId: "gate-1",
+              toolPattern: "alpha_tools_echo"
+            }
+          }
+        }
+      });
       await expect(
         router.callTool("alpha_tools_echo", { message: "hello" })
       ).rejects.toThrow(
@@ -199,6 +212,35 @@ describe("GenericMcpRouter", () => {
             'tool "alpha_tools_echo" requires approval by mandate gate "gate-1"'
         }
       ]);
+    } finally {
+      await router.close();
+    }
+  });
+
+  it("does not discover approval-gated tools outside the mandate allow list", async () => {
+    const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {
+      mandateId: "fix-ci",
+      toolPolicy: {
+        allowedTools: ["alpha_tools_whoami"],
+        approvalGates: [{ id: "gate-1", toolPattern: "alpha_tools_echo" }],
+        approvedApprovalRequests: [
+          {
+            id: "approval-1",
+            approvalGateId: "gate-1",
+            toolName: "alpha_tools_echo"
+          }
+        ]
+      }
+    });
+
+    try {
+      const tools = await router.discoverTools();
+      expect(tools.map((tool) => tool.name)).toEqual(["alpha_tools_whoami"]);
+      await expect(
+        router.callTool("alpha_tools_echo", { message: "hello" })
+      ).rejects.toThrow(
+        'tool "alpha_tools_echo" is not allowed by mandate policy'
+      );
     } finally {
       await router.close();
     }

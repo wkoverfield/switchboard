@@ -187,6 +187,16 @@ export function evaluateMandateToolPolicy(
     };
   }
 
+  if (
+    allowedTools.length > 0 &&
+    !matchesAnyToolPattern(toolName, allowedTools)
+  ) {
+    return {
+      allowed: false,
+      reason: `tool "${toolName}" is not allowed by mandate policy`
+    };
+  }
+
   const approvalGate = approvalGates.find((gate) =>
     toolPatternToRegExp(gate.toolPattern).test(toolName)
   );
@@ -208,16 +218,6 @@ export function evaluateMandateToolPolicy(
       approvalRequired: true,
       approvalGate,
       reason: `tool "${toolName}" requires approval by mandate gate "${approvalGate.id}"`
-    };
-  }
-
-  if (
-    allowedTools.length > 0 &&
-    !matchesAnyToolPattern(toolName, allowedTools)
-  ) {
-    return {
-      allowed: false,
-      reason: `tool "${toolName}" is not allowed by mandate policy`
     };
   }
 

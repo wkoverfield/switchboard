@@ -49,8 +49,16 @@ export function toNamespacedTool(
     namespacedTool.title = tool.title;
   }
   if (tool._meta) {
-    namespacedTool._meta = tool._meta;
+    namespacedTool._meta = withoutSwitchboardMeta(tool._meta);
   }
 
   return namespacedTool;
+}
+
+function withoutSwitchboardMeta(
+  meta: Record<string, unknown>
+): Record<string, unknown> {
+  const safeMeta = { ...meta };
+  delete safeMeta.switchboard;
+  return safeMeta;
 }

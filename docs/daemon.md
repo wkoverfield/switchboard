@@ -90,16 +90,19 @@ switchboard --cwd <repo> mcp --mandate fix-ci --approval-wait 30s
 The adapter validates that the mandate is active for the repo, asks the daemon
 to mount only the mandate's profiles, enforces the mandate's allow, deny, and
 approval-required namespaced tool patterns before routing calls, and attaches
-the mandate id to routed tool-call audit entries. Approval-required daemon calls
-create local approval requests that can be listed with `switchboard approvals`
-and decided with `switchboard approve <id>` or `switchboard deny <id>`. If the
-connected MCP client advertises form elicitation support, the daemon-backed MCP
-front door can ask for an in-client approve/deny decision, persist the decision
-through that same local approval store, and retry approved tool calls. With
-`--approval-wait`, the daemon polls for a local CLI decision for up to the
-requested duration. If the MCP client disconnects during that wait, the daemon
-marks the approval request `stale` so it cannot be approved after the
-originating call is gone. This is basic local approval handling, not
+the mandate id to routed tool-call audit entries. Approval-required tools remain
+visible in `tools/list` with `_meta.switchboard.approvalRequired`, but execution
+still creates local approval requests that can be listed with
+`switchboard approvals` and decided with `switchboard approve <id>` or
+`switchboard deny <id>`. Approval gates never expand the allow list: a tool
+outside `allowedTools` remains hidden and blocked even if it matches an approval
+gate. If the connected MCP client advertises form elicitation support, the
+daemon-backed MCP front door can ask for an in-client approve/deny decision,
+persist the decision through that same local approval store, and retry approved
+tool calls. With `--approval-wait`, the daemon polls for a local CLI decision
+for up to the requested duration. If the MCP client disconnects during that
+wait, the daemon marks the approval request `stale` so it cannot be approved
+after the originating call is gone. This is basic local approval handling, not
 provider-specific policy or secret access yet.
 
 Use `switchboard mcp --no-auto-start` to fail fast unless a daemon is already
@@ -114,7 +117,8 @@ running.
   does not create new approval requests; use `switchboard mcp --mandate <id>`
   for the approval request workflow.
 - Mandate-scoped MCP mounts currently validate active mandates, narrow mounted
-  profiles, enforce allow/deny/approval-required tool patterns, and annotate
+  profiles, enforce allow/deny/approval-required tool patterns, keep
+  approval-required tools discoverable with Switchboard metadata, and annotate
   audit entries.
 - Approval handling is local request/decision storage only. The daemon-backed
   MCP adapter can use MCP form elicitation when the connected client advertises
