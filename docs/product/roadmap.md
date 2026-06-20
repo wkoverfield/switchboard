@@ -4,7 +4,8 @@ Last updated: 2026-06-19
 
 This is the working roadmap for Switchboard. The source planning documents live in
 `docs/product/source/` and remain the product source of truth when this roadmap is
-ambiguous.
+ambiguous, except where the mandate strategy explicitly supersedes the earlier
+profile-router framing.
 
 ## Source Documents
 
@@ -14,25 +15,32 @@ ambiguous.
 - `docs/product/source/switchboard-agent-discovery-kit.md`
 - `docs/product/source/switchboard-agent-research-synthesis.md`
 - `docs/product/source/switchboard-competitive-landscape.md`
+- `docs/product/mandate-strategy.md`
 
 ## Product North Star
 
-Switchboard is a local-first MCP profile router. It gives developers one local
-MCP endpoint while keeping account, project, environment, namespace, policy,
-approval, secret, and audit concerns explicit.
+Switchboard is the local mandate layer for coding agents. It gives agents
+temporary, task-scoped authority for a specific repo, worktree, branch, role,
+profile set, tool surface, lease, approval posture, and audit trail.
 
-Switchboard should win by making multi-account and multi-environment agent tool
-use boring:
+The earlier local-first MCP profile router work remains the substrate. It gives
+mandates a durable runtime across Codex, Claude Code, Cursor, VS Code, and
+custom harnesses.
 
-- one agent config across Codex, Claude Code, Cursor, VS Code, and similar tools
+Switchboard should win by making delegated coding-agent work bounded:
+
+- one local mandate-aware MCP endpoint across coding-agent clients
+- repo/worktree/branch-aware authority, not broad inherited human access
+- leases and expiry for agent access
+- allowed/denied tool surfaces tied to task and role
+- approval gates for sensitive actions
+- audit and handoff state scoped to each mandate
 - clear profile namespaces so duplicate tool names are safe
-- repo-aware defaults for dev/staging/prod and client-specific profiles
-- local-first config and secret handling
-- safe progression from `status` to `doctor` to `test` to agent install
+- local-first config, secrets, and policy enforcement
 
 ## Current State
 
-Implemented on `main` through PR #17:
+Implemented on `main` through PR #20:
 
 - TypeScript pnpm workspace
 - `@switchboard-mcp/cli`
@@ -80,6 +88,7 @@ Implemented on `main` through PR #17:
 
 Not started:
 
+- mandate schema and CLI
 - policy engine
 - approval broker
 - secrets/keychain
@@ -194,7 +203,7 @@ policy, approval, and provider-specific behavior exist.
 
 ### Milestone 5: Policy Engine + Operating Modes
 
-Status: not started.
+Status: not started; should be mandate-aware.
 
 Original modes:
 
@@ -208,15 +217,20 @@ Recommended constraint:
 Keep these as config/schema concepts until the daemon/audit layer exists. Avoid
 implying enforcement that Switchboard cannot yet provide.
 
+Policy rules should be evaluated in the context of a mandate, not only a static
+profile. Profile-level policy remains useful, but task/repo/worktree/branch/role
+context is the differentiator.
+
 ### Milestone 6: Approval Broker
 
-Status: not started.
+Status: not started; should be mandate-aware.
 
 Original intent:
 
 - daemon-level approval queue
 - CLI approval surface
 - optional client elicitation later
+- approval requests tied to mandate id, task, repo, branch, agent role, and tool
 
 Do not build before:
 
@@ -235,6 +249,9 @@ Original intent:
 - no raw provider secrets in repo config or agent config
 
 Do not build provider presets before this has at least a minimal design.
+
+Secrets should be granted to agents through a mandate lease where possible, not
+through permanent inherited profile access.
 
 ### Milestone 8: Client Installers
 
@@ -299,6 +316,7 @@ Original order:
 
 Gate before starting:
 
+- mandate foundation
 - secrets plan
 - provider-specific doctor checks
 - clear read/write/default mode policy
@@ -470,7 +488,7 @@ Acceptance:
 - Installed clients do not keep producing install next steps
 - Invalid project client config is reported without mutating files
 
-### Current Slice: Existing MCP Server Discovery
+### Completed Slice: Existing MCP Server Discovery
 
 Goal: make `switchboard doctor` surface other MCP servers already present in
 project-scoped Codex and Claude config files before adding import behavior.
@@ -481,6 +499,34 @@ Acceptance:
 - Human doctor output shows other MCP server names when present
 - Discovery is read-only and does not import or mutate config
 - Existing missing/installed/stale/invalid client status behavior remains intact
+
+### Current Slice: Mandate Strategy Pivot
+
+Goal: update product direction so Switchboard's durable wedge is task-scoped
+authority for coding agents, not generic MCP gateway/profile routing alone.
+
+Acceptance:
+
+- Product docs introduce mandates as the long-term core primitive
+- Roadmap preserves current daemon/install/audit work as mandate substrate
+- Provider presets are explicitly gated behind mandate/secrets/policy work
+- Next build slice is mandate foundation rather than provider integrations
+
+### Next Slice: Mandate Foundation
+
+Goal: create the smallest local mandate primitive without claiming full
+enforcement yet.
+
+Acceptance:
+
+- `switchboard mandate create`
+- local mandate schema and persistence
+- mandate binds repo, worktree, branch, agent role, profile list, and lease
+- `switchboard mandate status`
+- audit entries may include mandate id
+- no provider integrations
+- no secret broker
+- no full approval broker yet
 
 ## Rules For Future Agents
 

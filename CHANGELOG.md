@@ -25,3 +25,4 @@
 - Added project-scoped `switchboard install <codex|claude> --write` installers with timestamped backups and `--rollback`.
 - Added project Codex/Claude client config detection to `switchboard doctor`.
 - Added existing project MCP server name discovery to `switchboard doctor`.
+- Added mandate strategy docs and updated the roadmap toward task-scoped authority for coding agents.
