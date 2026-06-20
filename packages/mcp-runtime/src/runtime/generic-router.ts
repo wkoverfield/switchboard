@@ -3,6 +3,7 @@ import {
   noopAuditLogger,
   safeAuditLog,
   type AuditLogger,
+  type MandateApprovalGate,
   type MandateToolPolicy
 } from "@switchboard-mcp/core";
 import {
@@ -73,8 +74,19 @@ export class GenericMcpRouter {
           namespacedName,
           this.toolPolicy
         );
-        if (policyDecision.allowed) {
-          tools.push(toNamespacedTool(profile.profileName, profile.namespace, tool));
+        if (policyDecision.allowed || "approvalRequired" in policyDecision) {
+          const namespacedTool = toNamespacedTool(
+            profile.profileName,
+            profile.namespace,
+            tool
+          );
+          if ("approvalRequired" in policyDecision) {
+            namespacedTool._meta = withApprovalRequiredMetadata(
+              namespacedTool._meta,
+              policyDecision.approvalGate
+            );
+          }
+          tools.push(namespacedTool);
         }
       }
     }
@@ -194,4 +206,33 @@ export class GenericMcpRouter {
       ...(this.mandateId ? { mandateId: this.mandateId } : {})
     };
   }
+}
+
+function withApprovalRequiredMetadata(
+  meta: Record<string, unknown> | undefined,
+  approvalGate: MandateApprovalGate
+): Record<string, unknown> {
+  const switchboardMeta = isRecord(meta?.switchboard)
+    ? meta.switchboard
+    : {};
+
+  return {
+    ...meta,
+    switchboard: {
+      ...switchboardMeta,
+      approvalRequired: {
+        gateId: approvalGate.id,
+        toolPattern: approvalGate.toolPattern,
+        ...(approvalGate.reason ? { reason: approvalGate.reason } : {}),
+        ...(approvalGate.risk ? { risk: approvalGate.risk } : {}),
+        ...(approvalGate.labels && approvalGate.labels.length > 0
+          ? { labels: approvalGate.labels }
+          : {})
+      }
+    }
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

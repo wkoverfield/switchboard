@@ -502,7 +502,7 @@ describe("daemon runtime mandate context", () => {
     );
   });
 
-  it("filters approval-gated tools from daemon list_tools results", async () => {
+  it("keeps approval-gated tools visible in daemon list_tools results", async () => {
     const root = await makeApprovalRepo();
 
     await expect(
@@ -517,7 +517,23 @@ describe("daemon runtime mandate context", () => {
     ).resolves.toMatchObject({
       id: "list",
       ok: true,
-      tools: [expect.objectContaining({ name: "github_findu_whoami" })]
+      tools: expect.arrayContaining([
+        expect.objectContaining({
+          name: "github_findu_echo",
+          _meta: {
+            switchboard: {
+              approvalRequired: {
+                gateId: "gate-1",
+                toolPattern: "github_findu_echo",
+                reason: "rerunning CI changes remote state",
+                risk: "high",
+                labels: ["remote-state", "ci"]
+              }
+            }
+          }
+        }),
+        expect.objectContaining({ name: "github_findu_whoami" })
+      ])
     });
   });
 

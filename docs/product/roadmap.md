@@ -862,6 +862,12 @@ Acceptance:
   approval request id
 - current `switchboard approvals`, `switchboard approve`, `switchboard deny`,
   and `--approval-wait` behavior remains available
+- approval-required tools remain discoverable through `tools/list` with
+  `_meta.switchboard.approvalRequired` metadata while execution stays gated
+- approval gates do not expand mandate allow lists; disallowed and denied tools
+  remain hidden and blocked
+- upstream tool `_meta.switchboard` values are not trusted as Switchboard policy
+  metadata
 - no URL-mode elicitation
 - no provider OAuth/secrets flows
 - no remote approval service

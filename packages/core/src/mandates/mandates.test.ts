@@ -95,10 +95,27 @@ describe("mandates", () => {
           { id: "gate-1", toolPattern: "github_findu_deploy_prod" }
         ]
       })
-    ).toMatchObject({
+    ).toEqual({
       allowed: false,
-      approvalRequired: true,
-      approvalGate: { id: "gate-1", toolPattern: "github_findu_deploy_prod" }
+      reason: 'tool "github_findu_deploy_prod" is not allowed by mandate policy'
+    });
+    expect(
+      evaluateMandateToolPolicy("github_findu_deploy_prod", {
+        allowedTools: ["github_findu_read"],
+        approvalGates: [
+          { id: "gate-1", toolPattern: "github_findu_deploy_prod" }
+        ],
+        approvedApprovalRequests: [
+          {
+            id: "approval-1",
+            approvalGateId: "gate-1",
+            toolName: "github_findu_deploy_prod"
+          }
+        ]
+      })
+    ).toEqual({
+      allowed: false,
+      reason: 'tool "github_findu_deploy_prod" is not allowed by mandate policy'
     });
     expect(
       evaluateMandateToolPolicy("github_findu_deploy_prod", {

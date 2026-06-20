@@ -417,12 +417,16 @@ function toCallToolResult(result: UpstreamToolResult): CallToolResult {
 }
 
 export function toMcpTool(tool: NamespacedTool): Tool {
+  const switchboardMeta = isRecord(tool._meta?.switchboard)
+    ? tool._meta.switchboard
+    : {};
   const mcpTool: Tool = {
     name: tool.name,
     inputSchema: tool.inputSchema,
     _meta: {
       ...tool._meta,
       switchboard: {
+        ...switchboardMeta,
         profileName: tool.profileName,
         namespace: tool.namespace,
         upstreamName: tool.upstreamName
@@ -444,4 +448,8 @@ export function toMcpTool(tool: NamespacedTool): Tool {
   }
 
   return mcpTool;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

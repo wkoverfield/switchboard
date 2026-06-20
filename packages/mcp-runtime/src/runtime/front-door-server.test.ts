@@ -132,7 +132,15 @@ describe("Switchboard MCP front door", () => {
               namespace: "daemon",
               upstreamName: "echo",
               description: "Echo from daemon.",
-              inputSchema: { type: "object" }
+              inputSchema: { type: "object" },
+              _meta: {
+                switchboard: {
+                  approvalRequired: {
+                    gateId: "gate-1",
+                    toolPattern: "daemon_echo"
+                  }
+                }
+              }
             }
           ]
         })
@@ -143,11 +151,15 @@ describe("Switchboard MCP front door", () => {
       expect(result.tools[0]).toMatchObject({
         name: "daemon_echo",
         description: "Echo from daemon.",
-        _meta: {
-          switchboard: {
-            profileName: "daemon",
-            namespace: "daemon",
-            upstreamName: "echo"
+          _meta: {
+            switchboard: {
+              approvalRequired: {
+                gateId: "gate-1",
+                toolPattern: "daemon_echo"
+              },
+              profileName: "daemon",
+              namespace: "daemon",
+              upstreamName: "echo"
           }
         }
       });
