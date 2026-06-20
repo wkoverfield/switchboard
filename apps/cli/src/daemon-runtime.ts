@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, resolve } from "node:path";
@@ -210,7 +210,7 @@ async function daemonHeartbeat(socketPath: string): Promise<boolean> {
     .catch(() => false);
 }
 
-interface DaemonSocketContext {
+export interface DaemonSocketContext {
   cwd?: string;
 }
 
@@ -272,7 +272,7 @@ function handleDaemonSocket(socket: Socket, context: DaemonSocketContext): void 
   });
 }
 
-async function handleDaemonRequest(raw: string, context: DaemonSocketContext): Promise<{
+export async function handleDaemonRequest(raw: string, context: DaemonSocketContext): Promise<{
   id: string;
   ok: boolean;
   type?: "pong" | "tools" | "tool_result";
@@ -465,10 +465,18 @@ async function routerForConfiguredProfiles(
   let mandate: MandateWithStatus | undefined;
   if (mandateId) {
     try {
+      const repoPath = configCwdBase(loaded, context.cwd);
       mandate = await resolveActiveMandate({
         id: mandateId,
-        repoPath: configCwdBase(loaded, context.cwd)
+        repoPath
       });
+      const gitBinding = resolveGitWorktreeBinding(repoPath);
+      if (gitBinding && gitBinding.branch !== mandate.branch) {
+        return {
+          ok: false,
+          error: `mandate "${mandate.id}" is scoped to branch "${mandate.branch}", but current git branch is "${gitBinding.branch}" in ${gitBinding.worktreePath}`
+        };
+      }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
@@ -554,6 +562,35 @@ function configCwdBase(
   }
 
   return cwd ? resolve(cwd) : process.cwd();
+}
+
+function resolveGitWorktreeBinding(
+  cwd: string
+): { worktreePath: string; branch: string } | undefined {
+  const worktreePath = runGit(["rev-parse", "--show-toplevel"], cwd);
+  if (!worktreePath) {
+    return undefined;
+  }
+
+  const branch = runGit(["branch", "--show-current"], cwd);
+  if (!branch) {
+    throw new Error(`git worktree at ${worktreePath} has no current branch`);
+  }
+
+  return { worktreePath, branch };
+}
+
+function runGit(args: string[], cwd: string): string | undefined {
+  try {
+    const output = execFileSync("git", ["-C", cwd, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    const trimmed = output.trim();
+    return trimmed || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function listen(server: Server, socketPath: string): Promise<void> {

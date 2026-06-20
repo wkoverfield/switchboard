@@ -179,6 +179,15 @@ describe("mandates", () => {
         lease: "1h"
       })
     ).resolves.toMatchObject({ id: "fix-ci", branch: "fix/ci-2" });
+
+    await expect(
+      resolveActiveMandate({
+        path,
+        repoPath: join(root, "repo"),
+        id: "fix-ci",
+        now: () => new Date("2026-06-19T17:30:00.000Z")
+      })
+    ).resolves.toMatchObject({ id: "fix-ci", branch: "fix/ci-2" });
   });
 
   it("resolves only active mandates for a repo", async () => {

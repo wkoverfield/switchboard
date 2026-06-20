@@ -219,11 +219,11 @@ export async function resolveActiveMandate(
     id,
     ...(options.now ? { now: options.now } : {})
   });
-  const mandate = mandates[0];
-  if (!mandate) {
+  if (mandates.length === 0) {
     throw new Error(`mandate "${id}" was not found for ${resolve(options.repoPath)}`);
   }
-  if (mandate.runtimeStatus !== "active") {
+  const mandate = mandates.find((item) => item.runtimeStatus === "active");
+  if (!mandate) {
     throw new Error(`mandate "${id}" is expired`);
   }
 
