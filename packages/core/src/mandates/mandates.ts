@@ -1,36 +1,51 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  open,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import * as z from "zod";
 import type { PathResolutionOptions } from "../config/paths.js";
 
 export type MandateRuntimeStatus = "active" | "expired";
+const mandateStoreLockTimeoutMs = 5_000;
+const mandateStoreStaleLockMs = 30_000;
 
-export interface Mandate {
-  version: 1;
-  id: string;
-  task: string;
-  repoPath: string;
-  worktreePath: string;
-  branch: string;
-  agentRole: string;
-  profiles: string[];
-  lease: string;
-  createdAt: string;
-  expiresAt: string;
-  allowedTools: string[];
-  deniedTools: string[];
-  approvalGates: string[];
-  handoffState: "open";
-}
+export const mandateSchema = z.object({
+  version: z.literal(1),
+  id: z.string().min(1),
+  task: z.string().min(1),
+  repoPath: z.string().min(1),
+  worktreePath: z.string().min(1),
+  branch: z.string().min(1),
+  agentRole: z.string().min(1),
+  profiles: z.array(z.string().min(1)),
+  lease: z.string().min(1),
+  createdAt: z.string().min(1),
+  expiresAt: z.string().min(1),
+  allowedTools: z.array(z.string()),
+  deniedTools: z.array(z.string()),
+  approvalGates: z.array(z.string()),
+  handoffState: z.literal("open")
+});
 
-export interface MandateWithStatus extends Mandate {
+export const mandateStoreSchema = z.object({
+  version: z.literal(1),
+  mandates: z.array(mandateSchema)
+});
+
+export type Mandate = z.infer<typeof mandateSchema>;
+export type MandateStore = z.infer<typeof mandateStoreSchema>;
+
+export type MandateWithStatus = Mandate & {
   runtimeStatus: MandateRuntimeStatus;
-}
-
-export interface MandateStore {
-  version: 1;
-  mandates: Mandate[];
-}
+};
 
 export interface CreateMandateOptions {
   task: string;
@@ -128,42 +143,45 @@ export async function createMandate(
   const leaseMs = parseMandateLease(options.lease);
   const repoPath = resolve(options.repoPath);
   const worktreePath = resolve(options.worktreePath);
-  const pathOptions = options.path ? { path: options.path } : {};
-  const store = await readMandateStore(pathOptions);
-  const activeDuplicate = store.mandates.find(
-    (mandate) =>
-      mandate.id === id &&
-      mandate.repoPath === repoPath &&
-      mandateRuntimeStatus(mandate, createdAt) === "active"
-  );
-  if (activeDuplicate) {
-    throw new Error(
-      `active mandate "${id}" already exists for ${repoPath}; choose a different task name or wait for it to expire`
+  const path = options.path ?? resolveMandateStorePath();
+
+  return withMandateStoreLock(path, async () => {
+    const store = await readMandateStore({ path });
+    const activeDuplicate = store.mandates.find(
+      (mandate) =>
+        mandate.id === id &&
+        mandate.repoPath === repoPath &&
+        mandateRuntimeStatus(mandate, createdAt) === "active"
     );
-  }
+    if (activeDuplicate) {
+      throw new Error(
+        `active mandate "${id}" already exists for ${repoPath}; choose a different task name or wait for it to expire`
+      );
+    }
 
-  const mandate: Mandate = {
-    version: 1,
-    id,
-    task: options.task.trim(),
-    repoPath,
-    worktreePath,
-    branch,
-    agentRole,
-    profiles,
-    lease: options.lease.trim(),
-    createdAt: createdAt.toISOString(),
-    expiresAt: new Date(createdAt.getTime() + leaseMs).toISOString(),
-    allowedTools: [],
-    deniedTools: [],
-    approvalGates: [],
-    handoffState: "open"
-  };
+    const mandate: Mandate = {
+      version: 1,
+      id,
+      task: options.task.trim(),
+      repoPath,
+      worktreePath,
+      branch,
+      agentRole,
+      profiles,
+      lease: options.lease.trim(),
+      createdAt: createdAt.toISOString(),
+      expiresAt: new Date(createdAt.getTime() + leaseMs).toISOString(),
+      allowedTools: [],
+      deniedTools: [],
+      approvalGates: [],
+      handoffState: "open"
+    };
 
-  store.mandates.push(mandate);
-  await writeMandateStore(store, pathOptions);
+    store.mandates.push(mandate);
+    await writeMandateStore(store, { path });
 
-  return withRuntimeStatus(mandate, createdAt);
+    return withRuntimeStatus(mandate, createdAt);
+  });
 }
 
 export async function listMandates(
@@ -201,12 +219,15 @@ export async function readMandateStore(options: {
     return { version: 1, mandates: [] };
   }
 
-  const parsed = JSON.parse(raw) as MandateStore;
-  if (parsed.version !== 1 || !Array.isArray(parsed.mandates)) {
-    throw new Error(`invalid Switchboard mandate store at ${path}`);
+  const parsed = JSON.parse(raw) as unknown;
+  const result = mandateStoreSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(
+      `invalid Switchboard mandate store at ${path}: ${z.prettifyError(result.error)}`
+    );
   }
 
-  return parsed;
+  return result.data;
 }
 
 async function writeMandateStore(
@@ -214,9 +235,81 @@ async function writeMandateStore(
   options: { path?: string } = {}
 ): Promise<void> {
   const path = options.path ?? resolveMandateStorePath();
+  const tempPath = `${path}.${process.pid}.${Date.now()}.tmp`;
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await writeFile(path, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
+  await writeFile(tempPath, `${JSON.stringify(store, null, 2)}\n`, {
+    mode: 0o600
+  });
+  await chmod(tempPath, 0o600);
+  await rename(tempPath, path);
   await chmod(path, 0o600);
+}
+
+async function withMandateStoreLock<T>(
+  path: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const lockPath = `${path}.lock`;
+  const startedAt = Date.now();
+
+  while (true) {
+    try {
+      await mkdir(dirname(lockPath), { recursive: true, mode: 0o700 });
+      const handle = await open(lockPath, "wx", 0o600);
+      try {
+        await handle.writeFile(
+          JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })
+        );
+      } finally {
+        await handle.close();
+      }
+      break;
+    } catch (error) {
+      if (!isNodeErrorCode(error, "EEXIST")) {
+        throw error;
+      }
+
+      await removeStaleLock(lockPath);
+      if (Date.now() - startedAt > mandateStoreLockTimeoutMs) {
+        throw new Error(`timed out waiting for mandate store lock at ${lockPath}`);
+      }
+      await sleep(25);
+    }
+  }
+
+  try {
+    return await fn();
+  } finally {
+    await rm(lockPath, { force: true });
+  }
+}
+
+async function removeStaleLock(lockPath: string): Promise<void> {
+  const lockStat = await stat(lockPath).catch((error: unknown) => {
+    if (isNodeErrorCode(error, "ENOENT")) {
+      return undefined;
+    }
+    throw error;
+  });
+
+  if (lockStat && Date.now() - lockStat.mtimeMs > mandateStoreStaleLockMs) {
+    await rm(lockPath, { force: true });
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolveSleep) => {
+    setTimeout(resolveSleep, ms);
+  });
+}
+
+function isNodeErrorCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === code
+  );
 }
 
 function withRuntimeStatus(mandate: Mandate, now: Date): MandateWithStatus {

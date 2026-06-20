@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import {
@@ -617,6 +618,22 @@ export function createProgram(io: ProgramIo = {}): Command {
             }
 
             const repoPath = configCwdBase(loaded, globalOptions.cwd);
+            let gitBinding: { worktreePath: string; branch: string } | undefined;
+            try {
+              gitBinding = resolveGitWorktreeBinding(repoPath);
+            } catch (error) {
+              writeErr(`error: ${messageFromError(error)}`);
+              process.exitCode = 1;
+              return;
+            }
+            const branch = options.branch.trim();
+            if (gitBinding && gitBinding.branch !== branch) {
+              writeErr(
+                `error: mandate branch "${branch}" does not match current git branch "${gitBinding.branch}" in ${gitBinding.worktreePath}`
+              );
+              process.exitCode = 1;
+              return;
+            }
             const path = io.mandateStorePath ?? resolveMandateStorePath();
 
             try {
@@ -624,8 +641,8 @@ export function createProgram(io: ProgramIo = {}): Command {
                 path,
                 task,
                 repoPath,
-                worktreePath: repoPath,
-                branch: options.branch,
+                worktreePath: gitBinding?.worktreePath ?? repoPath,
+                branch,
                 agentRole: options.agent,
                 profiles,
                 lease: options.lease
@@ -1130,6 +1147,35 @@ function installTargetCwd(cwd: string | undefined): string {
   const repoPaths = resolveRepoConfigPaths(cwd ? { cwd } : {});
 
   return repoPaths.repoConfigPath ? dirname(repoPaths.repoConfigPath) : resolvedCwd;
+}
+
+function resolveGitWorktreeBinding(
+  cwd: string
+): { worktreePath: string; branch: string } | undefined {
+  const worktreePath = runGit(["rev-parse", "--show-toplevel"], cwd);
+  if (!worktreePath) {
+    return undefined;
+  }
+
+  const branch = runGit(["branch", "--show-current"], cwd);
+  if (!branch) {
+    throw new Error(`git worktree at ${worktreePath} has no current branch`);
+  }
+
+  return { worktreePath, branch };
+}
+
+function runGit(args: string[], cwd: string): string | undefined {
+  try {
+    const output = execFileSync("git", ["-C", cwd, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    const trimmed = output.trim();
+    return trimmed || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function optionsFromRuntimeDir(

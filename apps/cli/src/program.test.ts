@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync
+} from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -1393,6 +1400,87 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("binds mandates to the actual git worktree and current branch", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "fix/ci");
+    writeMandateConfig(root);
+    const nested = join(root, "packages", "app");
+    mkdirSync(nested, { recursive: true });
+    const mandateStorePath = join(root, "state", "mandates.json");
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+    await program.parseAsync(
+      [
+        "--cwd",
+        nested,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--json"
+      ],
+      {
+        from: "user"
+      }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      mandate: {
+        repoPath: root,
+        worktreePath: realpathSync(root),
+        branch: "fix/ci"
+      }
+    });
+  });
+
+  it("rejects a mandate branch that does not match the current git branch", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "main");
+    writeMandateConfig(root);
+    const errors: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message),
+      mandateStorePath: join(root, "state", "mandates.json")
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h"
+      ],
+      {
+        from: "user"
+      }
+    );
+
+    expect(errors).toEqual([
+      `error: mandate branch "fix/ci" does not match current git branch "main" in ${realpathSync(root)}`
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
   it("prints local audit logs as JSON", async () => {
     const root = makeTempProject();
     const logPath = join(root, "switchboard.jsonl");
@@ -1511,6 +1599,13 @@ function makeTempProject(): string {
   );
   mkdirSync(root, { recursive: true });
   return root;
+}
+
+function initGitRepo(root: string, branch: string): void {
+  execFileSync("git", ["init", "-b", branch], {
+    cwd: root,
+    stdio: "ignore"
+  });
 }
 
 function writeStdioConfig(root: string): void {

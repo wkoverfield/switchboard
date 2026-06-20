@@ -1,4 +1,4 @@
-import { mkdtemp, stat } from "node:fs/promises";
+import { mkdtemp, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -82,6 +82,49 @@ describe("mandates", () => {
       mandates: [expect.objectContaining({ id: "fix-ci" })]
     });
     expect((await stat(path)).mode & 0o777).toBe(0o600);
+  });
+
+  it("serializes concurrent mandate creates without losing records", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+
+    await Promise.all(
+      Array.from({ length: 12 }, (_, index) =>
+        createMandate({
+          path,
+          now: () => new Date("2026-06-19T16:00:00.000Z"),
+          task: `task-${index}`,
+          repoPath: join(root, "repo"),
+          worktreePath: join(root, "repo"),
+          branch: `fix/task-${index}`,
+          agentRole: "implementer",
+          profiles: ["github_findu"],
+          lease: "2h"
+        })
+      )
+    );
+
+    const store = await readMandateStore({ path });
+    expect(store.mandates).toHaveLength(12);
+    expect(store.mandates.map((mandate) => mandate.id).sort()).toEqual(
+      Array.from({ length: 12 }, (_, index) => `task-${index}`).sort()
+    );
+  });
+
+  it("rejects malformed mandate stores with a schema error", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        mandates: [{ version: 1, id: "broken" }]
+      })
+    );
+
+    await expect(readMandateStore({ path })).rejects.toThrow(
+      "invalid Switchboard mandate store"
+    );
   });
 
   it("rejects active duplicate ids for the same repo", async () => {
