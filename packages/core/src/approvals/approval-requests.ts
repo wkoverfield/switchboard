@@ -21,6 +21,7 @@ export const approvalRequestSchema = z.object({
   toolName: z.string().min(1),
   approvalGateId: z.string().min(1),
   approvalGatePattern: z.string().min(1),
+  approvalGateReason: z.string().min(1).optional(),
   status: z.enum(["pending", "approved", "denied", "stale"]),
   createdAt: z.string().min(1),
   expiresAt: z.string().min(1),
@@ -46,6 +47,7 @@ export interface CreateApprovalRequestOptions {
   toolName: string;
   approvalGateId: string;
   approvalGatePattern: string;
+  approvalGateReason?: string;
   expiresAt: string;
   path?: string;
   now?: () => Date;
@@ -154,6 +156,9 @@ export async function createApprovalRequest(
       toolName: options.toolName.trim(),
       approvalGateId: options.approvalGateId.trim(),
       approvalGatePattern: options.approvalGatePattern.trim(),
+      ...(options.approvalGateReason?.trim()
+        ? { approvalGateReason: options.approvalGateReason.trim() }
+        : {}),
       status: "pending",
       createdAt: createdAt.toISOString(),
       expiresAt: options.expiresAt

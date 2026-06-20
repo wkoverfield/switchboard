@@ -132,7 +132,16 @@ describe("mandates", () => {
       lease: "2h",
       allowedTools: ["github_findu_*", "github_findu_*"],
       deniedTools: ["*_deploy_prod"],
-      approvalRequiredTools: ["github_findu_checks_rerun", "github_findu_checks_rerun"]
+      approvalRequiredTools: [
+        {
+          toolPattern: "github_findu_checks_rerun",
+          reason: "rerunning CI changes remote state"
+        },
+        {
+          toolPattern: "github_findu_checks_rerun",
+          reason: "duplicate should be ignored"
+        }
+      ]
     });
 
     expect(mandate).toMatchObject({
@@ -144,7 +153,11 @@ describe("mandates", () => {
       allowedTools: ["github_findu_*"],
       deniedTools: ["*_deploy_prod"],
       approvalGates: [
-        { id: "gate-1", toolPattern: "github_findu_checks_rerun" }
+        {
+          id: "gate-1",
+          toolPattern: "github_findu_checks_rerun",
+          reason: "rerunning CI changes remote state"
+        }
       ],
       createdAt: "2026-06-19T16:00:00.000Z",
       expiresAt: "2026-06-19T18:00:00.000Z",
@@ -164,6 +177,32 @@ describe("mandates", () => {
       mandates: [expect.objectContaining({ id: "fix-ci" })]
     });
     expect((await stat(path)).mode & 0o777).toBe(0o600);
+  });
+
+  it("rejects approval gate reasons with control characters", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+
+    await expect(
+      createMandate({
+        path,
+        task: "fix-ci",
+        repoPath: join(root, "repo"),
+        worktreePath: join(root, "repo"),
+        branch: "fix/ci",
+        agentRole: "implementer",
+        profiles: ["github_findu"],
+        lease: "2h",
+        approvalRequiredTools: [
+          {
+            toolPattern: "github_findu_checks_rerun",
+            reason: "looks safe\nactually deploy prod"
+          }
+        ]
+      })
+    ).rejects.toThrow(
+      "approval gate reason must not contain control characters"
+    );
   });
 
   it("serializes concurrent mandate creates without losing records", async () => {

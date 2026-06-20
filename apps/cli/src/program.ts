@@ -707,6 +707,12 @@ export function createProgram(io: ProgramIo = {}): Command {
           collectOption,
           [] as string[]
         )
+        .option(
+          "--require-approval-reason <reason>",
+          "human reason for a required approval gate (repeatable, matches --require-approval-tool order)",
+          collectOption,
+          [] as string[]
+        )
         .option("--json", "print machine-readable JSON")
         .action(
           async (
@@ -719,6 +725,7 @@ export function createProgram(io: ProgramIo = {}): Command {
               allowTool: string[];
               denyTool: string[];
               requireApprovalTool: string[];
+              requireApprovalReason: string[];
               json?: boolean;
             }
           ) => {
@@ -757,6 +764,17 @@ export function createProgram(io: ProgramIo = {}): Command {
               process.exitCode = 1;
               return;
             }
+            if (
+              options.requireApprovalReason.length > 0 &&
+              options.requireApprovalReason.length !==
+                options.requireApprovalTool.length
+            ) {
+              writeErr(
+                "error: --require-approval-reason must be provided once for each --require-approval-tool"
+              );
+              process.exitCode = 1;
+              return;
+            }
             const path = io.mandateStorePath ?? resolveMandateStorePath();
 
             try {
@@ -771,7 +789,14 @@ export function createProgram(io: ProgramIo = {}): Command {
                 lease: options.lease,
                 allowedTools: options.allowTool,
                 deniedTools: options.denyTool,
-                approvalRequiredTools: options.requireApprovalTool
+                approvalRequiredTools: options.requireApprovalTool.map(
+                  (toolPattern, index) => ({
+                    toolPattern,
+                    ...(options.requireApprovalReason[index]
+                      ? { reason: options.requireApprovalReason[index] }
+                      : {})
+                  })
+                )
               });
               if (options.json) {
                 writeOut(JSON.stringify({ path, mandate }, null, 2));
@@ -1287,7 +1312,13 @@ function formatApprovalGates(
     return "none";
   }
 
-  return gates.map((gate) => `${gate.id}:${gate.toolPattern}`).join(separator);
+  return gates
+    .map((gate) =>
+      gate.reason
+        ? `${gate.id}:${gate.toolPattern}(${gate.reason})`
+        : `${gate.id}:${gate.toolPattern}`
+    )
+    .join(separator);
 }
 
 function formatApprovalRequests(result: {
@@ -1316,6 +1347,7 @@ function formatApprovalRequests(result: {
         `branch:${request.branch}`,
         `tool:${request.toolName}`,
         `gate:${request.approvalGateId}:${request.approvalGatePattern}`,
+        ...(request.approvalGateReason ? [`reason:${request.approvalGateReason}`] : []),
         `expires:${request.expiresAt}`
       ].join(" ")
     );
@@ -1356,6 +1388,7 @@ function formatApprovalDecision(
     `Mandate: ${request.mandateId}`,
     `Tool: ${request.toolName}`,
     `Gate: ${request.approvalGateId}:${request.approvalGatePattern}`,
+    ...(request.approvalGateReason ? [`Reason: ${request.approvalGateReason}`] : []),
     `Store: ${path}`
   ].join("\n");
 }

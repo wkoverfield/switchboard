@@ -36,3 +36,4 @@
 - Added bounded approval waits for daemon-backed mandate MCP calls with `switchboard mcp --approval-wait <duration>`.
 - Added stale approval request status for disconnected approval waits.
 - Added daemon-start invalidation for leftover pending approval requests.
+- Added approval gate reason metadata for mandate creation and approval requests.
