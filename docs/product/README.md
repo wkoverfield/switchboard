@@ -18,3 +18,6 @@ active-mandate surfaces before child mandate/delegation enforcement.
 
 `mandate-strategy.md` supersedes the older generic MCP profile-router thesis
 where they conflict, but mandates should not be mandatory for simple setup.
+
+For approval UX planning, read `approval-elicitation-research.md` before
+implementing client-specific behavior.
