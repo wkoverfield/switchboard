@@ -100,6 +100,20 @@ describe("mandates", () => {
       approvalRequired: true,
       approvalGate: { id: "gate-1", toolPattern: "github_findu_deploy_prod" }
     });
+    expect(
+      evaluateMandateToolPolicy("github_findu_deploy_prod", {
+        approvalGates: [
+          { id: "gate-1", toolPattern: "github_findu_deploy_prod" }
+        ],
+        approvedApprovalRequests: [
+          {
+            id: "approval-1",
+            approvalGateId: "gate-1",
+            toolName: "github_findu_deploy_prod"
+          }
+        ]
+      })
+    ).toEqual({ allowed: true, approvalRequestId: "approval-1" });
   });
 
   it("creates and lists persisted mandates with runtime status", async () => {

@@ -135,11 +135,16 @@ Implemented in the current codebase:
 - human `mandate status` policy display
 - mandate approval-required tool patterns
 - conservative approval-required runtime blocking
+- local approval request store
+- `switchboard approvals`
+- `switchboard approve <id>`
+- `switchboard deny <id>`
+- approved approval decisions honored by daemon-routed mandate calls
 
 Not started:
 
 - richer policy engine and operating modes
-- approval broker and approval request store
+- full approval broker and long-running in-call waits
 - secrets/keychain
 - provider presets
 - mandate-first onboarding
@@ -277,7 +282,8 @@ context is the differentiator.
 
 ### Milestone 6: Approval Broker
 
-Status: approval-gate foundation in progress; broker/store not started.
+Status: local approval request store foundation in progress; full broker not
+started.
 
 Original intent:
 
@@ -299,6 +305,10 @@ Next acceptable slice:
 - `switchboard mandate create --require-approval-tool <pattern>`
 - denied-by-default behavior for approval-required tools until approvals exist
 - audit entries tied to mandate id, tool, gate id, gate pattern, and reason
+- local pending approval store
+- `switchboard approvals`
+- `switchboard approve <id>` / `switchboard deny <id>`
+- runtime honors fresh approved decisions within mandate lease
 - no provider integrations
 
 ### Milestone 7: Secrets
@@ -637,10 +647,9 @@ Acceptance:
 
 Follow-up slice:
 
-- local pending approval store
-- `switchboard approvals`
-- `switchboard approve <id>` / `switchboard deny <id>`
-- runtime honors fresh approved decisions within mandate lease
+- in-call wait/poll behavior for clients that can tolerate pending tool calls
+- stale approval invalidation beyond lease expiry
+- richer approval reasons and policy labels
 
 ## Rules For Future Agents
 

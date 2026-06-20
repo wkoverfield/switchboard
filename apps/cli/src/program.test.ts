@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { createApprovalRequest } from "@switchboard-mcp/core";
 import { createProgram } from "./program.js";
 
 describe("switchboard CLI program", () => {
@@ -882,7 +883,8 @@ describe("switchboard CLI program", () => {
         toolPolicy: {
           allowedTools: ["github_findu_*"],
           deniedTools: [],
-          approvalGates: []
+          approvalGates: [],
+          approvedApprovalRequests: []
         },
         profiles: [
           {
@@ -1686,6 +1688,83 @@ describe("switchboard CLI program", () => {
     expect(errors).toEqual([
       `error: mandate branch "fix/ci" does not match current git branch "main" in ${realpathSync(root)}`
     ]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("lists, approves, and denies local approval requests", async () => {
+    const root = makeTempProject();
+    const approvalStorePath = join(root, "state", "approvals.json");
+    await createApprovalRequest({
+      path: approvalStorePath,
+      now: () => new Date("2026-06-20T15:00:00.000Z"),
+      mandateId: "fix-ci",
+      repoPath: root,
+      branch: "fix/ci",
+      toolName: "github_findu_deploy",
+      approvalGateId: "gate-1",
+      approvalGatePattern: "github_findu_deploy",
+      expiresAt: "2026-06-20T17:00:00.000Z"
+    });
+    await createApprovalRequest({
+      path: approvalStorePath,
+      now: () => new Date("2026-06-20T15:01:00.000Z"),
+      mandateId: "fix-ci",
+      repoPath: root,
+      branch: "fix/ci",
+      toolName: "github_findu_delete",
+      approvalGateId: "gate-2",
+      approvalGatePattern: "github_findu_delete",
+      expiresAt: "2026-06-20T17:00:00.000Z"
+    });
+
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = createProgram({
+      approvalStorePath,
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message)
+    });
+
+    await program.parseAsync(["--cwd", root, "approvals", "--json"], {
+      from: "user"
+    });
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      path: approvalStorePath,
+      repoPath: root,
+      requests: [
+        { id: "approval-1", runtimeStatus: "pending" },
+        { id: "approval-2", runtimeStatus: "pending" }
+      ]
+    });
+
+    await program.parseAsync(
+      ["approve", "approval-1", "--reason", "preview deploy", "--json"],
+      { from: "user" }
+    );
+    expect(JSON.parse(output[1] ?? "{}")).toMatchObject({
+      path: approvalStorePath,
+      request: {
+        id: "approval-1",
+        status: "approved",
+        runtimeStatus: "approved",
+        decisionReason: "preview deploy"
+      }
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "approvals", "--status", "approved"],
+      { from: "user" }
+    );
+    expect(output[2]).toContain("approval-1 approved");
+    expect(output[2]).not.toContain("approval-2");
+
+    await program.parseAsync(["deny", "approval-2"], { from: "user" });
+    expect(output[3]).toContain("Status: denied");
+
+    await program.parseAsync(["approvals", "--status", "stale"], {
+      from: "user"
+    });
+    expect(errors).toEqual(["error: --status must be pending, approved, or denied"]);
     expect(process.exitCode).toBe(1);
   });
 

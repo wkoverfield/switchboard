@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createMandate,
+  decideApprovalRequest,
+  listApprovalRequests,
   readAuditLogEntries,
   resolveAuditLogPath
 } from "@switchboard-mcp/core";
@@ -159,8 +161,19 @@ describe("daemon runtime mandate context", () => {
     ).resolves.toMatchObject({
       id: "call",
       ok: false,
-      error: 'tool "github_findu_echo" requires approval by mandate gate "gate-1"'
+      error:
+        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1'
     });
+    await expect(
+      listApprovalRequests({ repoPath: root, mandateId: "fix-ci" })
+    ).resolves.toMatchObject([
+      {
+        id: "approval-1",
+        runtimeStatus: "pending",
+        toolName: "github_findu_echo",
+        approvalGateId: "gate-1"
+      }
+    ]);
     await expect(
       readAuditLogEntries({ path: resolveAuditLogPath(), mandateId: "fix-ci" })
     ).resolves.toMatchObject([
@@ -169,12 +182,62 @@ describe("daemon runtime mandate context", () => {
         status: "error",
         mandateId: "fix-ci",
         toolName: "github_findu_echo",
+        approvalRequestId: "approval-1",
         approvalGateId: "gate-1",
         approvalGatePattern: "github_findu_echo",
         error:
           'tool "github_findu_echo" requires approval by mandate gate "gate-1"'
       }
     ]);
+  });
+
+  it("routes approval-gated daemon calls after a request is approved", async () => {
+    const root = await makeApprovalRepo();
+
+    await handleDaemonRequest(
+      JSON.stringify({
+        id: "call",
+        type: "call_tool",
+        name: "github_findu_echo",
+        mandateId: "fix-ci",
+        arguments: { message: "hello" }
+      }),
+      { cwd: root }
+    );
+    await decideApprovalRequest({
+      id: "approval-1",
+      status: "approved"
+    });
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "call",
+          type: "call_tool",
+          name: "github_findu_echo",
+          mandateId: "fix-ci",
+          arguments: { message: "hello" }
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "call",
+      ok: true,
+      type: "tool_result"
+    });
+    await expect(
+      readAuditLogEntries({ path: resolveAuditLogPath(), mandateId: "fix-ci" })
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "tool_call",
+          status: "ok",
+          mandateId: "fix-ci",
+          toolName: "github_findu_echo",
+          approvalRequestId: "approval-1"
+        })
+      ])
+    );
   });
 
   it("filters approval-gated tools from daemon list_tools results", async () => {
@@ -213,7 +276,8 @@ describe("daemon runtime mandate context", () => {
     ).resolves.toMatchObject({
       id: "call",
       ok: false,
-      error: 'tool "github_findu_echo" requires approval by mandate gate "gate-1"'
+      error:
+        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1'
     });
   });
 });

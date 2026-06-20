@@ -36,6 +36,7 @@ logged by this foundation slice. When MCP runtime commands run with
 Tool calls denied by mandate allow/deny patterns are logged as `tool_call`
 entries with `status: "error"` and a redacted policy error message.
 Tool calls blocked by mandate approval gates are also logged as `tool_call`
-errors with the mandate id, tool name, approval gate id, and gate pattern.
+errors with the mandate id, tool name, approval request id, approval gate id,
+and gate pattern.
 
 Audit logs are local only. Switchboard does not upload audit logs automatically.

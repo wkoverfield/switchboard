@@ -137,6 +137,9 @@ export class GenericMcpRouter {
             profileName: route.profileName,
             toolName: route.namespacedName,
             upstreamName: route.upstreamName,
+            ...(policyDecision.approvalRequestId
+              ? { approvalRequestId: policyDecision.approvalRequestId }
+              : {}),
             durationMs: Date.now() - startedAt
           },
           profile?.namespace

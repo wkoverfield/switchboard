@@ -3,10 +3,13 @@ import { mkdir, rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, resolve } from "node:path";
 import {
+  createApprovalRequest,
   createJsonlAuditLogger,
   createDaemonState,
+  findApprovedApprovalRequest,
   getDaemonStatus,
   evaluateMandateToolPolicy,
+  listApprovalRequests,
   loadSwitchboardConfig,
   removeDaemonState,
   resolveActiveMandate,
@@ -433,17 +436,52 @@ async function callConfiguredTool(
   const router = routerResult.router;
   try {
     if (routerResult.mandate) {
+      const approvedApprovalRequests =
+        await approvedApprovalRequestsForMandate(routerResult.mandate);
       const policyDecision = evaluateMandateToolPolicy(name, {
         allowedTools: routerResult.mandate.allowedTools,
         deniedTools: routerResult.mandate.deniedTools,
-        approvalGates: routerResult.mandate.approvalGates
+        approvalGates: routerResult.mandate.approvalGates,
+        approvedApprovalRequests
       });
       if (!policyDecision.allowed) {
+        let approvalRequestId: string | undefined;
+        if ("approvalRequired" in policyDecision) {
+          const approved = await findApprovedApprovalRequest({
+            mandateId: routerResult.mandate.id,
+            repoPath: routerResult.mandate.repoPath,
+            toolName: name,
+            approvalGateId: policyDecision.approvalGate.id
+          });
+          if (approved) {
+            await router.discoverTools();
+            return {
+              id,
+              ok: true,
+              type: "tool_result",
+              version: daemonProtocolVersion,
+              result: await router.callTool(name, args)
+            };
+          }
+
+          const request = await createApprovalRequest({
+            mandateId: routerResult.mandate.id,
+            repoPath: routerResult.mandate.repoPath,
+            branch: routerResult.mandate.branch,
+            toolName: name,
+            approvalGateId: policyDecision.approvalGate.id,
+            approvalGatePattern: policyDecision.approvalGate.toolPattern,
+            expiresAt: routerResult.mandate.expiresAt
+          });
+          approvalRequestId = request.id;
+        }
+
         await safeAuditLog(createJsonlAuditLogger(), {
           action: "tool_call",
           status: "error",
           toolName: name,
           mandateId: routerResult.mandate.id,
+          ...(approvalRequestId ? { approvalRequestId } : {}),
           ...("approvalRequired" in policyDecision
             ? {
                 approvalGateId: policyDecision.approvalGate.id,
@@ -455,7 +493,9 @@ async function callConfiguredTool(
         return {
           id,
           ok: false,
-          error: policyDecision.reason
+          error: approvalRequestId
+            ? `${policyDecision.reason}; approval request ${approvalRequestId}`
+            : policyDecision.reason
         };
       }
     }
@@ -537,12 +577,33 @@ async function routerForConfiguredProfiles(
             toolPolicy: {
               allowedTools: mandate.allowedTools,
               deniedTools: mandate.deniedTools,
-              approvalGates: mandate.approvalGates
+              approvalGates: mandate.approvalGates,
+              approvedApprovalRequests: await approvedApprovalRequestsForMandate(
+                mandate
+              )
             }
           }
         : {})
     })
   };
+}
+
+async function approvedApprovalRequestsForMandate(
+  mandate: MandateWithStatus
+): Promise<Array<{ id: string; approvalGateId: string; toolName: string }>> {
+  const requests = await listApprovalRequests({
+    repoPath: mandate.repoPath,
+    mandateId: mandate.id,
+    status: "approved"
+  });
+
+  return requests
+    .filter((request) => request.runtimeStatus === "approved")
+    .map((request) => ({
+      id: request.id,
+      approvalGateId: request.approvalGateId,
+      toolName: request.toolName
+    }));
 }
 
 function loadedConfigError(

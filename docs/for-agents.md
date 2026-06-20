@@ -12,6 +12,7 @@ switchboard status
 switchboard doctor
 switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration>
 switchboard mandate status
+switchboard approvals
 switchboard logs --mandate <id>
 ```
 
