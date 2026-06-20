@@ -71,7 +71,7 @@ switchboard logs --mandate fix-ci
 
 ## Current State
 
-Implemented on `main` through PR #25:
+Implemented in the current codebase:
 
 - TypeScript pnpm workspace
 - `@switchboard-mcp/cli`
@@ -133,11 +133,13 @@ Implemented on `main` through PR #25:
 - pre-discovery daemon denial for disallowed mandate tool calls
 - denied-call audit entries
 - human `mandate status` policy display
+- mandate approval-required tool patterns
+- conservative approval-required runtime blocking
 
 Not started:
 
 - richer policy engine and operating modes
-- approval broker
+- approval broker and approval request store
 - secrets/keychain
 - provider presets
 - mandate-first onboarding
@@ -275,7 +277,7 @@ context is the differentiator.
 
 ### Milestone 6: Approval Broker
 
-Status: not started; should be the next enforcement depth after tool policy.
+Status: approval-gate foundation in progress; broker/store not started.
 
 Original intent:
 
@@ -294,10 +296,9 @@ Next acceptable slice:
 
 - replace the placeholder `approvalGates` array with typed gate records on
   mandates
-- local pending approval store
-- `switchboard approvals` / `switchboard approve <id>` skeleton
-- denied-by-default behavior for approval-required tools when no approval exists
-- audit entries tied to mandate id, tool, decision, and reason
+- `switchboard mandate create --require-approval-tool <pattern>`
+- denied-by-default behavior for approval-required tools until approvals exist
+- audit entries tied to mandate id, tool, gate id, gate pattern, and reason
 - no provider integrations
 
 ### Milestone 7: Secrets
@@ -629,11 +630,17 @@ Acceptance:
 - daemon/runtime detects approval-required calls under an active mandate
 - initial behavior is conservative: block with an auditable approval-required
   error until an approval store exists
-- `switchboard approvals` can list pending requests once the store is added
 - audit entries include mandate id, tool name, gate id or pattern, and status
 - no provider presets
 - no secrets broker
 - no remote service
+
+Follow-up slice:
+
+- local pending approval store
+- `switchboard approvals`
+- `switchboard approve <id>` / `switchboard deny <id>`
+- runtime honors fresh approved decisions within mandate lease
 
 ## Rules For Future Agents
 

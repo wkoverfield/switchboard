@@ -30,3 +30,4 @@
 - Added mandate-scoped MCP runtime context through `switchboard mcp --mandate` and `switchboard serve --mandate`.
 - Added mandate allow/deny tool patterns with denied-call audit entries.
 - Reframed product docs around Switchboard as the local mandate layer for coding agents, with provider presets deferred behind mandate-aware policy, approvals, audit, and secrets.
+- Added mandate approval-required tool patterns with conservative runtime blocking and audit gate metadata.

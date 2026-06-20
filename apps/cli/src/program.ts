@@ -11,6 +11,7 @@ import {
   listMandates,
   type LoadConfigOptions,
   loadSwitchboardConfig,
+  type MandateToolPolicy,
   type MandateWithStatus,
   noopAuditLogger,
   namespacesForProfiles,
@@ -67,7 +68,7 @@ export interface ProgramIo {
     options?: {
       auditLogger?: AuditLogger;
       mandateId?: string;
-      toolPolicy?: { allowedTools?: string[]; deniedTools?: string[] };
+      toolPolicy?: MandateToolPolicy;
     }
   ) => Promise<void>;
   testProfile?: (
@@ -526,7 +527,8 @@ export function createProgram(io: ProgramIo = {}): Command {
               mandateId: mandate.id,
               toolPolicy: {
                 allowedTools: mandate.allowedTools,
-                deniedTools: mandate.deniedTools
+                deniedTools: mandate.deniedTools,
+                approvalGates: mandate.approvalGates
               }
             }
           : {})
@@ -651,6 +653,12 @@ export function createProgram(io: ProgramIo = {}): Command {
           collectOption,
           [] as string[]
         )
+        .option(
+          "--require-approval-tool <pattern>",
+          "require approval for a namespaced tool pattern (repeatable)",
+          collectOption,
+          [] as string[]
+        )
         .option("--json", "print machine-readable JSON")
         .action(
           async (
@@ -662,6 +670,7 @@ export function createProgram(io: ProgramIo = {}): Command {
               lease: string;
               allowTool: string[];
               denyTool: string[];
+              requireApprovalTool: string[];
               json?: boolean;
             }
           ) => {
@@ -713,7 +722,8 @@ export function createProgram(io: ProgramIo = {}): Command {
                 profiles,
                 lease: options.lease,
                 allowedTools: options.allowTool,
-                deniedTools: options.denyTool
+                deniedTools: options.denyTool,
+                approvalRequiredTools: options.requireApprovalTool
               });
               if (options.json) {
                 writeOut(JSON.stringify({ path, mandate }, null, 2));
@@ -1091,6 +1101,7 @@ function formatMandateCreated(path: string, mandate: MandateWithStatus): string 
     `Profiles: ${mandate.profiles.join(", ")}`,
     `Allowed tools: ${mandate.allowedTools.length > 0 ? mandate.allowedTools.join(", ") : "all"}`,
     `Denied tools: ${mandate.deniedTools.length > 0 ? mandate.deniedTools.join(", ") : "none"}`,
+    `Approval gates: ${formatApprovalGates(mandate.approvalGates)}`,
     `Lease: ${mandate.lease}`,
     `Status: ${mandate.runtimeStatus}`,
     `Expires: ${mandate.expiresAt}`,
@@ -1125,12 +1136,24 @@ function formatMandateStatus(result: {
         `profiles:${mandate.profiles.join(",")}`,
         `allow:${mandate.allowedTools.length > 0 ? mandate.allowedTools.join(",") : "all"}`,
         `deny:${mandate.deniedTools.length > 0 ? mandate.deniedTools.join(",") : "none"}`,
+        `approval:${formatApprovalGates(mandate.approvalGates, ",")}`,
         `expires:${mandate.expiresAt}`
       ].join(" ")
     );
   }
 
   return lines.join("\n");
+}
+
+function formatApprovalGates(
+  gates: MandateWithStatus["approvalGates"],
+  separator = ", "
+): string {
+  if (gates.length === 0) {
+    return "none";
+  }
+
+  return gates.map((gate) => `${gate.id}:${gate.toolPattern}`).join(separator);
 }
 
 function formatAuditLogs(
@@ -1157,6 +1180,9 @@ function formatAuditLogs(
     }
     if (entry.mandateId) {
       labelParts.push(`mandate:${entry.mandateId}`);
+    }
+    if (entry.approvalGateId) {
+      labelParts.push(`gate:${entry.approvalGateId}`);
     }
     if (entry.durationMs !== undefined) {
       labelParts.push(`${entry.durationMs}ms`);
@@ -1434,7 +1460,7 @@ async function serveProfilesOverStdio(
   options: {
     auditLogger?: AuditLogger;
     mandateId?: string;
-    toolPolicy?: { allowedTools?: string[]; deniedTools?: string[] };
+    toolPolicy?: MandateToolPolicy;
   } = {}
 ): Promise<void> {
   const router = new GenericMcpRouter(

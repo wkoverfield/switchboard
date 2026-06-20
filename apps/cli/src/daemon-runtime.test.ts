@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { createMandate, readAuditLogEntries, resolveAuditLogPath } from "@switchboard-mcp/core";
+import {
+  createMandate,
+  readAuditLogEntries,
+  resolveAuditLogPath
+} from "@switchboard-mcp/core";
 import { handleDaemonRequest } from "./daemon-runtime.js";
 
 const fixtureServerPath = fileURLToPath(
@@ -137,6 +141,81 @@ describe("daemon runtime mandate context", () => {
       error: 'tool "github_findu_whoami" is not allowed by mandate policy'
     });
   });
+
+  it("rejects approval-gated daemon calls with audit metadata", async () => {
+    const root = await makeApprovalRepo();
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "call",
+          type: "call_tool",
+          name: "github_findu_echo",
+          mandateId: "fix-ci",
+          arguments: {}
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "call",
+      ok: false,
+      error: 'tool "github_findu_echo" requires approval by mandate gate "gate-1"'
+    });
+    await expect(
+      readAuditLogEntries({ path: resolveAuditLogPath(), mandateId: "fix-ci" })
+    ).resolves.toMatchObject([
+      {
+        action: "tool_call",
+        status: "error",
+        mandateId: "fix-ci",
+        toolName: "github_findu_echo",
+        approvalGateId: "gate-1",
+        approvalGatePattern: "github_findu_echo",
+        error:
+          'tool "github_findu_echo" requires approval by mandate gate "gate-1"'
+      }
+    ]);
+  });
+
+  it("filters approval-gated tools from daemon list_tools results", async () => {
+    const root = await makeApprovalRepo();
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "list",
+          type: "list_tools",
+          mandateId: "fix-ci"
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "list",
+      ok: true,
+      tools: [expect.objectContaining({ name: "github_findu_whoami" })]
+    });
+  });
+
+  it("rejects approval-gated daemon calls before opening upstream sessions", async () => {
+    const root = await makeBrokenApprovalRepo();
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "call",
+          type: "call_tool",
+          name: "github_findu_echo",
+          mandateId: "fix-ci",
+          arguments: {}
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "call",
+      ok: false,
+      error: 'tool "github_findu_echo" requires approval by mandate gate "gate-1"'
+    });
+  });
 });
 
 async function makeMandateRepoOnWrongBranch(): Promise<string> {
@@ -192,6 +271,71 @@ async function makeBrokenPolicyRepo(): Promise<string> {
     agentRole: "implementer",
     profiles: ["github_findu"],
     allowedTools: ["github_findu_echo"],
+    lease: "2h"
+  });
+
+  return root;
+}
+
+async function makeBrokenApprovalRepo(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "switchboard-daemon-runtime-"));
+  process.env.XDG_STATE_HOME = join(root, "state");
+  await writeFile(
+    join(root, ".switchboard.yaml"),
+    [
+      "version: 1",
+      "profiles:",
+      "  github_findu:",
+      "    provider: generic",
+      "    namespace: github_findu",
+      "    upstream:",
+      "      type: stdio",
+      "      command: definitely-not-a-real-switchboard-command"
+    ].join("\n")
+  );
+  await createMandate({
+    task: "fix-ci",
+    repoPath: root,
+    worktreePath: root,
+    branch: "fix/ci",
+    agentRole: "implementer",
+    profiles: ["github_findu"],
+    allowedTools: ["github_findu_*"],
+    approvalRequiredTools: ["github_findu_echo"],
+    lease: "2h"
+  });
+
+  return root;
+}
+
+async function makeApprovalRepo(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "switchboard-daemon-runtime-"));
+  process.env.XDG_STATE_HOME = join(root, "state");
+  await writeFile(
+    join(root, ".switchboard.yaml"),
+    [
+      "version: 1",
+      "profiles:",
+      "  github_findu:",
+      "    provider: generic",
+      "    namespace: github_findu",
+      "    upstream:",
+      "      type: stdio",
+      `      command: ${JSON.stringify(process.execPath)}`,
+      "      args:",
+      `        - ${JSON.stringify(fixtureServerPath)}`,
+      "        - github-findu"
+    ].join("\n")
+  );
+  await createMandate({
+    task: "fix-ci",
+    repoPath: root,
+    worktreePath: root,
+    branch: "fix/ci",
+    agentRole: "implementer",
+    profiles: ["github_findu"],
+    allowedTools: ["github_findu_*"],
+    approvalRequiredTools: ["github_findu_echo"],
     lease: "2h"
   });
 

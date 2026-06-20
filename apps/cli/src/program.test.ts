@@ -501,6 +501,8 @@ describe("switchboard CLI program", () => {
         "github_findu_*",
         "--deny-tool",
         "*_deploy_prod",
+        "--require-approval-tool",
+        "github_findu_checks_rerun",
         "--json"
       ],
       { from: "user" }
@@ -879,7 +881,8 @@ describe("switchboard CLI program", () => {
         mandateId: "fix-ci",
         toolPolicy: {
           allowedTools: ["github_findu_*"],
-          deniedTools: []
+          deniedTools: [],
+          approvalGates: []
         },
         profiles: [
           {
@@ -1496,6 +1499,8 @@ describe("switchboard CLI program", () => {
         "github_findu_*",
         "--deny-tool",
         "*_deploy_prod",
+        "--require-approval-tool",
+        "github_findu_checks_rerun",
         "--json"
       ],
       {
@@ -1515,6 +1520,9 @@ describe("switchboard CLI program", () => {
         profiles: ["github_findu", "vercel_preview"],
         allowedTools: ["github_findu_*"],
         deniedTools: ["*_deploy_prod"],
+        approvalGates: [
+          { id: "gate-1", toolPattern: "github_findu_checks_rerun" }
+        ],
         lease: "2h",
         runtimeStatus: "active"
       }
@@ -1534,6 +1542,9 @@ describe("switchboard CLI program", () => {
           agentRole: "implementer",
           allowedTools: ["github_findu_*"],
           deniedTools: ["*_deploy_prod"],
+          approvalGates: [
+            { id: "gate-1", toolPattern: "github_findu_checks_rerun" }
+          ],
           runtimeStatus: "active"
         }
       ]
@@ -1544,6 +1555,7 @@ describe("switchboard CLI program", () => {
     });
     expect(output[2]).toContain("allow:github_findu_*");
     expect(output[2]).toContain("deny:*_deploy_prod");
+    expect(output[2]).toContain("approval:gate-1:github_findu_checks_rerun");
   });
 
   it("fails mandate status for a missing id", async () => {
