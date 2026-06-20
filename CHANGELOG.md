@@ -29,3 +29,4 @@
 - Added local mandate persistence plus `switchboard mandate create`, `switchboard mandate status`, and `switchboard logs --mandate`.
 - Added mandate-scoped MCP runtime context through `switchboard mcp --mandate` and `switchboard serve --mandate`.
 - Added mandate allow/deny tool patterns with denied-call audit entries.
+- Reframed product docs around Switchboard as the local mandate layer for coding agents, with provider presets deferred behind mandate-aware policy, approvals, audit, and secrets.

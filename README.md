@@ -4,7 +4,7 @@ Task-scoped authority for agentic software work.
 
 Switchboard is evolving into the local mandate layer for coding agents: a way to give agents bounded jobs without giving them your whole life. The current foundation is a local-first MCP router for developers using Codex, Claude Code, Cursor, VS Code, and other MCP-compatible agents. It makes multi-account, multi-project, and dev/staging/prod tool access explicit, namespaced, policy-aware, and locally auditable.
 
-This repository is in foundation work for the local mandate layer. It currently ships the TypeScript workspace, CLI shell, config/profile schemas, namespace normalization, collision detection, `switchboard status`, `switchboard doctor`, generic stdio MCP upstream mounting, namespaced tool routing, a stdio MCP front door, client config dry-run and write-mode installers for Codex and Claude Code, project client config and existing MCP server detection in doctor, local audit logs, daemon lifecycle commands, daemon-side tool discovery, a daemon-backed MCP adapter for tool listing and routed calls, local mandate creation/status, mandate-scoped MCP runtime context, and end-to-end MCP smoke checks.
+This repository is in foundation work for the local mandate layer. It currently ships the TypeScript workspace, CLI shell, config/profile schemas, namespace normalization, collision detection, `switchboard status`, `switchboard doctor`, generic stdio MCP upstream mounting, namespaced tool routing, a stdio MCP front door, client config dry-run and write-mode installers for Codex and Claude Code, project client config and existing MCP server detection in doctor, local audit logs, daemon lifecycle commands, daemon-side tool discovery, a daemon-backed MCP adapter for tool listing and routed calls, local mandate creation/status, mandate-scoped MCP runtime context, mandate allow/deny tool policy, and end-to-end MCP smoke checks.
 
 ## Install From Source
 
@@ -28,7 +28,7 @@ switchboard install <codex|claude>
 switchboard install <codex|claude> --write
 switchboard install <codex|claude> --rollback <backup>
 switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration>
-switchboard mandate create <task> --allow-tool <pattern> --deny-tool <pattern>
+switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --allow-tool <pattern> --deny-tool <pattern>
 switchboard mandate status [id]
 switchboard logs
 switchboard logs --mandate <id>
