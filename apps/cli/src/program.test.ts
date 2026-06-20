@@ -1582,6 +1582,14 @@ describe("switchboard CLI program", () => {
         ],
         lease: "2h",
         runtimeStatus: "active"
+      },
+      mcpLaunch: {
+        schemaVersion: "switchboard.mcp-launch.v1",
+        transport: "stdio",
+        mandateId: "fix-ci",
+        cwd: root,
+        command: "switchboard",
+        args: ["--cwd", root, "mcp", "--mandate", "fix-ci"]
       }
     });
 
