@@ -22,6 +22,7 @@ export interface SwitchboardMcpServerOptions {
 }
 
 export interface DaemonBackedMcpServerOptions extends SwitchboardMcpServerOptions {
+  mandateId?: string;
   listTools?: () => Promise<NamespacedTool[]>;
   callTool?: (
     name: string,
@@ -74,13 +75,21 @@ export function createDaemonBackedSwitchboardMcpServer(
   const listTools =
     options.listTools ??
     (async () => {
-      const response = await listDaemonTools(socketPath);
+      const response = await listDaemonTools(
+        socketPath,
+        options.mandateId ? { mandateId: options.mandateId } : {}
+      );
       return response.tools;
     });
   const callTool =
     options.callTool ??
     (async (name: string, args?: Record<string, unknown>) => {
-      const response = await callDaemonTool(socketPath, name, args);
+      const response = await callDaemonTool(
+        socketPath,
+        name,
+        args,
+        options.mandateId ? { mandateId: options.mandateId } : {}
+      );
       return response.result;
     });
   const server = new Server(

@@ -66,6 +66,13 @@ export interface ListMandatesOptions {
   now?: () => Date;
 }
 
+export interface ResolveActiveMandateOptions {
+  id: string;
+  repoPath: string;
+  path?: string;
+  now?: () => Date;
+}
+
 export function resolveMandateStorePath(
   options: PathResolutionOptions = {}
 ): string {
@@ -196,6 +203,31 @@ export async function listMandates(
     .filter((mandate) => (repoPath ? mandate.repoPath === repoPath : true))
     .filter((mandate) => (id ? mandate.id === id : true))
     .map((mandate) => withRuntimeStatus(mandate, now));
+}
+
+export async function resolveActiveMandate(
+  options: ResolveActiveMandateOptions
+): Promise<MandateWithStatus> {
+  const id = normalizeMandateId(options.id);
+  if (!id) {
+    throw new Error("mandate id is required");
+  }
+
+  const mandates = await listMandates({
+    ...(options.path ? { path: options.path } : {}),
+    repoPath: options.repoPath,
+    id,
+    ...(options.now ? { now: options.now } : {})
+  });
+  const mandate = mandates[0];
+  if (!mandate) {
+    throw new Error(`mandate "${id}" was not found for ${resolve(options.repoPath)}`);
+  }
+  if (mandate.runtimeStatus !== "active") {
+    throw new Error(`mandate "${id}" is expired`);
+  }
+
+  return mandate;
 }
 
 export async function readMandateStore(options: {
