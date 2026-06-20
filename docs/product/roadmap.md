@@ -40,7 +40,7 @@ Switchboard should win by making delegated coding-agent work bounded:
 
 ## Current State
 
-Implemented on `main` through PR #20:
+Implemented on `main` through PR #21:
 
 - TypeScript pnpm workspace
 - `@switchboard-mcp/cli`
@@ -85,6 +85,7 @@ Implemented on `main` through PR #20:
 - project-scoped Codex/Claude install writes with backups and rollback
 - project Codex/Claude client config detection in `switchboard doctor`
 - existing project MCP server name discovery in `switchboard doctor`
+- mandate strategy and roadmap pivot toward task-scoped authority
 
 Not started:
 
@@ -500,7 +501,7 @@ Acceptance:
 - Discovery is read-only and does not import or mutate config
 - Existing missing/installed/stale/invalid client status behavior remains intact
 
-### Current Slice: Mandate Strategy Pivot
+### Completed Slice: Mandate Strategy Pivot
 
 Goal: update product direction so Switchboard's durable wedge is task-scoped
 authority for coding agents, not generic MCP gateway/profile routing alone.
@@ -512,7 +513,7 @@ Acceptance:
 - Provider presets are explicitly gated behind mandate/secrets/policy work
 - Next build slice is mandate foundation rather than provider integrations
 
-### Next Slice: Mandate Foundation
+### Current Slice: Mandate Foundation
 
 Goal: create the smallest local mandate primitive without claiming full
 enforcement yet.
