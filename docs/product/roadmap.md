@@ -1,11 +1,11 @@
 # Switchboard Roadmap
 
-Last updated: 2026-06-19
+Last updated: 2026-06-20
 
 This is the working roadmap for Switchboard. The source planning documents live in
-`docs/product/source/` and remain the product source of truth when this roadmap is
-ambiguous, except where the mandate strategy explicitly supersedes the earlier
-profile-router framing.
+`docs/product/source/` and are preserved source material from the original
+planning thread. They are no longer product source of truth when they conflict
+with this roadmap or `docs/product/mandate-strategy.md`.
 
 ## Source Documents
 
@@ -38,9 +38,40 @@ Switchboard should win by making delegated coding-agent work bounded:
 - clear profile namespaces so duplicate tool names are safe
 - local-first config, secrets, and policy enforcement
 
+## Product Compass Reset
+
+Do not hard-pivot away from the infrastructure already built. Daemon-backed MCP
+routing, project-scoped Codex/Claude install, reversible config writes, profile
+routing, namespaces, repo-aware config, and audit logs are all required substrate
+for mandates.
+
+But do stop expanding the old thesis as a generic MCP profile manager. The next
+roadmap should optimize for:
+
+- task-scoped authority over static profile inheritance
+- mandate/audit/policy/approval depth over provider breadth
+- repo/worktree/branch-aware local enforcement over cloud gateway breadth
+- reversible client install as distribution plumbing, not the product center
+
+Provider presets should wait until mandate-aware approval, audit, and secrets
+gates have enough shape to keep them honest. The better next demo is:
+
+```bash
+switchboard mandate create fix-ci \
+  --agent implementer \
+  --profiles github_findu,vercel_preview \
+  --branch fix/ci \
+  --lease 2h \
+  --allow-tool 'github_findu_*' \
+  --deny-tool '*_deploy_prod'
+
+switchboard mandate status
+switchboard logs --mandate fix-ci
+```
+
 ## Current State
 
-Implemented on `main` through PR #24, plus the current mandate-tool-policy branch:
+Implemented on `main` through PR #25:
 
 - TypeScript pnpm workspace
 - `@switchboard-mcp/cli`
@@ -98,7 +129,10 @@ Implemented on `main` through PR #24, plus the current mandate-tool-policy branc
 - mandate-linked MCP tool-call audit entries
 - mandate allow/deny tool patterns
 - call-time mandate tool policy enforcement
+- policy-filtered MCP `tools/list` under active mandates
+- pre-discovery daemon denial for disallowed mandate tool calls
 - denied-call audit entries
+- human `mandate status` policy display
 
 Not started:
 
@@ -106,7 +140,7 @@ Not started:
 - approval broker
 - secrets/keychain
 - provider presets
-- guided onboarding
+- mandate-first onboarding
 - global/user-scope client installers
 - Supabase, Stripe, PostHog, or Sentry integrations
 
@@ -170,7 +204,7 @@ Remaining useful hardening:
 
 ### Milestone 3: Stdio Adapter + Local Daemon
 
-Status: lifecycle foundation in progress.
+Status: foundation complete; long-lived upstream session/cache work deferred.
 
 Original intent:
 
@@ -188,10 +222,13 @@ Foundation slice:
 - local JSON socket heartbeat
 - stale daemon cleanup
 - lifecycle smoke test
+- `switchboard mcp` stdio adapter
+- daemon-backed MCP `tools/list` and `tools/call`
+- auto-start from MCP adapter
 
 ### Milestone 4: Audit Logs + Doctor
 
-Status: audit foundation complete, doctor guidance in progress.
+Status: audit foundation and doctor guidance complete for the current substrate.
 
 Original intent:
 
@@ -207,6 +244,8 @@ Foundation slice:
 - profile-test audit entries
 - routed tool-call audit entries
 - `switchboard logs`
+- `switchboard logs --mandate`
+- denied mandate policy audit entries
 - local-only audit docs
 
 Why it matters soon:
@@ -216,7 +255,7 @@ policy, approval, and provider-specific behavior exist.
 
 ### Milestone 5: Policy Engine + Operating Modes
 
-Status: not started; should be mandate-aware.
+Status: thin mandate tool policy shipped; richer engine not started.
 
 Original modes:
 
@@ -227,8 +266,8 @@ Original modes:
 
 Recommended constraint:
 
-Keep these as config/schema concepts until the daemon/audit layer exists. Avoid
-implying enforcement that Switchboard cannot yet provide.
+Keep operating modes as config/schema concepts until approval and secrets are
+designed. Avoid implying enforcement that Switchboard cannot yet provide.
 
 Policy rules should be evaluated in the context of a mandate, not only a static
 profile. Profile-level policy remains useful, but task/repo/worktree/branch/role
@@ -236,7 +275,7 @@ context is the differentiator.
 
 ### Milestone 6: Approval Broker
 
-Status: not started; should be mandate-aware.
+Status: not started; should be the next enforcement depth after tool policy.
 
 Original intent:
 
@@ -247,9 +286,19 @@ Original intent:
 
 Do not build before:
 
-- daemon lifecycle
-- audit log
-- basic policy classification
+- daemon lifecycle: shipped
+- audit log: shipped
+- basic policy classification: thin allow/deny shipped
+
+Next acceptable slice:
+
+- replace the placeholder `approvalGates` array with typed gate records on
+  mandates
+- local pending approval store
+- `switchboard approvals` / `switchboard approve <id>` skeleton
+- denied-by-default behavior for approval-required tools when no approval exists
+- audit entries tied to mandate id, tool, decision, and reason
+- no provider integrations
 
 ### Milestone 7: Secrets
 
@@ -261,7 +310,8 @@ Original intent:
 - env references as fallback
 - no raw provider secrets in repo config or agent config
 
-Do not build provider presets before this has at least a minimal design.
+Do not build provider presets before this has at least a minimal mandate-aware
+design.
 
 Secrets should be granted to agents through a mandate lease where possible, not
 through permanent inherited profile access.
@@ -302,25 +352,31 @@ migrate.
 
 ### Milestone 9: Guided Onboarding
 
-Status: partly pulled forward.
+Status: mostly pulled forward for profile/router setup; mandate onboarding still
+thin.
 
 Already shipped:
 
 - `switchboard test <profile>`
 - Codex/Claude client config dry-runs
+- project-scoped Codex/Claude writes with rollback
 - local audit log viewing
+- `switchboard init`
+- existing MCP config detection and read-only discovery
+- dry-run/reversible writes
+- doctor + profile test next-step guidance
 
 Still needed:
 
-- `switchboard init`
-- existing MCP config detection/import
-- one-provider-first flow
-- dry-run/reversible writes
-- final doctor + profile test + copyable agent prompt
+- mandate-first onboarding copy
+- one-task-first flow instead of one-provider-first flow
+- copyable agent prompt that includes the active mandate id
+- optional helper for installing a client entry that starts under a selected
+  mandate
 
 ### Milestone 10: Provider Presets
 
-Status: not started.
+Status: not started; deliberately deferred.
 
 Original order:
 
@@ -329,11 +385,16 @@ Original order:
 
 Gate before starting:
 
-- mandate foundation
+- mandate foundation: shipped
+- mandate runtime context: shipped
+- mandate allow/deny tool policy: shipped
 - secrets plan
 - provider-specific doctor checks
 - clear read/write/default mode policy
 - audit story
+
+New constraint: a provider preset must serve a mandate use case, such as a
+bounded GitHub/Vercel CI-fix demo, rather than broad connector coverage.
 
 ### Milestone 11: Agent Discovery Kit + Distribution Assets
 
@@ -525,7 +586,7 @@ Acceptance:
 - Provider presets are explicitly gated behind mandate/secrets/policy work
 - Next build slice is mandate foundation rather than provider integrations
 
-### Current Slice: Mandate Tool Policy
+### Completed Slice: Mandate Tool Policy
 
 Goal: add the thinnest enforceable tool policy around active mandate context
 without building approvals, secrets, or provider-specific integrations.
@@ -543,11 +604,43 @@ Acceptance:
 - no secret broker
 - no full approval broker yet
 
+### Current Slice: Product Compass Reset
+
+Goal: land the roadmap adjustment before more build momentum accumulates around
+the older MCP-profile-manager thesis.
+
+Acceptance:
+
+- docs state that daemon/install/audit/profile routing are mandate substrate
+- roadmap names mandates as the product primitive
+- provider presets are explicitly deferred unless they support mandates
+- next build sequence prioritizes approval/policy/audit depth
+- agent instructions no longer describe the active scope as Milestone 0/1 only
+
+### Recommended Next Build Slice: Approval Gate Foundation
+
+Goal: make mandate policy express "allowed only with approval" without building
+provider-specific integrations or a cloud service.
+
+Acceptance:
+
+- mandate schema can store typed approval gates for namespaced tool patterns
+- `switchboard mandate create` can add approval-gated tool patterns
+- daemon/runtime detects approval-required calls under an active mandate
+- initial behavior is conservative: block with an auditable approval-required
+  error until an approval store exists
+- `switchboard approvals` can list pending requests once the store is added
+- audit entries include mandate id, tool name, gate id or pattern, and status
+- no provider presets
+- no secrets broker
+- no remote service
+
 ## Rules For Future Agents
 
 - Read `docs/product/roadmap.md` and the relevant source docs before building.
 - Use current docs for touched SDKs and client config formats.
 - Keep CLI commands thin; reusable behavior belongs in packages.
-- Do not add provider integrations before the secrets/policy/audit gates.
+- Do not add provider integrations before mandate-aware secrets/policy/audit
+  gates.
 - Do not claim enforcement until the code actually enforces it.
 - Keep every PR small, reviewed, tested, pushed, and mergeable.

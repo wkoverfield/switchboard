@@ -1,6 +1,6 @@
 # Switchboard Mandate Strategy
 
-Last updated: 2026-06-19
+Last updated: 2026-06-20
 
 ## Thesis
 
@@ -116,7 +116,43 @@ around static profiles alone.
 Installers and MCP routing remain useful, but they are distribution and runtime
 plumbing. They are not the durable product differentiation by themselves.
 
-## First Mandate Slice
+## Shipped Foundation
+
+Switchboard now has the first local mandate foundation:
+
+- `switchboard mandate create`
+- local mandate schema and persistence
+- repo, worktree, branch, agent role, profile list, and lease binding
+- `switchboard mandate status`
+- `switchboard mcp --mandate`
+- `switchboard serve --mandate`
+- `switchboard logs --mandate`
+- mandate-linked MCP tool-call audit entries
+- allowed and denied namespaced tool patterns
+- policy-filtered tool listing under an active mandate
+- pre-discovery denial for disallowed daemon-routed tool calls
+
+This is intentionally still local and thin. It proves the product primitive
+without building provider integrations, secret brokerage, or a full approval
+broker.
+
+## Next Mandate Slice
+
+Build the smallest approval-gate foundation:
+
+- replace the placeholder `approvalGates` array with typed gate records on
+  mandates
+- CLI creation syntax for approval-gated namespaced tool patterns
+- conservative runtime behavior that blocks approval-required calls until an
+  approval exists
+- local approval request records
+- `switchboard approvals` / `switchboard approve <id>` skeleton
+- audit entries tied to mandate id, tool name, gate, decision, and reason
+- no provider integrations
+- no secret broker
+- no remote service
+
+## Original First Mandate Slice
 
 Build the smallest local foundation:
 
