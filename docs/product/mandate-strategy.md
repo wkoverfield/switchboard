@@ -133,6 +133,10 @@ Switchboard now has the first local mandate foundation:
 - pre-discovery denial for disallowed daemon-routed tool calls
 - approval-required tool patterns
 - conservative approval-required runtime blocking
+- local approval request records
+- `switchboard approvals`
+- `switchboard approve <id>` / `switchboard deny <id>`
+- approved requests honored by daemon-routed mandate calls
 
 This is intentionally still local and thin. It proves the product primitive
 without building provider integrations, secret brokerage, or a full approval
@@ -152,8 +156,8 @@ Build the smallest approval-gate foundation:
 - no secret broker
 - no remote service
 
-Then add the local approval request store and `switchboard approvals` /
-`switchboard approve <id>` in a follow-up slice.
+Then add in-call wait/poll behavior, richer approval reasons, and any
+client-specific elicitation support in follow-up slices.
 
 ## Original First Mandate Slice
 

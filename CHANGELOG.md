@@ -31,3 +31,4 @@
 - Added mandate allow/deny tool patterns with denied-call audit entries.
 - Reframed product docs around Switchboard as the local mandate layer for coding agents, with provider presets deferred behind mandate-aware policy, approvals, audit, and secrets.
 - Added mandate approval-required tool patterns with conservative runtime blocking and audit gate metadata.
+- Added local approval request storage plus `switchboard approvals`, `switchboard approve`, and `switchboard deny`.

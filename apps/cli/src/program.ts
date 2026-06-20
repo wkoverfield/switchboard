@@ -4,10 +4,13 @@ import { writeFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import {
   type AuditLogger,
+  type ApprovalRequestWithStatus,
   checkLocalConfigIgnored,
   createMandate,
+  decideApprovalRequest,
   createInitConfigPlan,
   inspectProjectClientConfigs,
+  listApprovalRequests,
   listMandates,
   type LoadConfigOptions,
   loadSwitchboardConfig,
@@ -17,6 +20,7 @@ import {
   namespacesForProfiles,
   readAuditLogEntries,
   renderSwitchboardClientConfig,
+  resolveApprovalRequestStorePath,
   resolveAuditLogPath,
   resolveActiveMandate,
   resolveMandateStorePath,
@@ -62,6 +66,7 @@ export interface ProgramIo {
   writeErr?: (message: string) => void;
   auditLogger?: AuditLogger;
   auditLogPath?: string;
+  approvalStorePath?: string;
   mandateStorePath?: string;
   serveMcp?: (
     profiles: StdioUpstreamProfile[],
@@ -93,11 +98,34 @@ export function createProgram(io: ProgramIo = {}): Command {
   const serveDaemonMcp = io.serveDaemonMcp ?? serveDaemonBackedMcpStdio;
   const auditLogger = io.auditLogger ?? noopAuditLogger;
   const program = new Command();
+  const decideApprovalRequestForCommand = async (
+    id: string,
+    status: "approved" | "denied",
+    options: { reason?: string; json?: boolean }
+  ): Promise<void> => {
+    const path = io.approvalStorePath ?? resolveApprovalRequestStorePath();
+    try {
+      const request = await decideApprovalRequest({
+        path,
+        id,
+        status,
+        ...(options.reason ? { reason: options.reason } : {})
+      });
+      if (options.json) {
+        writeOut(JSON.stringify({ path, request }, null, 2));
+      } else {
+        writeOut(formatApprovalDecision(path, request));
+      }
+    } catch (error) {
+      writeErr(`error: ${messageFromError(error)}`);
+      process.exitCode = 1;
+    }
+  };
 
   program
     .name("switchboard")
     .description(
-      "Local-first MCP profile router for multiple accounts, projects, environments, and AI coding agents."
+      "Local mandate layer and MCP profile router for coding agents."
     )
     .version(version)
     .option("--cwd <path>", "resolve repo config from this directory");
@@ -528,7 +556,11 @@ export function createProgram(io: ProgramIo = {}): Command {
               toolPolicy: {
                 allowedTools: mandate.allowedTools,
                 deniedTools: mandate.deniedTools,
-                approvalGates: mandate.approvalGates
+                approvalGates: mandate.approvalGates,
+                approvedApprovalRequests: await approvedApprovalRequestsForMandate(
+                  mandate,
+                  io.approvalStorePath
+                )
               }
             }
           : {})
@@ -777,6 +809,90 @@ export function createProgram(io: ProgramIo = {}): Command {
             }
           }
         )
+    );
+
+  program
+    .command("approvals")
+    .description("Show local mandate approval requests.")
+    .option("--json", "print machine-readable JSON")
+    .option("--all", "show approval requests for all repos")
+    .option("--mandate <id>", "filter approval requests by mandate id")
+    .option(
+      "--status <status>",
+      "filter by stored status: pending, approved, or denied"
+    )
+    .action(
+      async (options: {
+        json?: boolean;
+        all?: boolean;
+        mandate?: string;
+        status?: "pending" | "approved" | "denied";
+      }) => {
+        const globalOptions = program.opts<{ cwd?: string }>();
+        const repoPath = options.all
+          ? undefined
+          : installTargetCwd(globalOptions.cwd);
+        if (
+          options.status &&
+          !["pending", "approved", "denied"].includes(options.status)
+        ) {
+          writeErr("error: --status must be pending, approved, or denied");
+          process.exitCode = 1;
+          return;
+        }
+        const path = io.approvalStorePath ?? resolveApprovalRequestStorePath();
+        const requests = await listApprovalRequests({
+          path,
+          ...(repoPath ? { repoPath } : {}),
+          ...(options.mandate ? { mandateId: options.mandate } : {}),
+          ...(options.status ? { status: options.status } : {})
+        });
+        const result = {
+          path,
+          repoPath: repoPath ?? null,
+          requests
+        };
+
+        if (options.json) {
+          writeOut(JSON.stringify(result, null, 2));
+        } else {
+          writeOut(formatApprovalRequests(result));
+        }
+      }
+    );
+
+  program
+    .command("approve <id>")
+    .description("Approve a local mandate approval request.")
+    .option("--reason <reason>", "optional decision reason")
+    .option("--json", "print machine-readable JSON")
+    .action(
+      async (
+        id: string,
+        options: {
+          reason?: string;
+          json?: boolean;
+        }
+      ) => {
+        await decideApprovalRequestForCommand(id, "approved", options);
+      }
+    );
+
+  program
+    .command("deny <id>")
+    .description("Deny a local mandate approval request.")
+    .option("--reason <reason>", "optional decision reason")
+    .option("--json", "print machine-readable JSON")
+    .action(
+      async (
+        id: string,
+        options: {
+          reason?: string;
+          json?: boolean;
+        }
+      ) => {
+        await decideApprovalRequestForCommand(id, "denied", options);
+      }
     );
 
   program
@@ -1156,6 +1272,54 @@ function formatApprovalGates(
   return gates.map((gate) => `${gate.id}:${gate.toolPattern}`).join(separator);
 }
 
+function formatApprovalRequests(result: {
+  path: string;
+  repoPath: string | null;
+  requests: ApprovalRequestWithStatus[];
+}): string {
+  const lines = [
+    "Switchboard approval requests",
+    `Store: ${result.path}`,
+    `Repo: ${result.repoPath ?? "all"}`
+  ];
+
+  if (result.requests.length === 0) {
+    lines.push("", "No approval requests found.");
+    return lines.join("\n");
+  }
+
+  lines.push("");
+  for (const request of result.requests) {
+    lines.push(
+      [
+        request.id,
+        request.runtimeStatus,
+        `mandate:${request.mandateId}`,
+        `branch:${request.branch}`,
+        `tool:${request.toolName}`,
+        `gate:${request.approvalGateId}:${request.approvalGatePattern}`,
+        `expires:${request.expiresAt}`
+      ].join(" ")
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function formatApprovalDecision(
+  path: string,
+  request: ApprovalRequestWithStatus
+): string {
+  return [
+    `Updated approval request ${request.id}`,
+    `Status: ${request.runtimeStatus}`,
+    `Mandate: ${request.mandateId}`,
+    `Tool: ${request.toolName}`,
+    `Gate: ${request.approvalGateId}:${request.approvalGatePattern}`,
+    `Store: ${path}`
+  ].join("\n");
+}
+
 function formatAuditLogs(
   path: string,
   entries: Awaited<ReturnType<typeof readAuditLogEntries>>
@@ -1284,6 +1448,26 @@ function profilesForMandate(
       allowedProfiles.has(profileName)
     )
   ) as ReturnType<typeof loadSwitchboardConfig>["config"]["profiles"];
+}
+
+async function approvedApprovalRequestsForMandate(
+  mandate: MandateWithStatus,
+  path: string | undefined
+): Promise<Array<{ id: string; approvalGateId: string; toolName: string }>> {
+  const requests = await listApprovalRequests({
+    ...(path ? { path } : {}),
+    repoPath: mandate.repoPath,
+    mandateId: mandate.id,
+    status: "approved"
+  });
+
+  return requests
+    .filter((request) => request.runtimeStatus === "approved")
+    .map((request) => ({
+      id: request.id,
+      approvalGateId: request.approvalGateId,
+      toolName: request.toolName
+    }));
 }
 
 function resolveGitWorktreeBinding(

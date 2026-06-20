@@ -21,7 +21,7 @@ export interface MandateApprovalGate {
 }
 
 export type MandateToolPolicyDecision =
-  | { allowed: true }
+  | { allowed: true; approvalRequestId?: string | undefined }
   | { allowed: false; reason: string }
   | {
       allowed: false;
@@ -89,6 +89,11 @@ export interface MandateToolPolicy {
   allowedTools?: string[];
   deniedTools?: string[];
   approvalGates?: MandateApprovalGate[];
+  approvedApprovalRequests?: Array<{
+    id?: string | undefined;
+    approvalGateId: string;
+    toolName: string;
+  }>;
 }
 
 export interface ListMandatesOptions {
@@ -161,6 +166,7 @@ export function evaluateMandateToolPolicy(
   const allowedTools = uniqueTrimmed(policy.allowedTools ?? []);
   const deniedTools = uniqueTrimmed(policy.deniedTools ?? []);
   const approvalGates = normalizeApprovalGates(policy.approvalGates ?? []);
+  const approvedApprovalRequests = policy.approvedApprovalRequests ?? [];
 
   if (matchesAnyToolPattern(toolName, deniedTools)) {
     return {
@@ -173,6 +179,18 @@ export function evaluateMandateToolPolicy(
     toolPatternToRegExp(gate.toolPattern).test(toolName)
   );
   if (approvalGate) {
+    const approvedRequest = approvedApprovalRequests.find(
+      (request) =>
+        request.approvalGateId === approvalGate.id && request.toolName === toolName
+    );
+    if (approvedRequest) {
+      return (
+        approvedRequest.id
+          ? { allowed: true, approvalRequestId: approvedRequest.id }
+          : { allowed: true }
+      );
+    }
+
     return {
       allowed: false,
       approvalRequired: true,
