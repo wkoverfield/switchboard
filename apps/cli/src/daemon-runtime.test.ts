@@ -232,7 +232,9 @@ describe("daemon runtime mandate context", () => {
         runtimeStatus: "pending",
         toolName: "github_findu_echo",
         approvalGateId: "gate-1",
-        approvalGateReason: "rerunning CI changes remote state"
+        approvalGateReason: "rerunning CI changes remote state",
+        approvalGateRisk: "high",
+        approvalGateLabels: ["remote-state", "ci"]
       }
     ]);
     await expect(
@@ -682,7 +684,9 @@ async function makeBrokenApprovalRepo(): Promise<string> {
     approvalRequiredTools: [
       {
         toolPattern: "github_findu_echo",
-        reason: "rerunning CI changes remote state"
+        reason: "rerunning CI changes remote state",
+        risk: "high",
+        labels: ["remote-state", "ci"]
       }
     ],
     lease: "2h"
@@ -721,7 +725,9 @@ async function makeApprovalRepo(): Promise<string> {
     approvalRequiredTools: [
       {
         toolPattern: "github_findu_echo",
-        reason: "rerunning CI changes remote state"
+        reason: "rerunning CI changes remote state",
+        risk: "high",
+        labels: ["remote-state", "ci"]
       }
     ],
     lease: "2h"

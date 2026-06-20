@@ -22,6 +22,8 @@ export const approvalRequestSchema = z.object({
   approvalGateId: z.string().min(1),
   approvalGatePattern: z.string().min(1),
   approvalGateReason: z.string().min(1).optional(),
+  approvalGateRisk: z.enum(["low", "medium", "high", "critical"]).optional(),
+  approvalGateLabels: z.array(z.string().min(1)).optional(),
   status: z.enum(["pending", "approved", "denied", "stale"]),
   createdAt: z.string().min(1),
   expiresAt: z.string().min(1),
@@ -48,6 +50,8 @@ export interface CreateApprovalRequestOptions {
   approvalGateId: string;
   approvalGatePattern: string;
   approvalGateReason?: string;
+  approvalGateRisk?: "low" | "medium" | "high" | "critical";
+  approvalGateLabels?: string[];
   expiresAt: string;
   path?: string;
   now?: () => Date;
@@ -132,6 +136,10 @@ export async function createApprovalRequest(
   const createdAt = now();
   const repoPath = resolve(options.repoPath);
   const path = options.path ?? resolveApprovalRequestStorePath();
+  const approvalGateRisk = normalizeApprovalGateRisk(options.approvalGateRisk);
+  const approvalGateLabels = normalizeApprovalGateLabels(
+    options.approvalGateLabels ?? []
+  );
 
   return withApprovalStoreLock(path, async () => {
     const store = await readApprovalRequestStore({ path });
@@ -158,6 +166,12 @@ export async function createApprovalRequest(
       approvalGatePattern: options.approvalGatePattern.trim(),
       ...(options.approvalGateReason?.trim()
         ? { approvalGateReason: options.approvalGateReason.trim() }
+        : {}),
+      ...(approvalGateRisk
+        ? { approvalGateRisk }
+        : {}),
+      ...(approvalGateLabels.length > 0
+        ? { approvalGateLabels }
         : {}),
       status: "pending",
       createdAt: createdAt.toISOString(),
@@ -434,6 +448,48 @@ async function removeStaleLock(lockPath: string): Promise<void> {
 
 function nextApprovalRequestId(store: ApprovalRequestStore): string {
   return `approval-${store.requests.length + 1}`;
+}
+
+function normalizeApprovalGateRisk(
+  value: string | undefined
+): "low" | "medium" | "high" | "critical" | undefined {
+  const risk = value?.trim().toLowerCase();
+  if (!risk) {
+    return undefined;
+  }
+  if (
+    risk !== "low" &&
+    risk !== "medium" &&
+    risk !== "high" &&
+    risk !== "critical"
+  ) {
+    throw new Error(
+      "approval gate risk must be one of: low, medium, high, critical"
+    );
+  }
+
+  return risk;
+}
+
+function normalizeApprovalGateLabels(labels: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const rawLabel of labels) {
+    const label = rawLabel.trim().toLowerCase();
+    if (!label || seen.has(label)) {
+      continue;
+    }
+    if (!/^[a-z0-9][a-z0-9_.:-]*$/.test(label)) {
+      throw new Error(
+        "approval gate labels must use lowercase letters, digits, dots, colons, underscores, or hyphens"
+      );
+    }
+    seen.add(label);
+    result.push(label);
+  }
+
+  return result;
 }
 
 function withRuntimeStatus(

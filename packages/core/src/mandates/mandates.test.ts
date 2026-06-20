@@ -135,7 +135,9 @@ describe("mandates", () => {
       approvalRequiredTools: [
         {
           toolPattern: "github_findu_checks_rerun",
-          reason: "rerunning CI changes remote state"
+          reason: "rerunning CI changes remote state",
+          risk: "high",
+          labels: ["remote-state", "ci", "remote-state"]
         },
         {
           toolPattern: "github_findu_checks_rerun",
@@ -156,7 +158,9 @@ describe("mandates", () => {
         {
           id: "gate-1",
           toolPattern: "github_findu_checks_rerun",
-          reason: "rerunning CI changes remote state"
+          reason: "rerunning CI changes remote state",
+          risk: "high",
+          labels: ["remote-state", "ci"]
         }
       ],
       createdAt: "2026-06-19T16:00:00.000Z",
@@ -202,6 +206,50 @@ describe("mandates", () => {
       })
     ).rejects.toThrow(
       "approval gate reason must not contain control characters"
+    );
+  });
+
+  it("rejects invalid approval gate risk and labels", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+    const base = {
+      path,
+      task: "fix-ci",
+      repoPath: join(root, "repo"),
+      worktreePath: join(root, "repo"),
+      branch: "fix/ci",
+      agentRole: "implementer",
+      profiles: ["github_findu"],
+      lease: "2h"
+    };
+
+    await expect(
+      createMandate({
+        ...base,
+        approvalRequiredTools: [
+          {
+            toolPattern: "github_findu_checks_rerun",
+            risk: "urgent"
+          }
+        ]
+      })
+    ).rejects.toThrow(
+      "approval gate risk must be one of: low, medium, high, critical"
+    );
+
+    await expect(
+      createMandate({
+        ...base,
+        task: "fix-ci-label",
+        approvalRequiredTools: [
+          {
+            toolPattern: "github_findu_checks_rerun",
+            labels: ["Remote State"]
+          }
+        ]
+      })
+    ).rejects.toThrow(
+      "approval gate labels must use lowercase letters, digits, dots, colons, underscores, or hyphens"
     );
   });
 

@@ -723,6 +723,18 @@ export function createProgram(io: ProgramIo = {}): Command {
           collectOption,
           [] as string[]
         )
+        .option(
+          "--require-approval-risk <risk>",
+          "risk class for a required approval gate: low, medium, high, or critical (repeatable, matches --require-approval-tool order)",
+          collectOption,
+          [] as string[]
+        )
+        .option(
+          "--require-approval-label <label>",
+          "structured label for approval gates (repeatable, applies to every approval gate)",
+          collectOption,
+          [] as string[]
+        )
         .option("--json", "print machine-readable JSON")
         .action(
           async (
@@ -736,6 +748,8 @@ export function createProgram(io: ProgramIo = {}): Command {
               denyTool: string[];
               requireApprovalTool: string[];
               requireApprovalReason: string[];
+              requireApprovalRisk: string[];
+              requireApprovalLabel: string[];
               json?: boolean;
             }
           ) => {
@@ -785,6 +799,17 @@ export function createProgram(io: ProgramIo = {}): Command {
               process.exitCode = 1;
               return;
             }
+            if (
+              options.requireApprovalRisk.length > 0 &&
+              options.requireApprovalRisk.length !==
+                options.requireApprovalTool.length
+            ) {
+              writeErr(
+                "error: --require-approval-risk must be provided once for each --require-approval-tool"
+              );
+              process.exitCode = 1;
+              return;
+            }
             const path = io.mandateStorePath ?? resolveMandateStorePath();
 
             try {
@@ -804,6 +829,12 @@ export function createProgram(io: ProgramIo = {}): Command {
                     toolPattern,
                     ...(options.requireApprovalReason[index]
                       ? { reason: options.requireApprovalReason[index] }
+                      : {}),
+                    ...(options.requireApprovalRisk[index]
+                      ? { risk: options.requireApprovalRisk[index] }
+                      : {}),
+                    ...(options.requireApprovalLabel.length > 0
+                      ? { labels: options.requireApprovalLabel }
                       : {})
                   })
                 )
@@ -1346,11 +1377,18 @@ function formatApprovalGates(
   }
 
   return gates
-    .map((gate) =>
-      gate.reason
-        ? `${gate.id}:${gate.toolPattern}(${gate.reason})`
-        : `${gate.id}:${gate.toolPattern}`
-    )
+    .map((gate) => {
+      const metadata = [
+        ...(gate.risk ? [`risk:${gate.risk}`] : []),
+        ...(gate.labels && gate.labels.length > 0
+          ? [`labels:${gate.labels.join("+")}`]
+          : []),
+        ...(gate.reason ? [`reason:${gate.reason}`] : [])
+      ];
+      return metadata.length > 0
+        ? `${gate.id}:${gate.toolPattern}(${metadata.join(" ")})`
+        : `${gate.id}:${gate.toolPattern}`;
+    })
     .join(separator);
 }
 
@@ -1380,6 +1418,10 @@ function formatApprovalRequests(result: {
         `branch:${request.branch}`,
         `tool:${request.toolName}`,
         `gate:${request.approvalGateId}:${request.approvalGatePattern}`,
+        ...(request.approvalGateRisk ? [`risk:${request.approvalGateRisk}`] : []),
+        ...(request.approvalGateLabels && request.approvalGateLabels.length > 0
+          ? [`labels:${request.approvalGateLabels.join("+")}`]
+          : []),
         ...(request.approvalGateReason ? [`reason:${request.approvalGateReason}`] : []),
         `expires:${request.expiresAt}`
       ].join(" ")
