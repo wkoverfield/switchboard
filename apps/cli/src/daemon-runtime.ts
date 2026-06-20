@@ -12,6 +12,7 @@ import {
   listApprovalRequests,
   loadSwitchboardConfig,
   markApprovalRequestStale,
+  markPendingApprovalRequestsStale,
   removeDaemonState,
   resolveActiveMandate,
   resolveDaemonPaths,
@@ -155,6 +156,7 @@ export async function runDaemon(
   const daemonCwd = resolve(options.cwd ?? process.cwd());
   await mkdir(paths.runtimeDir, { recursive: true, mode: 0o700 });
   await rm(paths.socketPath, { force: true });
+  await invalidatePendingApprovalRequestsForDaemon(daemonCwd);
 
   const socketContext = { cwd: daemonCwd };
   const server = createServer((socket) => handleDaemonSocket(socket, socketContext));
@@ -181,6 +183,16 @@ export async function runDaemon(
     process.once("SIGINT", () => {
       void shutdown();
     });
+  });
+}
+
+export async function invalidatePendingApprovalRequestsForDaemon(
+  cwd: string
+): Promise<void> {
+  const loaded = loadSwitchboardConfig(optionsFromCwd(cwd));
+  await markPendingApprovalRequestsStale({
+    repoPath: configCwdBase(loaded, cwd),
+    reason: "daemon restarted"
   });
 }
 
@@ -859,7 +871,7 @@ function configCwdBase(
   cwd: string | undefined
 ): string {
   const repoSource = loaded.sources.find(
-    (source) => source.kind === "repo" && source.loaded && source.path
+    (source) => source.kind === "repo" && source.path
   );
 
   if (repoSource?.path) {

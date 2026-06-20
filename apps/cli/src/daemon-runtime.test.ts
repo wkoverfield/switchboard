@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  createApprovalRequest,
   createMandate,
   decideApprovalRequest,
   listApprovalRequests,
@@ -12,7 +13,10 @@ import {
   readAuditLogEntries,
   resolveAuditLogPath
 } from "@switchboard-mcp/core";
-import { handleDaemonRequest } from "./daemon-runtime.js";
+import {
+  handleDaemonRequest,
+  invalidatePendingApprovalRequestsForDaemon
+} from "./daemon-runtime.js";
 
 const fixtureServerPath = fileURLToPath(
   new URL("../../../packages/mcp-runtime/fixtures/echo-server.mjs", import.meta.url)
@@ -27,6 +31,61 @@ describe("daemon runtime mandate context", () => {
     } else {
       process.env.XDG_STATE_HOME = previousStateHome;
     }
+  });
+
+  it("marks pending approval requests stale when the daemon starts for a repo", async () => {
+    const root = await makeApprovalRepo();
+    await createApprovalRequest({
+      mandateId: "fix-ci",
+      repoPath: root,
+      branch: "fix/ci",
+      toolName: "github_findu_echo",
+      approvalGateId: "gate-1",
+      approvalGatePattern: "github_findu_echo",
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString()
+    });
+
+    await invalidatePendingApprovalRequestsForDaemon(root);
+
+    await expect(
+      listApprovalRequests({ repoPath: root, mandateId: "fix-ci" })
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "approval-1",
+        status: "stale",
+        runtimeStatus: "stale",
+        decisionReason: "daemon restarted"
+      })
+    ]);
+  });
+
+  it("invalidates parent repo approvals from a subdirectory even when repo config is invalid", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-daemon-runtime-"));
+    process.env.XDG_STATE_HOME = join(root, "state");
+    const nested = join(root, "packages", "app");
+    await mkdir(nested, { recursive: true });
+    await writeFile(join(root, ".switchboard.yaml"), "version: [");
+    await createApprovalRequest({
+      mandateId: "fix-ci",
+      repoPath: root,
+      branch: "fix/ci",
+      toolName: "github_findu_echo",
+      approvalGateId: "gate-1",
+      approvalGatePattern: "github_findu_echo",
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString()
+    });
+
+    await invalidatePendingApprovalRequestsForDaemon(nested);
+
+    await expect(
+      listApprovalRequests({ repoPath: root, mandateId: "fix-ci" })
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "approval-1",
+        runtimeStatus: "stale",
+        decisionReason: "daemon restarted"
+      })
+    ]);
   });
 
   it("rejects mandate-scoped list_tools when the daemon cwd is on another branch", async () => {
