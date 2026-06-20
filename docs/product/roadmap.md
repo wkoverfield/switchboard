@@ -140,11 +140,12 @@ Implemented in the current codebase:
 - `switchboard approve <id>`
 - `switchboard deny <id>`
 - approved approval decisions honored by daemon-routed mandate calls
+- optional bounded approval waits with `switchboard mcp --approval-wait <duration>`
 
 Not started:
 
 - richer policy engine and operating modes
-- full approval broker and long-running in-call waits
+- full approval broker, stale/cancel semantics, and client-specific elicitation
 - secrets/keychain
 - provider presets
 - mandate-first onboarding
@@ -309,13 +310,13 @@ Shipped foundation:
 - `switchboard approvals`
 - `switchboard approve <id>` / `switchboard deny <id>`
 - runtime honors fresh approved decisions within mandate lease
+- optional bounded in-call wait/poll behavior for daemon-backed MCP calls
 - no provider integrations
 
 Next acceptable slice:
 
-- approval lifecycle polish for stale/expired visibility and retry guidance
-- optional in-call wait/poll behavior for clients that can tolerate pending
-  tool calls
+- approval wait stale/cancel semantics for disconnected clients or daemon
+  restarts
 - client elicitation research before implementing client-specific approval UX
 
 ### Milestone 7: Secrets
@@ -651,7 +652,7 @@ Acceptance:
 - no secrets broker
 - no remote service
 
-### Current Slice: Approval Lifecycle Polish
+### Completed Slice: Approval Lifecycle Polish
 
 Goal: make the local approval loop understandable and auditable before adding
 in-call waits or client elicitation.
@@ -666,9 +667,26 @@ Acceptance:
 - no secrets broker
 - no remote service
 
+### Current Slice: Bounded Approval Waits
+
+Goal: reduce approval retry friction for clients that tolerate pending tool
+calls without building client-specific elicitation or a remote broker.
+
+Acceptance:
+
+- `switchboard mcp --approval-wait <duration>` accepts bounded waits up to 10m
+- daemon protocol carries approval wait duration on mandate-scoped tool calls
+- approval-gated calls create/reuse local approval requests, then poll for a
+  local approve/deny decision during the wait window
+- approved requests route the original tool call and preserve audit linkage
+- denied, expired, or timed-out requests return clear errors
+- no provider presets
+- no secrets broker
+- no remote service
+
 Follow-up slice:
 
-- in-call wait/poll behavior for clients that can tolerate pending tool calls
+- stale/cancel behavior if the MCP client disconnects or the daemon restarts
 - richer approval reasons and policy labels
 
 ## Rules For Future Agents

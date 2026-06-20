@@ -33,3 +33,4 @@
 - Added mandate approval-required tool patterns with conservative runtime blocking and audit gate metadata.
 - Added local approval request storage plus `switchboard approvals`, `switchboard approve`, and `switchboard deny`.
 - Added approval lifecycle polish: expired-status filtering, human next-action hints, and retry guidance in approval-required daemon errors.
+- Added bounded approval waits for daemon-backed mandate MCP calls with `switchboard mcp --approval-wait <duration>`.

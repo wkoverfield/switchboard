@@ -23,6 +23,7 @@ export interface SwitchboardMcpServerOptions {
 
 export interface DaemonBackedMcpServerOptions extends SwitchboardMcpServerOptions {
   mandateId?: string;
+  approvalWaitMs?: number;
   listTools?: () => Promise<NamespacedTool[]>;
   callTool?: (
     name: string,
@@ -88,7 +89,12 @@ export function createDaemonBackedSwitchboardMcpServer(
         socketPath,
         name,
         args,
-        options.mandateId ? { mandateId: options.mandateId } : {}
+        {
+          ...(options.mandateId ? { mandateId: options.mandateId } : {}),
+          ...(options.approvalWaitMs !== undefined
+            ? { approvalWaitMs: options.approvalWaitMs }
+            : {})
+        }
       );
       return response.result;
     });

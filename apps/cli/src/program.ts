@@ -84,7 +84,7 @@ export interface ProgramIo {
   startDaemon?: typeof startDaemon;
   serveDaemonMcp?: (
     socketPath: string,
-    options?: { mandateId?: string }
+    options?: { mandateId?: string; approvalWaitMs?: number }
   ) => Promise<void>;
 }
 
@@ -447,11 +447,16 @@ export function createProgram(io: ProgramIo = {}): Command {
     .description("Serve MCP over stdio through the local Switchboard daemon.")
     .option("--runtime-dir <path>", "override daemon runtime directory")
     .option("--mandate <id>", "bind routed tool calls to an active mandate")
+    .option(
+      "--approval-wait <duration>",
+      "wait for approval decisions during gated tool calls, like 30s, 2m, or 0"
+    )
     .option("--no-auto-start", "fail if the daemon is not already running")
     .action(
       async (options: {
         runtimeDir?: string;
         mandate?: string;
+        approvalWait?: string;
         autoStart?: boolean;
       }) => {
         const globalOptions = program.opts<{ cwd?: string }>();
@@ -506,10 +511,21 @@ export function createProgram(io: ProgramIo = {}): Command {
           process.exitCode = 1;
           return;
         }
+        const approvalWaitMs = parseApprovalWaitDurationForCommand(
+          options.approvalWait,
+          writeErr
+        );
+        if (approvalWaitMs === undefined) {
+          process.exitCode = 1;
+          return;
+        }
 
         await serveDaemonMcp(
           status.daemon.socketPath,
-          mandate ? { mandateId: mandate.id } : {}
+          {
+            ...(mandate ? { mandateId: mandate.id } : {}),
+            ...(approvalWaitMs > 0 ? { approvalWaitMs } : {})
+          }
         );
       }
     );
@@ -1523,6 +1539,41 @@ function optionsFromRuntimeDir(
   runtimeDir: string | undefined
 ): { runtimeDir?: string } {
   return runtimeDir ? { runtimeDir } : {};
+}
+
+function parseApprovalWaitDurationForCommand(
+  value: string | undefined,
+  writeErr: (message: string) => void
+): number | undefined {
+  if (value === undefined) {
+    return 0;
+  }
+
+  const trimmed = value.trim();
+  if (trimmed === "0") {
+    return 0;
+  }
+
+  const match = /^([1-9]\d*)(s|m)$/.exec(trimmed);
+  if (!match) {
+    writeErr("error: --approval-wait must use 0 or a duration like 30s or 2m");
+    return undefined;
+  }
+
+  const amountText = match[1];
+  const unit = match[2];
+  if (!amountText || !unit) {
+    writeErr("error: --approval-wait must use 0 or a duration like 30s or 2m");
+    return undefined;
+  }
+
+  const waitMs = Number(amountText) * (unit === "s" ? 1_000 : 60_000);
+  if (waitMs > 600_000) {
+    writeErr("error: --approval-wait must be 10m or less");
+    return undefined;
+  }
+
+  return waitMs;
 }
 
 function validateLoadedConfigForCommand(

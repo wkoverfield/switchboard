@@ -459,7 +459,11 @@ describe("switchboard CLI program", () => {
     writeMandateConfig(root);
     const mandateStorePath = join(root, "state", "mandates.json");
     const socketPath = join(root, "daemon.sock");
-    const served: Array<{ socket: string; mandateId: string | undefined }> = [];
+    const served: Array<{
+      socket: string;
+      mandateId: string | undefined;
+      approvalWaitMs: number | undefined;
+    }> = [];
     const program = createProgram({
       mandateStorePath,
       writeOut: () => undefined,
@@ -479,7 +483,11 @@ describe("switchboard CLI program", () => {
         }
       }),
       serveDaemonMcp: async (socket, options) => {
-        served.push({ socket, mandateId: options?.mandateId });
+        served.push({
+          socket,
+          mandateId: options?.mandateId,
+          approvalWaitMs: options?.approvalWaitMs
+        });
       }
     });
 
@@ -508,11 +516,50 @@ describe("switchboard CLI program", () => {
       ],
       { from: "user" }
     );
-    await program.parseAsync(["--cwd", root, "mcp", "--mandate", "fix-ci"], {
+    await program.parseAsync(
+      ["--cwd", root, "mcp", "--mandate", "fix-ci", "--approval-wait", "30s"],
+      { from: "user" }
+    );
+
+    expect(served).toEqual([
+      { socket: socketPath, mandateId: "fix-ci", approvalWaitMs: 30_000 }
+    ]);
+  });
+
+  it("rejects invalid daemon-backed mcp approval wait durations", async () => {
+    const root = makeTempProject();
+    const socketPath = join(root, "daemon.sock");
+    const errors: string[] = [];
+    const served: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message),
+      daemonStatus: async () => ({
+        state: "running",
+        paths: {
+          runtimeDir: root,
+          socketPath,
+          statePath: join(root, "daemon.json")
+        },
+        daemon: {
+          version: 1,
+          pid: process.pid,
+          startedAt: "2026-06-20T08:00:00.000Z",
+          socketPath,
+          cwd: root
+        }
+      }),
+      serveDaemonMcp: async (socket) => {
+        served.push(socket);
+      }
+    });
+
+    await program.parseAsync(["--cwd", root, "mcp", "--approval-wait", "11m"], {
       from: "user"
     });
 
-    expect(served).toEqual([{ socket: socketPath, mandateId: "fix-ci" }]);
+    expect(errors).toEqual(["error: --approval-wait must be 10m or less"]);
+    expect(served).toEqual([]);
+    expect(process.exitCode).toBe(1);
   });
 
   it("fails daemon-backed mcp for a missing mandate", async () => {

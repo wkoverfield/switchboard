@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { GenericMcpRouter } from "./generic-router.js";
 import type { StdioUpstreamProfile } from "./stdio-upstream.js";
 
@@ -199,6 +199,64 @@ describe("GenericMcpRouter", () => {
             'tool "alpha_tools_echo" requires approval by mandate gate "gate-1"'
         }
       ]);
+    } finally {
+      await router.close();
+    }
+  });
+
+  it("keeps approval request audit linkage when approved gated calls fail upstream", async () => {
+    const auditEntries: unknown[] = [];
+    const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {
+      mandateId: "fix-ci",
+      toolPolicy: {
+        allowedTools: ["alpha_tools_*"],
+        approvalGates: [{ id: "gate-1", toolPattern: "alpha_tools_echo" }],
+        approvedApprovalRequests: [
+          {
+            id: "approval-1",
+            approvalGateId: "gate-1",
+            toolName: "alpha_tools_echo"
+          }
+        ]
+      },
+      auditLogger: {
+        async log(entry) {
+          auditEntries.push(entry);
+        }
+      }
+    });
+
+    try {
+      await router.discoverTools();
+      const connections = (
+        router as unknown as {
+          connections: Map<string, { callTool: GenericMcpRouter["callTool"] }>;
+        }
+      ).connections;
+      const connection = connections.get("alpha");
+      if (!connection) {
+        throw new Error("alpha connection was not created");
+      }
+      vi.spyOn(connection, "callTool").mockRejectedValue(new Error("upstream died"));
+
+      await expect(
+        router.callTool("alpha_tools_echo", { message: "hello" })
+      ).rejects.toThrow("upstream died");
+
+      expect(auditEntries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "tool_call",
+            status: "error",
+            mandateId: "fix-ci",
+            profileName: "alpha",
+            namespace: "alpha_tools",
+            toolName: "alpha_tools_echo",
+            upstreamName: "echo",
+            approvalRequestId: "approval-1"
+          })
+        ])
+      );
     } finally {
       await router.close();
     }
