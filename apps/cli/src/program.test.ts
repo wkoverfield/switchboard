@@ -1538,6 +1538,12 @@ describe("switchboard CLI program", () => {
         }
       ]
     });
+
+    await program.parseAsync(["--cwd", root, "mandate", "status"], {
+      from: "user"
+    });
+    expect(output[2]).toContain("allow:github_findu_*");
+    expect(output[2]).toContain("deny:*_deploy_prod");
   });
 
   it("fails mandate status for a missing id", async () => {

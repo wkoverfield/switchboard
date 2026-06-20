@@ -43,6 +43,16 @@ describe("mandates", () => {
 
   it("evaluates allow and deny tool patterns", () => {
     expect(
+      evaluateMandateToolPolicy("github.findu.checks.list", {
+        allowedTools: ["github.findu.*"]
+      })
+    ).toEqual({ allowed: true });
+    expect(
+      evaluateMandateToolPolicy("anything", {
+        allowedTools: ["*"]
+      })
+    ).toEqual({ allowed: true });
+    expect(
       evaluateMandateToolPolicy("github_findu_checks_list", {
         allowedTools: ["github_findu_*"]
       })

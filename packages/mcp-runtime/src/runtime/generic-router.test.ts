@@ -145,6 +145,21 @@ describe("GenericMcpRouter", () => {
     }
   });
 
+  it("filters discovered tools through mandate policy", async () => {
+    const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {
+      toolPolicy: {
+        allowedTools: ["alpha_tools_echo"]
+      }
+    });
+
+    try {
+      const tools = await router.discoverTools();
+      expect(tools.map((tool) => tool.name)).toEqual(["alpha_tools_echo"]);
+    } finally {
+      await router.close();
+    }
+  });
+
   it("lets deny patterns win over allow patterns", async () => {
     const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {
       toolPolicy: {

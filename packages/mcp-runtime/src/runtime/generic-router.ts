@@ -69,7 +69,13 @@ export class GenericMcpRouter {
           profileName: profile.profileName,
           upstreamName: tool.name
         });
-        tools.push(toNamespacedTool(profile.profileName, profile.namespace, tool));
+        const policyDecision = evaluateMandateToolPolicy(
+          namespacedName,
+          this.toolPolicy
+        );
+        if (policyDecision.allowed) {
+          tools.push(toNamespacedTool(profile.profileName, profile.namespace, tool));
+        }
       }
     }
 

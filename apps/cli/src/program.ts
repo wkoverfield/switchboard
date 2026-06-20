@@ -1123,6 +1123,8 @@ function formatMandateStatus(result: {
         mandate.agentRole,
         mandate.branch,
         `profiles:${mandate.profiles.join(",")}`,
+        `allow:${mandate.allowedTools.length > 0 ? mandate.allowedTools.join(",") : "all"}`,
+        `deny:${mandate.deniedTools.length > 0 ? mandate.deniedTools.join(",") : "none"}`,
         `expires:${mandate.expiresAt}`
       ].join(" ")
     );

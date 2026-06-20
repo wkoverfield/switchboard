@@ -84,7 +84,7 @@ try {
     const tools = await client.listTools();
     const names = tools.tools.map((tool) => tool.name).sort();
     assert(names.includes("daemon_mcp_echo"), "expected daemon_mcp_echo tool");
-    assert(names.includes("daemon_mcp_whoami"), "expected daemon_mcp_whoami tool");
+    assert(!names.includes("daemon_mcp_whoami"), "expected mandate policy to hide daemon_mcp_whoami tool");
 
     const result = await client.callTool({
       name: "daemon_mcp_echo",
