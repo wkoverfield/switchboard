@@ -706,7 +706,7 @@ Acceptance:
 - no secrets broker
 - no remote service
 
-### Current Slice: Daemon Restart Approval Invalidation
+### Completed Slice: Daemon Restart Approval Invalidation
 
 Goal: prevent leftover pending approval requests from surviving daemon restarts.
 
