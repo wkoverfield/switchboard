@@ -8,6 +8,7 @@ import {
   decideApprovalRequest,
   findApprovedApprovalRequest,
   listApprovalRequests,
+  markApprovalRequestStale,
   readApprovalRequestStore,
   resolveApprovalRequestStorePath
 } from "./approval-requests.js";
@@ -148,6 +149,14 @@ describe("approval requests", () => {
         now: () => new Date("2026-06-20T15:11:00.000Z")
       })
     ).resolves.toMatchObject({ id: "approval-2", runtimeStatus: "denied" });
+    await expect(
+      decideApprovalRequest({
+        path,
+        id: "approval-2",
+        status: "approved",
+        now: () => new Date("2026-06-20T15:12:00.000Z")
+      })
+    ).rejects.toThrow('approval request "approval-2" is already denied');
   });
 
   it("expires pending and approved requests at their lease boundary", async () => {
@@ -183,6 +192,112 @@ describe("approval requests", () => {
         now: () => new Date("2026-06-20T15:31:00.000Z")
       })
     ).rejects.toThrow('approval request "approval-1" is expired');
+  });
+
+  it("marks pending requests stale and prevents later approval", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-approvals-"));
+    const path = join(root, "approvals.json");
+
+    await createApprovalRequest({
+      path,
+      now: () => new Date("2026-06-20T15:00:00.000Z"),
+      mandateId: "fix-ci",
+      repoPath: join(root, "repo"),
+      branch: "fix/ci",
+      toolName: "github_findu_deploy",
+      approvalGateId: "gate-1",
+      approvalGatePattern: "github_findu_deploy",
+      expiresAt: "2026-06-20T17:00:00.000Z"
+    });
+
+    await expect(
+      markApprovalRequestStale({
+        path,
+        id: "approval-1",
+        reason: "client disconnected",
+        now: () => new Date("2026-06-20T15:05:00.000Z")
+      })
+    ).resolves.toMatchObject({
+      id: "approval-1",
+      status: "stale",
+      runtimeStatus: "stale",
+      decisionReason: "client disconnected"
+    });
+    await expect(
+      decideApprovalRequest({
+        path,
+        id: "approval-1",
+        status: "approved",
+        now: () => new Date("2026-06-20T15:06:00.000Z")
+      })
+    ).rejects.toThrow('approval request "approval-1" is stale');
+    await expect(
+      createApprovalRequest({
+        path,
+        now: () => new Date("2026-06-20T15:07:00.000Z"),
+        mandateId: "fix-ci",
+        repoPath: join(root, "repo"),
+        branch: "fix/ci",
+        toolName: "github_findu_deploy",
+        approvalGateId: "gate-1",
+        approvalGatePattern: "github_findu_deploy",
+        expiresAt: "2026-06-20T17:00:00.000Z"
+      })
+    ).resolves.toMatchObject({ id: "approval-2", runtimeStatus: "pending" });
+    expect(
+      await listApprovalRequests({
+        path,
+        repoPath: join(root, "repo"),
+        mandateId: "fix-ci",
+        status: "stale"
+      })
+    ).toEqual([expect.objectContaining({ id: "approval-1" })]);
+  });
+
+  it("lets stale cleanup override approved requests before reuse", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-approvals-"));
+    const path = join(root, "approvals.json");
+
+    await createApprovalRequest({
+      path,
+      now: () => new Date("2026-06-20T15:00:00.000Z"),
+      mandateId: "fix-ci",
+      repoPath: join(root, "repo"),
+      branch: "fix/ci",
+      toolName: "github_findu_deploy",
+      approvalGateId: "gate-1",
+      approvalGatePattern: "github_findu_deploy",
+      expiresAt: "2026-06-20T17:00:00.000Z"
+    });
+    await decideApprovalRequest({
+      path,
+      id: "approval-1",
+      status: "approved",
+      now: () => new Date("2026-06-20T15:01:00.000Z")
+    });
+
+    await expect(
+      markApprovalRequestStale({
+        path,
+        id: "approval-1",
+        reason: "client disconnected",
+        now: () => new Date("2026-06-20T15:02:00.000Z")
+      })
+    ).resolves.toMatchObject({
+      id: "approval-1",
+      status: "stale",
+      runtimeStatus: "stale"
+    });
+    await expect(
+      findApprovedApprovalRequest({
+        path,
+        mandateId: "fix-ci",
+        repoPath: join(root, "repo"),
+        toolName: "github_findu_deploy",
+        approvalGateId: "gate-1",
+        now: () => new Date("2026-06-20T15:03:00.000Z")
+      })
+    ).resolves.toBeUndefined();
   });
 
   it("treats malformed expiry timestamps as expired", async () => {

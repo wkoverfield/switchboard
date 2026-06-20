@@ -8,6 +8,7 @@ import {
   createMandate,
   decideApprovalRequest,
   listApprovalRequests,
+  markApprovalRequestStale,
   readAuditLogEntries,
   resolveAuditLogPath
 } from "@switchboard-mcp/core";
@@ -268,6 +269,68 @@ describe("daemon runtime mandate context", () => {
     );
   });
 
+  it("marks pending approval waits stale when the client disconnects", async () => {
+    const root = await makeApprovalRepo();
+    const controller = new AbortController();
+    const abort = abortWhenRequestExists(root, "approval-1", controller);
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "call",
+          type: "call_tool",
+          name: "github_findu_echo",
+          mandateId: "fix-ci",
+          approvalWaitMs: 1_000,
+          arguments: { message: "hello" }
+        }),
+        { cwd: root },
+        { signal: controller.signal }
+      )
+    ).resolves.toMatchObject({
+      id: "call",
+      ok: false,
+      error:
+        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 is stale because the client disconnected.'
+    });
+    await abort;
+    await expect(
+      listApprovalRequests({ repoPath: root, mandateId: "fix-ci" })
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "approval-1",
+        status: "stale",
+        runtimeStatus: "stale",
+        decisionReason: "client disconnected during approval wait"
+      })
+    ]);
+  });
+
+  it("returns stale approval decisions during approval waits", async () => {
+    const root = await makeApprovalRepo();
+    const stale = staleWhenRequestExists(root, "approval-1");
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "call",
+          type: "call_tool",
+          name: "github_findu_echo",
+          mandateId: "fix-ci",
+          approvalWaitMs: 1_000,
+          arguments: { message: "hello" }
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "call",
+      ok: false,
+      error:
+        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 is stale. Retry the original gated tool call to create a fresh approval request.'
+    });
+    await stale;
+  });
+
   it("times out approval waits with retry guidance", async () => {
     const root = await makeApprovalRepo();
 
@@ -449,6 +512,50 @@ async function decideWhenRequestExists(
       await decideApprovalRequest({
         id,
         status
+      });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error(`approval request "${id}" was not created`);
+}
+
+async function abortWhenRequestExists(
+  root: string,
+  id: string,
+  controller: AbortController
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 1_000) {
+    const requests = await listApprovalRequests({
+      repoPath: root,
+      mandateId: "fix-ci"
+    });
+    if (requests.some((request) => request.id === id)) {
+      controller.abort();
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error(`approval request "${id}" was not created`);
+}
+
+async function staleWhenRequestExists(
+  root: string,
+  id: string
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 1_000) {
+    const requests = await listApprovalRequests({
+      repoPath: root,
+      mandateId: "fix-ci"
+    });
+    if (requests.some((request) => request.id === id)) {
+      await markApprovalRequestStale({
+        id,
+        reason: "another client disconnected"
       });
       return;
     }

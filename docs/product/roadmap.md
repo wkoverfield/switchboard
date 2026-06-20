@@ -141,11 +141,12 @@ Implemented in the current codebase:
 - `switchboard deny <id>`
 - approved approval decisions honored by daemon-routed mandate calls
 - optional bounded approval waits with `switchboard mcp --approval-wait <duration>`
+- stale approval request status for disconnected approval waits
 
 Not started:
 
 - richer policy engine and operating modes
-- full approval broker, stale/cancel semantics, and client-specific elicitation
+- full approval broker, daemon-restart invalidation, and client-specific elicitation
 - secrets/keychain
 - provider presets
 - mandate-first onboarding
@@ -311,12 +312,13 @@ Shipped foundation:
 - `switchboard approve <id>` / `switchboard deny <id>`
 - runtime honors fresh approved decisions within mandate lease
 - optional bounded in-call wait/poll behavior for daemon-backed MCP calls
+- stale approval request status when a client disconnects during an approval
+  wait
 - no provider integrations
 
 Next acceptable slice:
 
-- approval wait stale/cancel semantics for disconnected clients or daemon
-  restarts
+- daemon restart invalidation for pending approval requests
 - client elicitation research before implementing client-specific approval UX
 
 ### Milestone 7: Secrets
@@ -667,7 +669,7 @@ Acceptance:
 - no secrets broker
 - no remote service
 
-### Current Slice: Bounded Approval Waits
+### Completed Slice: Bounded Approval Waits
 
 Goal: reduce approval retry friction for clients that tolerate pending tool
 calls without building client-specific elicitation or a remote broker.
@@ -684,9 +686,26 @@ Acceptance:
 - no secrets broker
 - no remote service
 
+### Current Slice: Approval Stale Semantics
+
+Goal: make stale approval requests explicit so approvals cannot be granted
+after the originating call disappears.
+
+Acceptance:
+
+- approval request schema supports terminal `stale` status
+- `switchboard approvals --status stale` filters stale requests
+- stale requests cannot be approved later
+- stale requests do not dedupe future approval requests
+- daemon marks a waiting approval request stale if the MCP client disconnects
+  during `--approval-wait`
+- no provider presets
+- no secrets broker
+- no remote service
+
 Follow-up slice:
 
-- stale/cancel behavior if the MCP client disconnects or the daemon restarts
+- daemon restart invalidation for pending approval requests
 - richer approval reasons and policy labels
 
 ## Rules For Future Agents
