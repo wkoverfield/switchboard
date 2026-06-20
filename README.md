@@ -1,8 +1,8 @@
 # Switchboard
 
-One local MCP endpoint for every account, project, and environment.
+Task-scoped authority for agentic software work.
 
-Switchboard is a local-first MCP profile router for developers using Codex, Claude Code, Cursor, VS Code, and other MCP-compatible agents. It is designed to make multi-account, multi-project, and dev/staging/prod tool access explicit, namespaced, policy-aware, and locally auditable.
+Switchboard is evolving into the local mandate layer for coding agents: a way to give agents bounded jobs without giving them your whole life. The current foundation is a local-first MCP router for developers using Codex, Claude Code, Cursor, VS Code, and other MCP-compatible agents. It makes multi-account, multi-project, and dev/staging/prod tool access explicit, namespaced, policy-aware, and locally auditable.
 
 This repository is in Milestone 4 foundation work. It currently ships the TypeScript workspace, CLI shell, config/profile schemas, namespace normalization, collision detection, `switchboard status`, `switchboard doctor`, generic stdio MCP upstream mounting, namespaced tool routing, a stdio MCP front door, client config dry-run and write-mode installers for Codex and Claude Code, project client config and existing MCP server detection in doctor, local audit logs, daemon lifecycle commands, daemon-side tool discovery, a daemon-backed MCP adapter for tool listing and routed calls, and end-to-end MCP smoke checks.
 
@@ -35,8 +35,9 @@ switchboard serve
 
 ## Product Roadmap
 
-The current working roadmap lives at `docs/product/roadmap.md`. Original
-planning-thread source docs are preserved in `docs/product/source/`.
+The current working roadmap lives at `docs/product/roadmap.md`. The mandate
+strategy lives at `docs/product/mandate-strategy.md`. Original planning-thread
+source docs are preserved in `docs/product/source/`.
 
 ## Config Files
 
