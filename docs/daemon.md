@@ -81,9 +81,10 @@ switchboard --cwd <repo> mcp --mandate fix-ci
 ```
 
 The adapter validates that the mandate is active for the repo, asks the daemon
-to mount only the mandate's profiles, and attaches the mandate id to routed
-tool-call audit entries. This is profile-scope and audit context, not full
-tool-level policy or approval enforcement yet.
+to mount only the mandate's profiles, enforces the mandate's allow/deny
+namespaced tool patterns before routing calls, and attaches the mandate id to
+routed tool-call audit entries. This is basic local tool policy, not approval
+brokering or secret access yet.
 
 Use `switchboard mcp --no-auto-start` to fail fast unless a daemon is already
 running.
@@ -94,6 +95,6 @@ running.
   local JSON socket.
 - `switchboard serve` remains daemonless for debugging and CI.
 - Mandate-scoped MCP mounts currently validate active mandates, narrow mounted
-  profiles, and annotate audit entries.
-- The daemon does not cache upstream sessions, enforce tool-level policy, broker
-  approvals, or read secrets yet.
+  profiles, enforce allow/deny tool patterns, and annotate audit entries.
+- The daemon does not cache upstream sessions, broker approvals, or read secrets
+  yet.

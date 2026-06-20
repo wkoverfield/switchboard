@@ -14,6 +14,9 @@ import * as z from "zod";
 import type { PathResolutionOptions } from "../config/paths.js";
 
 export type MandateRuntimeStatus = "active" | "expired";
+export type MandateToolPolicyDecision =
+  | { allowed: true }
+  | { allowed: false; reason: string };
 const mandateStoreLockTimeoutMs = 5_000;
 const mandateStoreStaleLockMs = 30_000;
 
@@ -55,8 +58,15 @@ export interface CreateMandateOptions {
   agentRole: string;
   profiles: string[];
   lease: string;
+  allowedTools?: string[];
+  deniedTools?: string[];
   path?: string;
   now?: () => Date;
+}
+
+export interface MandateToolPolicy {
+  allowedTools?: string[];
+  deniedTools?: string[];
 }
 
 export interface ListMandatesOptions {
@@ -122,6 +132,33 @@ export function mandateRuntimeStatus(
     : "expired";
 }
 
+export function evaluateMandateToolPolicy(
+  toolName: string,
+  policy: MandateToolPolicy
+): MandateToolPolicyDecision {
+  const allowedTools = uniqueTrimmed(policy.allowedTools ?? []);
+  const deniedTools = uniqueTrimmed(policy.deniedTools ?? []);
+
+  if (matchesAnyToolPattern(toolName, deniedTools)) {
+    return {
+      allowed: false,
+      reason: `tool "${toolName}" is denied by mandate policy`
+    };
+  }
+
+  if (
+    allowedTools.length > 0 &&
+    !matchesAnyToolPattern(toolName, allowedTools)
+  ) {
+    return {
+      allowed: false,
+      reason: `tool "${toolName}" is not allowed by mandate policy`
+    };
+  }
+
+  return { allowed: true };
+}
+
 export async function createMandate(
   options: CreateMandateOptions
 ): Promise<MandateWithStatus> {
@@ -146,6 +183,8 @@ export async function createMandate(
   if (profiles.length === 0) {
     throw new Error("mandate requires at least one profile");
   }
+  const allowedTools = uniqueTrimmed(options.allowedTools ?? []);
+  const deniedTools = uniqueTrimmed(options.deniedTools ?? []);
 
   const leaseMs = parseMandateLease(options.lease);
   const repoPath = resolve(options.repoPath);
@@ -178,8 +217,8 @@ export async function createMandate(
       lease: options.lease.trim(),
       createdAt: createdAt.toISOString(),
       expiresAt: new Date(createdAt.getTime() + leaseMs).toISOString(),
-      allowedTools: [],
-      deniedTools: [],
+      allowedTools,
+      deniedTools,
       approvalGates: [],
       handoffState: "open"
     };
@@ -365,4 +404,13 @@ function uniqueTrimmed(values: string[]): string[] {
   }
 
   return result;
+}
+
+function matchesAnyToolPattern(toolName: string, patterns: string[]): boolean {
+  return patterns.some((pattern) => toolPatternToRegExp(pattern).test(toolName));
+}
+
+function toolPatternToRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+  return new RegExp(`^${escaped.replace(/\*/g, ".*")}$`);
 }

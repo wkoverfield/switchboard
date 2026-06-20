@@ -1,7 +1,9 @@
 import {
+  evaluateMandateToolPolicy,
   noopAuditLogger,
   safeAuditLog,
-  type AuditLogger
+  type AuditLogger,
+  type MandateToolPolicy
 } from "@switchboard-mcp/core";
 import {
   namespacedToolName,
@@ -18,6 +20,7 @@ import {
 export interface GenericMcpRouterOptions {
   auditLogger?: AuditLogger;
   mandateId?: string;
+  toolPolicy?: MandateToolPolicy;
 }
 
 export class GenericMcpRouter {
@@ -25,6 +28,7 @@ export class GenericMcpRouter {
   private routes = new Map<string, ToolRoute>();
   private readonly auditLogger: AuditLogger;
   private readonly mandateId: string | undefined;
+  private readonly toolPolicy: MandateToolPolicy;
 
   constructor(
     private readonly profiles: StdioUpstreamProfile[],
@@ -32,6 +36,7 @@ export class GenericMcpRouter {
   ) {
     this.auditLogger = options.auditLogger ?? noopAuditLogger;
     this.mandateId = options.mandateId;
+    this.toolPolicy = options.toolPolicy ?? {};
 
     for (const profile of profiles) {
       if (this.connections.has(profile.profileName)) {
@@ -64,7 +69,13 @@ export class GenericMcpRouter {
           profileName: profile.profileName,
           upstreamName: tool.name
         });
-        tools.push(toNamespacedTool(profile.profileName, profile.namespace, tool));
+        const policyDecision = evaluateMandateToolPolicy(
+          namespacedName,
+          this.toolPolicy
+        );
+        if (policyDecision.allowed) {
+          tools.push(toNamespacedTool(profile.profileName, profile.namespace, tool));
+        }
       }
     }
 
@@ -88,45 +99,59 @@ export class GenericMcpRouter {
       (item) => item.profileName === route.profileName
     );
     const startedAt = Date.now();
+    const policyDecision = evaluateMandateToolPolicy(
+      route.namespacedName,
+      this.toolPolicy
+    );
+    if (!policyDecision.allowed) {
+      const entry = this.auditEntry(
+        {
+          action: "tool_call",
+          status: "error",
+          profileName: route.profileName,
+          toolName: route.namespacedName,
+          upstreamName: route.upstreamName,
+          durationMs: Date.now() - startedAt,
+          error: policyDecision.reason
+        },
+        profile?.namespace
+      );
+      await safeAuditLog(this.auditLogger, entry);
+      throw new Error(policyDecision.reason);
+    }
 
     try {
       const result = await connection.callTool(route.upstreamName, args);
-      const entry = {
-        action: "tool_call",
-        status: "ok",
-        profileName: route.profileName,
-        toolName: route.namespacedName,
-        upstreamName: route.upstreamName,
-        durationMs: Date.now() - startedAt
-      } as const;
-      const contextualEntry = this.mandateId
-        ? { ...entry, mandateId: this.mandateId }
-        : entry;
       await safeAuditLog(
         this.auditLogger,
-        profile?.namespace
-          ? { ...contextualEntry, namespace: profile.namespace }
-          : contextualEntry
+        this.auditEntry(
+          {
+            action: "tool_call",
+            status: "ok",
+            profileName: route.profileName,
+            toolName: route.namespacedName,
+            upstreamName: route.upstreamName,
+            durationMs: Date.now() - startedAt
+          },
+          profile?.namespace
+        )
       );
       return result;
     } catch (error) {
-      const entry = {
-        action: "tool_call",
-        status: "error",
-        profileName: route.profileName,
-        toolName: route.namespacedName,
-        upstreamName: route.upstreamName,
-        durationMs: Date.now() - startedAt,
-        error: error instanceof Error ? error.message : String(error)
-      } as const;
-      const contextualEntry = this.mandateId
-        ? { ...entry, mandateId: this.mandateId }
-        : entry;
       await safeAuditLog(
         this.auditLogger,
-        profile?.namespace
-          ? { ...contextualEntry, namespace: profile.namespace }
-          : contextualEntry
+        this.auditEntry(
+          {
+            action: "tool_call",
+            status: "error",
+            profileName: route.profileName,
+            toolName: route.namespacedName,
+            upstreamName: route.upstreamName,
+            durationMs: Date.now() - startedAt,
+            error: error instanceof Error ? error.message : String(error)
+          },
+          profile?.namespace
+        )
       );
       throw error;
     }
@@ -145,5 +170,16 @@ export class GenericMcpRouter {
     }
 
     return connection;
+  }
+
+  private auditEntry(
+    entry: Parameters<AuditLogger["log"]>[0],
+    namespace: string | undefined
+  ): Parameters<AuditLogger["log"]>[0] {
+    return {
+      ...entry,
+      ...(namespace ? { namespace } : {}),
+      ...(this.mandateId ? { mandateId: this.mandateId } : {})
+    };
   }
 }

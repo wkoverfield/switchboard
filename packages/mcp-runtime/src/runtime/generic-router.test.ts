@@ -108,6 +108,76 @@ describe("GenericMcpRouter", () => {
     }
   });
 
+  it("denies routed tool calls outside the mandate allow list", async () => {
+    const auditEntries: unknown[] = [];
+    const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {
+      mandateId: "fix-ci",
+      toolPolicy: {
+        allowedTools: ["alpha_tools_echo"]
+      },
+      auditLogger: {
+        async log(entry) {
+          auditEntries.push(entry);
+        }
+      }
+    });
+
+    try {
+      await router.discoverTools();
+      await expect(router.callTool("alpha_tools_whoami")).rejects.toThrow(
+        'tool "alpha_tools_whoami" is not allowed by mandate policy'
+      );
+
+      expect(auditEntries).toMatchObject([
+        {
+          action: "tool_call",
+          status: "error",
+          mandateId: "fix-ci",
+          profileName: "alpha",
+          namespace: "alpha_tools",
+          toolName: "alpha_tools_whoami",
+          upstreamName: "whoami",
+          error: 'tool "alpha_tools_whoami" is not allowed by mandate policy'
+        }
+      ]);
+    } finally {
+      await router.close();
+    }
+  });
+
+  it("filters discovered tools through mandate policy", async () => {
+    const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {
+      toolPolicy: {
+        allowedTools: ["alpha_tools_echo"]
+      }
+    });
+
+    try {
+      const tools = await router.discoverTools();
+      expect(tools.map((tool) => tool.name)).toEqual(["alpha_tools_echo"]);
+    } finally {
+      await router.close();
+    }
+  });
+
+  it("lets deny patterns win over allow patterns", async () => {
+    const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {
+      toolPolicy: {
+        allowedTools: ["alpha_tools_*"],
+        deniedTools: ["*_echo"]
+      }
+    });
+
+    try {
+      await router.discoverTools();
+      await expect(
+        router.callTool("alpha_tools_echo", { message: "hello" })
+      ).rejects.toThrow('tool "alpha_tools_echo" is denied by mandate policy');
+    } finally {
+      await router.close();
+    }
+  });
+
   it("does not audit unknown local routes", async () => {
     const auditEntries: unknown[] = [];
     const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {

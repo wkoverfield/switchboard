@@ -33,5 +33,7 @@ arguments, tool results, prompts, provider credentials, and raw payloads are not
 logged by this foundation slice. When MCP runtime commands run with
 `--mandate <id>`, routed tool-call entries include that mandate id so
 `switchboard logs --mandate <id>` can show the task-scoped activity trail.
+Tool calls denied by mandate allow/deny patterns are logged as `tool_call`
+entries with `status: "error"` and a redacted policy error message.
 
 Audit logs are local only. Switchboard does not upload audit logs automatically.

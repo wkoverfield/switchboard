@@ -6,10 +6,12 @@ import {
   createJsonlAuditLogger,
   createDaemonState,
   getDaemonStatus,
+  evaluateMandateToolPolicy,
   loadSwitchboardConfig,
   removeDaemonState,
   resolveActiveMandate,
   resolveDaemonPaths,
+  safeAuditLog,
   writeDaemonState,
   type DaemonPaths,
   type DaemonStatus,
@@ -430,6 +432,27 @@ async function callConfiguredTool(
 
   const router = routerResult.router;
   try {
+    if (routerResult.mandate) {
+      const policyDecision = evaluateMandateToolPolicy(name, {
+        allowedTools: routerResult.mandate.allowedTools,
+        deniedTools: routerResult.mandate.deniedTools
+      });
+      if (!policyDecision.allowed) {
+        await safeAuditLog(createJsonlAuditLogger(), {
+          action: "tool_call",
+          status: "error",
+          toolName: name,
+          mandateId: routerResult.mandate.id,
+          error: policyDecision.reason
+        });
+        return {
+          id,
+          ok: false,
+          error: policyDecision.reason
+        };
+      }
+    }
+
     await router.discoverTools();
     return {
       id,
@@ -453,7 +476,7 @@ async function routerForConfiguredProfiles(
   context: DaemonSocketContext,
   mandateId?: string
 ): Promise<
-  | { ok: true; router: GenericMcpRouter }
+  | { ok: true; router: GenericMcpRouter; mandate: MandateWithStatus | undefined }
   | { ok: false; error: string }
 > {
   const loaded = loadSwitchboardConfig(optionsFromCwd(context.cwd));
@@ -498,9 +521,18 @@ async function routerForConfiguredProfiles(
 
   return {
     ok: true,
+    mandate,
     router: new GenericMcpRouter(profiles, {
       auditLogger: createJsonlAuditLogger(),
-      ...(mandate ? { mandateId: mandate.id } : {})
+      ...(mandate
+        ? {
+            mandateId: mandate.id,
+            toolPolicy: {
+              allowedTools: mandate.allowedTools,
+              deniedTools: mandate.deniedTools
+            }
+          }
+        : {})
     })
   };
 }

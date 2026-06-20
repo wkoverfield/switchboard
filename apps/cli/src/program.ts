@@ -64,7 +64,11 @@ export interface ProgramIo {
   mandateStorePath?: string;
   serveMcp?: (
     profiles: StdioUpstreamProfile[],
-    options?: { auditLogger?: AuditLogger; mandateId?: string }
+    options?: {
+      auditLogger?: AuditLogger;
+      mandateId?: string;
+      toolPolicy?: { allowedTools?: string[]; deniedTools?: string[] };
+    }
   ) => Promise<void>;
   testProfile?: (
     profile: StdioUpstreamProfile,
@@ -517,7 +521,15 @@ export function createProgram(io: ProgramIo = {}): Command {
 
       await serveMcp(profiles, {
         auditLogger,
-        ...(mandate ? { mandateId: mandate.id } : {})
+        ...(mandate
+          ? {
+              mandateId: mandate.id,
+              toolPolicy: {
+                allowedTools: mandate.allowedTools,
+                deniedTools: mandate.deniedTools
+              }
+            }
+          : {})
       });
     });
 
@@ -627,6 +639,18 @@ export function createProgram(io: ProgramIo = {}): Command {
         )
         .requiredOption("--branch <branch>", "branch the mandate is scoped to")
         .requiredOption("--lease <duration>", "lease duration, like 30m, 2h, or 1d")
+        .option(
+          "--allow-tool <pattern>",
+          "allow a namespaced tool pattern (repeatable)",
+          collectOption,
+          [] as string[]
+        )
+        .option(
+          "--deny-tool <pattern>",
+          "deny a namespaced tool pattern (repeatable)",
+          collectOption,
+          [] as string[]
+        )
         .option("--json", "print machine-readable JSON")
         .action(
           async (
@@ -636,6 +660,8 @@ export function createProgram(io: ProgramIo = {}): Command {
               profiles: string;
               branch: string;
               lease: string;
+              allowTool: string[];
+              denyTool: string[];
               json?: boolean;
             }
           ) => {
@@ -685,7 +711,9 @@ export function createProgram(io: ProgramIo = {}): Command {
                 branch,
                 agentRole: options.agent,
                 profiles,
-                lease: options.lease
+                lease: options.lease,
+                allowedTools: options.allowTool,
+                deniedTools: options.denyTool
               });
               if (options.json) {
                 writeOut(JSON.stringify({ path, mandate }, null, 2));
@@ -1061,6 +1089,8 @@ function formatMandateCreated(path: string, mandate: MandateWithStatus): string 
     `Worktree: ${mandate.worktreePath}`,
     `Branch: ${mandate.branch}`,
     `Profiles: ${mandate.profiles.join(", ")}`,
+    `Allowed tools: ${mandate.allowedTools.length > 0 ? mandate.allowedTools.join(", ") : "all"}`,
+    `Denied tools: ${mandate.deniedTools.length > 0 ? mandate.deniedTools.join(", ") : "none"}`,
     `Lease: ${mandate.lease}`,
     `Status: ${mandate.runtimeStatus}`,
     `Expires: ${mandate.expiresAt}`,
@@ -1093,6 +1123,8 @@ function formatMandateStatus(result: {
         mandate.agentRole,
         mandate.branch,
         `profiles:${mandate.profiles.join(",")}`,
+        `allow:${mandate.allowedTools.length > 0 ? mandate.allowedTools.join(",") : "all"}`,
+        `deny:${mandate.deniedTools.length > 0 ? mandate.deniedTools.join(",") : "none"}`,
         `expires:${mandate.expiresAt}`
       ].join(" ")
     );
@@ -1373,6 +1405,10 @@ function parseCommaSeparatedList(value: string): string[] {
     .filter(Boolean);
 }
 
+function collectOption(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
 function parseSupportedClient(value: string): SupportedClient | undefined {
   if (value === "codex" || value === "claude") {
     return value;
@@ -1395,13 +1431,18 @@ function stdioProfilesFromConfig(
 
 async function serveProfilesOverStdio(
   profiles: StdioUpstreamProfile[],
-  options: { auditLogger?: AuditLogger; mandateId?: string } = {}
+  options: {
+    auditLogger?: AuditLogger;
+    mandateId?: string;
+    toolPolicy?: { allowedTools?: string[]; deniedTools?: string[] };
+  } = {}
 ): Promise<void> {
   const router = new GenericMcpRouter(
     profiles,
     {
       ...(options.auditLogger ? { auditLogger: options.auditLogger } : {}),
-      ...(options.mandateId ? { mandateId: options.mandateId } : {})
+      ...(options.mandateId ? { mandateId: options.mandateId } : {}),
+      ...(options.toolPolicy ? { toolPolicy: options.toolPolicy } : {})
     }
   );
   await serveSwitchboardMcpStdio(router);
