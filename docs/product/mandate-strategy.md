@@ -4,11 +4,24 @@ Last updated: 2026-06-20
 
 ## Thesis
 
-Switchboard should become the local mandate layer for coding agents.
+Switchboard should enter through repo-aware MCP/environment setup and deepen
+into the local mandate layer for coding agents.
 
-Agents should not simply inherit a human's broad access or a static MCP profile.
-They should receive temporary, task-scoped authority tied to the work they are
-doing in a specific repo, worktree, branch, and role.
+For normal developers, the clearest first pain is still project-scoped agent
+tooling: Codex, Claude Code, Cursor, VS Code, and other clients should get the
+right MCP profiles for the current repo and environment without duplicated
+config or accidental dev/prod/account mixups. Codex and Claude Code are shipped
+installer targets today; Cursor and VS Code remain planned surfaces.
+
+For advanced agentic workflows, agents should not simply inherit a human's broad
+access or a static MCP profile. They should receive temporary, task-scoped
+authority tied to the work they are doing in a specific repo, worktree, branch,
+and role.
+
+Positioning bridge:
+
+> Switchboard gives coding agents the right tools for each repo, environment,
+> and task.
 
 Short positioning:
 
@@ -17,6 +30,11 @@ Short positioning:
 Alternate plain-English positioning:
 
 > Give coding agents bounded jobs without giving them your whole life.
+
+Harness positioning:
+
+> Bring your own agent harness. Switchboard gives each agent the right tools,
+> scope, lease, and audit trail.
 
 ## Why Adjust
 
@@ -48,8 +66,8 @@ The market is splitting into adjacent lanes:
   config surfaces.
 
 Switchboard should avoid being only another MCP gateway, connector marketplace,
-or generic permissions wrapper. Its wedge should be repo-native delegated work
-authority for coding agents.
+or generic permissions wrapper. Its wedge should be repo-native setup plus
+delegated work authority for coding agents.
 
 Useful reference links:
 
@@ -88,6 +106,77 @@ Mandates should answer:
 - What did the agent actually do under this mandate?
 - Can another agent or human safely resume the work?
 
+## Product Layers
+
+Layer 1 is easy repo-aware MCP/environment setup:
+
+- project-scoped agent config, with Codex and Claude Code shipped first
+- correct accounts/projects for each repo
+- dev/prod separation
+- fewer duplicate MCP configs
+- safer defaults
+- basic local auditability
+
+Layer 2 is task-scoped mandates:
+
+- active mandate context selects profiles and policy
+- runtime tool calls know the mandate id
+- audit entries include mandate id when active
+- leases and approval gates become task-specific
+
+Layer 3 is controlled delegation:
+
+- a lead agent can create child mandates for worker agents
+- child mandates cannot exceed the parent's repo, profile, tool, lease, or
+  approval scope
+- privileged actions escalate back to Wilson or the parent approver
+- audit logs preserve the delegation chain
+
+Layer 4 is harness integration:
+
+- external orchestrators request scoped authority from Switchboard
+- Switchboard returns a JSON MCP command/args payload
+- the harness launches agents through that scoped endpoint
+- the harness inspects mandate-scoped logs afterward
+
+Mandates should be powerful but optional. A developer should be able to get
+value from Switchboard as a repo-aware MCP setup tool before learning the
+mandate model.
+
+These layers describe product depth, not implementation order. The next build
+work should make active mandates easy for harnesses to consume before adding
+child mandate/delegation enforcement.
+
+## Harness Boundary
+
+Switchboard should coexist with agent harnesses rather than replace them.
+
+Harnesses decide:
+
+- what work gets assigned
+- what agents to spawn
+- when to retry or escalate
+- how agents communicate
+
+Switchboard decides:
+
+- what repo/worktree/branch context an agent receives
+- which MCP profiles and tools it can use
+- which tools are denied
+- how long authority lasts
+- when approval is required
+- how actions are audited
+- eventually, once child mandates exist, how delegation chains are preserved
+
+Important scriptable surfaces:
+
+- `switchboard mandate create --json`
+- `switchboard mandate status --json`
+- `switchboard mcp --mandate <id>`
+- `switchboard logs --mandate <id> --json`
+- future `switchboard mandate child --parent <id> --json`
+- future approval and lease commands with JSON output
+
 ## Example Mandates
 
 Implementer:
@@ -108,10 +197,12 @@ Release:
 
 ## Product Implications
 
-Provider presets should wait unless they directly support mandate enforcement.
+Provider presets should wait unless they directly support mandate safety or the
+repo-aware setup wedge.
 
 Policy, approvals, and secrets should be designed around mandates rather than
-around static profiles alone.
+around static profiles alone. Simple profile-only usage must remain supported
+for users who do not need task-scoped authority yet.
 
 Installers and MCP routing remain useful, but they are distribution and runtime
 plumbing. They are not the durable product differentiation by themselves.
@@ -132,11 +223,15 @@ Switchboard now has the first local mandate foundation:
 - policy-filtered tool listing under an active mandate
 - pre-discovery denial for disallowed daemon-routed tool calls
 - approval-required tool patterns
+- approval gate reason metadata
 - conservative approval-required runtime blocking
 - local approval request records
 - `switchboard approvals`
 - `switchboard approve <id>` / `switchboard deny <id>`
 - approved requests honored by daemon-routed mandate calls
+- optional bounded approval waits
+- stale approval semantics for disconnected approval waits
+- daemon-start invalidation for leftover pending approval requests
 
 This is intentionally still local and thin. It proves the product primitive
 without building provider integrations, secret brokerage, or a full approval
@@ -144,20 +239,24 @@ broker.
 
 ## Next Mandate Slice
 
-Build the smallest approval-gate foundation:
+Make active mandate use easier for external harnesses without building a full
+orchestrator:
 
-- replace the placeholder `approvalGates` array with typed gate records on
-  mandates
-- CLI creation syntax for approval-gated namespaced tool patterns
-- conservative runtime behavior that blocks approval-required calls until an
-  approval exists
-- audit entries tied to mandate id, tool name, gate, decision, and reason
-- no provider integrations
+- ensure `switchboard mandate create --json` returns stable mandate data and a
+  scoped MCP command/args payload
+- include at least a schema/version marker, mandate id, repo cwd, command, and
+  args in the launch payload; args should carry `--cwd <repo> mcp --mandate
+  <id>`
+- keep `switchboard mandate status --json` and `switchboard logs --mandate
+  <id> --json` stable for harness polling and post-run inspection
+- document the "request scoped authority, launch agent, inspect logs" flow
+- keep enforcement claims modest and tied to actual runtime behavior
+- sketch parent/child mandate fields for the future, but do not enforce
+  delegation trees until the basic active-mandate flow is solid
+- no provider presets
 - no secret broker
 - no remote service
-
-Then add in-call wait/poll behavior, richer approval reasons, and any
-client-specific elicitation support in follow-up slices.
+- no full agent orchestrator
 
 ## Original First Mandate Slice
 

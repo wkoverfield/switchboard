@@ -1,16 +1,24 @@
 # Switchboard Agent Instructions
 
-Switchboard is evolving from a local-first MCP profile router into the local
-mandate layer for coding agents. Keep the project boring, testable, and aligned
-to the current roadmap in `docs/product/roadmap.md`.
+Switchboard enters through local-first, repo-aware MCP setup and deepens into
+the local mandate layer for coding agents. Keep the project boring, testable,
+and aligned to the current roadmap in `docs/product/roadmap.md`.
 
 ## Current Scope
 
 - The daemon/profile/install/audit foundation is mandate substrate; do not throw
   it away.
-- Product direction now prioritizes mandates: task, repo, worktree, branch,
-  agent role, profiles, allowed/denied tools, lease, approval gates, audit, and
-  handoff state.
+- Simple users should get value from project-scoped MCP/environment setup
+  without understanding mandates.
+- Product direction now uses mandates as the deeper power layer: task, repo,
+  worktree, branch, agent role, profiles, allowed/denied tools, lease, approval
+  gates, audit, and handoff state.
+- Long-term mandate work should support controlled delegation: parent mandates,
+  narrower child mandates, approval escalation, and audit-preserved delegation
+  chains.
+- Switchboard is not a full agent orchestrator. External harnesses assign work
+  and spawn agents; Switchboard grants scoped repo/profile/tool authority.
+- Keep mandate features scriptable and JSON-friendly for harness integration.
 - Prefer mandate/policy/audit/approval depth over broad provider preset work.
 - Do not build provider integrations yet.
 - Do not add Supabase, Stripe, PostHog, or Sentry adapters yet.
