@@ -17,6 +17,7 @@ import {
   readAuditLogEntries,
   renderSwitchboardClientConfig,
   resolveAuditLogPath,
+  resolveActiveMandate,
   resolveMandateStorePath,
   rollbackSwitchboardClientConfig,
   safeAuditLog,
@@ -63,7 +64,7 @@ export interface ProgramIo {
   mandateStorePath?: string;
   serveMcp?: (
     profiles: StdioUpstreamProfile[],
-    options?: { auditLogger?: AuditLogger }
+    options?: { auditLogger?: AuditLogger; mandateId?: string }
   ) => Promise<void>;
   testProfile?: (
     profile: StdioUpstreamProfile,
@@ -71,7 +72,10 @@ export interface ProgramIo {
   ) => Promise<StdioProfileTestResult>;
   daemonStatus?: typeof daemonStatus;
   startDaemon?: typeof startDaemon;
-  serveDaemonMcp?: (socketPath: string) => Promise<void>;
+  serveDaemonMcp?: (
+    socketPath: string,
+    options?: { mandateId?: string }
+  ) => Promise<void>;
 }
 
 export function createProgram(io: ProgramIo = {}): Command {
@@ -409,67 +413,100 @@ export function createProgram(io: ProgramIo = {}): Command {
     .command("mcp")
     .description("Serve MCP over stdio through the local Switchboard daemon.")
     .option("--runtime-dir <path>", "override daemon runtime directory")
+    .option("--mandate <id>", "bind routed tool calls to an active mandate")
     .option("--no-auto-start", "fail if the daemon is not already running")
-    .action(async (options: { runtimeDir?: string; autoStart?: boolean }) => {
-      const globalOptions = program.opts<{ cwd?: string }>();
-      const daemonOptions = {
-        ...optionsFromRuntimeDir(options.runtimeDir),
-        ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
-      };
-      const desiredCwd = resolve(globalOptions.cwd ?? process.cwd());
-      let status = await getDaemonStatus(daemonOptions);
-      if (
-        status.state === "running" &&
-        status.daemon.cwd !== desiredCwd
-      ) {
-        writeErr(
-          `error: Switchboard daemon is running for ${status.daemon.cwd ?? "an unknown cwd"}; stop it or use --runtime-dir for a separate daemon before serving ${desiredCwd}`
-        );
-        process.exitCode = 1;
-        return;
-      }
-
-      if (status.state !== "running") {
-        if (options.autoStart === false) {
-          writeErr(
-            "error: Switchboard daemon is not running; run switchboard daemon start first"
-          );
-          process.exitCode = 1;
-          return;
-        }
-
-        const started = await startDaemonProcess(daemonOptions);
-        if (!started.ok || started.status.state !== "running") {
-          writeErr(`error: ${started.message}`);
-          process.exitCode = 1;
-          return;
-        }
-        status = started.status;
-        if (status.daemon.cwd !== desiredCwd) {
+    .action(
+      async (options: {
+        runtimeDir?: string;
+        mandate?: string;
+        autoStart?: boolean;
+      }) => {
+        const globalOptions = program.opts<{ cwd?: string }>();
+        const daemonOptions = {
+          ...optionsFromRuntimeDir(options.runtimeDir),
+          ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
+        };
+        const desiredCwd = resolve(globalOptions.cwd ?? process.cwd());
+        let status = await getDaemonStatus(daemonOptions);
+        if (status.state === "running" && status.daemon.cwd !== desiredCwd) {
           writeErr(
             `error: Switchboard daemon is running for ${status.daemon.cwd ?? "an unknown cwd"}; stop it or use --runtime-dir for a separate daemon before serving ${desiredCwd}`
           );
           process.exitCode = 1;
           return;
         }
-      }
 
-      await serveDaemonMcp(status.daemon.socketPath);
-    });
+        if (status.state !== "running") {
+          if (options.autoStart === false) {
+            writeErr(
+              "error: Switchboard daemon is not running; run switchboard daemon start first"
+            );
+            process.exitCode = 1;
+            return;
+          }
+
+          const started = await startDaemonProcess(daemonOptions);
+          if (!started.ok || started.status.state !== "running") {
+            writeErr(`error: ${started.message}`);
+            process.exitCode = 1;
+            return;
+          }
+          status = started.status;
+          if (status.daemon.cwd !== desiredCwd) {
+            writeErr(
+              `error: Switchboard daemon is running for ${status.daemon.cwd ?? "an unknown cwd"}; stop it or use --runtime-dir for a separate daemon before serving ${desiredCwd}`
+            );
+            process.exitCode = 1;
+            return;
+          }
+        }
+
+        const mandate = options.mandate
+          ? await resolveActiveMandateForCommand({
+              id: options.mandate,
+              cwd: globalOptions.cwd,
+              mandateStorePath: io.mandateStorePath,
+              writeErr
+            })
+          : undefined;
+        if (options.mandate && !mandate) {
+          process.exitCode = 1;
+          return;
+        }
+
+        await serveDaemonMcp(
+          status.daemon.socketPath,
+          mandate ? { mandateId: mandate.id } : {}
+        );
+      }
+    );
 
   program
     .command("serve")
     .description("Serve configured stdio MCP upstreams through one Switchboard MCP endpoint.")
-    .action(async () => {
+    .option("--mandate <id>", "bind routed tool calls to an active mandate")
+    .action(async (options: { mandate?: string }) => {
       const globalOptions = program.opts<{ cwd?: string }>();
       const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
 
       if (!validateLoadedConfigForCommand(loaded, writeErr)) {
         return;
       }
+      const mandate = options.mandate
+        ? await resolveActiveMandateForCommand({
+            id: options.mandate,
+            cwd: globalOptions.cwd,
+            mandateStorePath: io.mandateStorePath,
+            writeErr
+          })
+        : undefined;
+      if (options.mandate && !mandate) {
+        process.exitCode = 1;
+        return;
+      }
 
       const profiles = stdioProfilesFromConfig(
-        loaded.config.profiles,
+        mandate ? profilesForMandate(loaded.config.profiles, mandate) : loaded.config.profiles,
         configCwdBase(loaded, globalOptions.cwd)
       );
       if (profiles.length === 0) {
@@ -478,7 +515,10 @@ export function createProgram(io: ProgramIo = {}): Command {
         return;
       }
 
-      await serveMcp(profiles, { auditLogger });
+      await serveMcp(profiles, {
+        auditLogger,
+        ...(mandate ? { mandateId: mandate.id } : {})
+      });
     });
 
   program
@@ -1149,6 +1189,45 @@ function installTargetCwd(cwd: string | undefined): string {
   return repoPaths.repoConfigPath ? dirname(repoPaths.repoConfigPath) : resolvedCwd;
 }
 
+async function resolveActiveMandateForCommand(options: {
+  id: string;
+  cwd: string | undefined;
+  mandateStorePath: string | undefined;
+  writeErr: (message: string) => void;
+}): Promise<MandateWithStatus | undefined> {
+  const repoPath = installTargetCwd(options.cwd);
+  try {
+    const mandate = await resolveActiveMandate({
+      id: options.id,
+      repoPath,
+      ...(options.mandateStorePath ? { path: options.mandateStorePath } : {})
+    });
+    const gitBinding = resolveGitWorktreeBinding(repoPath);
+    if (gitBinding && gitBinding.branch !== mandate.branch) {
+      throw new Error(
+        `mandate "${mandate.id}" is scoped to branch "${mandate.branch}", but current git branch is "${gitBinding.branch}" in ${gitBinding.worktreePath}`
+      );
+    }
+
+    return mandate;
+  } catch (error) {
+    options.writeErr(`error: ${messageFromError(error)}`);
+    return undefined;
+  }
+}
+
+function profilesForMandate(
+  profiles: ReturnType<typeof loadSwitchboardConfig>["config"]["profiles"],
+  mandate: MandateWithStatus
+): ReturnType<typeof loadSwitchboardConfig>["config"]["profiles"] {
+  const allowedProfiles = new Set(mandate.profiles);
+  return Object.fromEntries(
+    Object.entries(profiles).filter(([profileName]) =>
+      allowedProfiles.has(profileName)
+    )
+  ) as ReturnType<typeof loadSwitchboardConfig>["config"]["profiles"];
+}
+
 function resolveGitWorktreeBinding(
   cwd: string
 ): { worktreePath: string; branch: string } | undefined {
@@ -1316,11 +1395,14 @@ function stdioProfilesFromConfig(
 
 async function serveProfilesOverStdio(
   profiles: StdioUpstreamProfile[],
-  options: { auditLogger?: AuditLogger } = {}
+  options: { auditLogger?: AuditLogger; mandateId?: string } = {}
 ): Promise<void> {
   const router = new GenericMcpRouter(
     profiles,
-    options.auditLogger ? { auditLogger: options.auditLogger } : {}
+    {
+      ...(options.auditLogger ? { auditLogger: options.auditLogger } : {}),
+      ...(options.mandateId ? { mandateId: options.mandateId } : {})
+    }
   );
   await serveSwitchboardMcpStdio(router);
 }

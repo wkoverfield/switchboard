@@ -26,6 +26,7 @@ switchboard daemon ping --json
 switchboard daemon tools --json
 switchboard daemon stop --json
 switchboard mcp --runtime-dir <path>
+switchboard mcp --mandate <id>
 ```
 
 ## Runtime Files
@@ -73,6 +74,17 @@ For manual testing, use:
 switchboard --cwd <repo> mcp
 ```
 
+To run under an active task-scoped mandate, use:
+
+```bash
+switchboard --cwd <repo> mcp --mandate fix-ci
+```
+
+The adapter validates that the mandate is active for the repo, asks the daemon
+to mount only the mandate's profiles, and attaches the mandate id to routed
+tool-call audit entries. This is profile-scope and audit context, not full
+tool-level policy or approval enforcement yet.
+
 Use `switchboard mcp --no-auto-start` to fail fast unless a daemon is already
 running.
 
@@ -81,5 +93,7 @@ running.
 - The daemon supports heartbeat, tool discovery, and tool-call routing over its
   local JSON socket.
 - `switchboard serve` remains daemonless for debugging and CI.
-- The daemon does not cache upstream sessions, enforce policy, broker
+- Mandate-scoped MCP mounts currently validate active mandates, narrow mounted
+  profiles, and annotate audit entries.
+- The daemon does not cache upstream sessions, enforce tool-level policy, broker
   approvals, or read secrets yet.

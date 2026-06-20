@@ -78,6 +78,36 @@ describe("GenericMcpRouter", () => {
     }
   });
 
+  it("attaches mandate context to routed tool-call audit entries", async () => {
+    const auditEntries: unknown[] = [];
+    const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {
+      mandateId: "fix-ci",
+      auditLogger: {
+        async log(entry) {
+          auditEntries.push(entry);
+        }
+      }
+    });
+
+    try {
+      await router.discoverTools();
+      await router.callTool("alpha_tools_echo", { message: "hello" });
+
+      expect(auditEntries).toMatchObject([
+        {
+          action: "tool_call",
+          status: "ok",
+          mandateId: "fix-ci",
+          profileName: "alpha",
+          namespace: "alpha_tools",
+          toolName: "alpha_tools_echo"
+        }
+      ]);
+    } finally {
+      await router.close();
+    }
+  });
+
   it("does not audit unknown local routes", async () => {
     const auditEntries: unknown[] = [];
     const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {

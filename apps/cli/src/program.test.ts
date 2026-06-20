@@ -453,6 +453,100 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it("passes active mandate context to daemon-backed mcp", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const socketPath = join(root, "daemon.sock");
+    const served: Array<{ socket: string; mandateId: string | undefined }> = [];
+    const program = createProgram({
+      mandateStorePath,
+      writeOut: () => undefined,
+      daemonStatus: async () => ({
+        state: "running",
+        paths: {
+          runtimeDir: root,
+          socketPath,
+          statePath: join(root, "daemon.json")
+        },
+        daemon: {
+          version: 1,
+          pid: process.pid,
+          startedAt: "2026-06-20T08:00:00.000Z",
+          socketPath,
+          cwd: root
+        }
+      }),
+      serveDaemonMcp: async (socket, options) => {
+        served.push({ socket, mandateId: options?.mandateId });
+      }
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(["--cwd", root, "mcp", "--mandate", "fix-ci"], {
+      from: "user"
+    });
+
+    expect(served).toEqual([{ socket: socketPath, mandateId: "fix-ci" }]);
+  });
+
+  it("fails daemon-backed mcp for a missing mandate", async () => {
+    const root = makeTempProject();
+    const socketPath = join(root, "daemon.sock");
+    const errors: string[] = [];
+    const served: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message),
+      mandateStorePath: join(root, "state", "mandates.json"),
+      daemonStatus: async () => ({
+        state: "running",
+        paths: {
+          runtimeDir: root,
+          socketPath,
+          statePath: join(root, "daemon.json")
+        },
+        daemon: {
+          version: 1,
+          pid: process.pid,
+          startedAt: "2026-06-20T08:00:00.000Z",
+          socketPath,
+          cwd: root
+        }
+      }),
+      serveDaemonMcp: async (socket) => {
+        served.push(socket);
+      }
+    });
+
+    await program.parseAsync(["--cwd", root, "mcp", "--mandate", "missing"], {
+      from: "user"
+    });
+
+    expect(errors).toEqual([
+      `error: mandate "missing" was not found for ${root}`
+    ]);
+    expect(served).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
   it("refuses daemon-backed mcp when the running daemon uses another cwd", async () => {
     const root = makeTempProject();
     const otherRoot = makeTempProject();
@@ -707,6 +801,79 @@ describe("switchboard CLI program", () => {
         command: "node",
         args: ["fixture.mjs"],
         cwd: root
+      }
+    ]);
+  });
+
+  it("scopes daemonless serve profiles through an active mandate", async () => {
+    const root = makeTempProject();
+    const mandateStorePath = join(root, "state", "mandates.json");
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_findu:",
+        "    provider: generic",
+        "    namespace: github_findu",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "  vercel_preview:",
+        "    provider: generic",
+        "    namespace: vercel_preview",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node"
+      ].join("\n")
+    );
+
+    const served: Array<{
+      profiles: unknown[];
+      mandateId: string | undefined;
+    }> = [];
+    const program = createProgram({
+      mandateStorePath,
+      writeOut: () => undefined,
+      serveMcp: async (profiles, options) => {
+        served.push({ profiles, mandateId: options?.mandateId });
+      }
+    });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(["--cwd", root, "serve", "--mandate", "fix-ci"], {
+      from: "user"
+    });
+
+    expect(served).toEqual([
+      {
+        mandateId: "fix-ci",
+        profiles: [
+          {
+            profileName: "github_findu",
+            namespace: "github_findu",
+            command: "node",
+            cwd: root
+          }
+        ]
       }
     ]);
   });

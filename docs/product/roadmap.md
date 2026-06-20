@@ -40,7 +40,7 @@ Switchboard should win by making delegated coding-agent work bounded:
 
 ## Current State
 
-Implemented on `main` through PR #22, plus the current mandate-foundation branch:
+Implemented on `main` through PR #23, plus the current mandate-runtime-context branch:
 
 - TypeScript pnpm workspace
 - `@switchboard-mcp/cli`
@@ -92,10 +92,14 @@ Implemented on `main` through PR #22, plus the current mandate-foundation branch
 - `switchboard mandate status`
 - optional audit log mandate ids
 - `switchboard logs --mandate`
+- `switchboard mcp --mandate`
+- `switchboard serve --mandate`
+- mandate-scoped MCP profile mounting
+- mandate-linked MCP tool-call audit entries
 
 Not started:
 
-- mandate-aware runtime enforcement
+- mandate-aware tool-level policy enforcement
 - policy engine
 - approval broker
 - secrets/keychain
@@ -519,20 +523,21 @@ Acceptance:
 - Provider presets are explicitly gated behind mandate/secrets/policy work
 - Next build slice is mandate foundation rather than provider integrations
 
-### Current Slice: Mandate Foundation
+### Current Slice: Mandate Runtime Context
 
-Goal: create the smallest local mandate primitive without claiming full
-enforcement yet.
+Goal: make the MCP runtime aware of active mandates without claiming full
+tool-level policy or approval enforcement yet.
 
 Acceptance:
 
-- `switchboard mandate create`
-- local mandate schema and persistence
-- mandate binds repo, worktree, branch, agent role, profile list, and lease
-- `switchboard mandate status`
-- audit entries may include mandate id
+- `switchboard mcp --mandate <id>`
+- `switchboard serve --mandate <id>`
+- runtime validates the mandate is active for the repo
+- runtime mounts only profiles bound to the mandate
+- routed MCP tool-call audit entries include mandate id
 - no provider integrations
 - no secret broker
+- no full policy engine yet
 - no full approval broker yet
 
 ## Rules For Future Agents

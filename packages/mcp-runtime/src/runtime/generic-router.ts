@@ -17,18 +17,21 @@ import {
 
 export interface GenericMcpRouterOptions {
   auditLogger?: AuditLogger;
+  mandateId?: string;
 }
 
 export class GenericMcpRouter {
   private readonly connections = new Map<string, StdioUpstreamConnection>();
   private routes = new Map<string, ToolRoute>();
   private readonly auditLogger: AuditLogger;
+  private readonly mandateId: string | undefined;
 
   constructor(
     private readonly profiles: StdioUpstreamProfile[],
     options: GenericMcpRouterOptions = {}
   ) {
     this.auditLogger = options.auditLogger ?? noopAuditLogger;
+    this.mandateId = options.mandateId;
 
     for (const profile of profiles) {
       if (this.connections.has(profile.profileName)) {
@@ -96,9 +99,14 @@ export class GenericMcpRouter {
         upstreamName: route.upstreamName,
         durationMs: Date.now() - startedAt
       } as const;
+      const contextualEntry = this.mandateId
+        ? { ...entry, mandateId: this.mandateId }
+        : entry;
       await safeAuditLog(
         this.auditLogger,
-        profile?.namespace ? { ...entry, namespace: profile.namespace } : entry
+        profile?.namespace
+          ? { ...contextualEntry, namespace: profile.namespace }
+          : contextualEntry
       );
       return result;
     } catch (error) {
@@ -111,9 +119,14 @@ export class GenericMcpRouter {
         durationMs: Date.now() - startedAt,
         error: error instanceof Error ? error.message : String(error)
       } as const;
+      const contextualEntry = this.mandateId
+        ? { ...entry, mandateId: this.mandateId }
+        : entry;
       await safeAuditLog(
         this.auditLogger,
-        profile?.namespace ? { ...entry, namespace: profile.namespace } : entry
+        profile?.namespace
+          ? { ...contextualEntry, namespace: profile.namespace }
+          : contextualEntry
       );
       throw error;
     }

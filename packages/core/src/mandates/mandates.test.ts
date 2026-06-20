@@ -9,6 +9,7 @@ import {
   normalizeMandateId,
   parseMandateLease,
   readMandateStore,
+  resolveActiveMandate,
   resolveMandateStorePath
 } from "./mandates.js";
 
@@ -178,6 +179,58 @@ describe("mandates", () => {
         lease: "1h"
       })
     ).resolves.toMatchObject({ id: "fix-ci", branch: "fix/ci-2" });
+
+    await expect(
+      resolveActiveMandate({
+        path,
+        repoPath: join(root, "repo"),
+        id: "fix-ci",
+        now: () => new Date("2026-06-19T17:30:00.000Z")
+      })
+    ).resolves.toMatchObject({ id: "fix-ci", branch: "fix/ci-2" });
+  });
+
+  it("resolves only active mandates for a repo", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+
+    await createMandate({
+      path,
+      now: () => new Date("2026-06-19T16:00:00.000Z"),
+      task: "fix-ci",
+      repoPath: join(root, "repo"),
+      worktreePath: join(root, "repo"),
+      branch: "fix/ci",
+      agentRole: "implementer",
+      profiles: ["github_findu"],
+      lease: "1h"
+    });
+
+    await expect(
+      resolveActiveMandate({
+        path,
+        repoPath: join(root, "repo"),
+        id: "fix-ci",
+        now: () => new Date("2026-06-19T16:30:00.000Z")
+      })
+    ).resolves.toMatchObject({ id: "fix-ci", runtimeStatus: "active" });
+
+    await expect(
+      resolveActiveMandate({
+        path,
+        repoPath: join(root, "repo"),
+        id: "fix-ci",
+        now: () => new Date("2026-06-19T17:01:00.000Z")
+      })
+    ).rejects.toThrow('mandate "fix-ci" is expired');
+
+    await expect(
+      resolveActiveMandate({
+        path,
+        repoPath: join(root, "other-repo"),
+        id: "fix-ci"
+      })
+    ).rejects.toThrow('mandate "fix-ci" was not found');
   });
 
   it("computes active and expired runtime status from expiresAt", () => {

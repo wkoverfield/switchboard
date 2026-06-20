@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, resolve } from "node:path";
@@ -8,10 +8,12 @@ import {
   getDaemonStatus,
   loadSwitchboardConfig,
   removeDaemonState,
+  resolveActiveMandate,
   resolveDaemonPaths,
   writeDaemonState,
   type DaemonPaths,
-  type DaemonStatus
+  type DaemonStatus,
+  type MandateWithStatus
 } from "@switchboard-mcp/core";
 import {
   GenericMcpRouter,
@@ -208,7 +210,7 @@ async function daemonHeartbeat(socketPath: string): Promise<boolean> {
     .catch(() => false);
 }
 
-interface DaemonSocketContext {
+export interface DaemonSocketContext {
   cwd?: string;
 }
 
@@ -270,7 +272,7 @@ function handleDaemonSocket(socket: Socket, context: DaemonSocketContext): void 
   });
 }
 
-async function handleDaemonRequest(raw: string, context: DaemonSocketContext): Promise<{
+export async function handleDaemonRequest(raw: string, context: DaemonSocketContext): Promise<{
   id: string;
   ok: boolean;
   type?: "pong" | "tools" | "tool_result";
@@ -285,6 +287,7 @@ async function handleDaemonRequest(raw: string, context: DaemonSocketContext): P
       type?: unknown;
       name?: unknown;
       arguments?: unknown;
+      mandateId?: unknown;
     };
     const id = typeof request.id === "string" ? request.id : "unknown";
     if (request.type === "ping") {
@@ -296,7 +299,17 @@ async function handleDaemonRequest(raw: string, context: DaemonSocketContext): P
       };
     }
     if (request.type === "list_tools") {
-      return listConfiguredTools(id, context);
+      if (
+        request.mandateId !== undefined &&
+        !isValidMandateId(request.mandateId)
+      ) {
+        return {
+          id,
+          ok: false,
+          error: "Daemon request mandateId must be a non-empty string."
+        };
+      }
+      return listConfiguredTools(id, context, request.mandateId);
     }
     if (request.type === "call_tool") {
       if (typeof request.name !== "string" || request.name.length === 0) {
@@ -317,7 +330,24 @@ async function handleDaemonRequest(raw: string, context: DaemonSocketContext): P
         };
       }
 
-      return callConfiguredTool(id, context, request.name, request.arguments);
+      if (
+        request.mandateId !== undefined &&
+        !isValidMandateId(request.mandateId)
+      ) {
+        return {
+          id,
+          ok: false,
+          error: "Daemon request mandateId must be a non-empty string."
+        };
+      }
+
+      return callConfiguredTool(
+        id,
+        context,
+        request.name,
+        request.arguments,
+        request.mandateId
+      );
     }
 
     return {
@@ -336,7 +366,8 @@ async function handleDaemonRequest(raw: string, context: DaemonSocketContext): P
 
 async function listConfiguredTools(
   id: string,
-  context: DaemonSocketContext
+  context: DaemonSocketContext,
+  mandateId?: string
 ): Promise<{
   id: string;
   ok: boolean;
@@ -345,7 +376,7 @@ async function listConfiguredTools(
   tools?: NamespacedTool[];
   error?: string;
 }> {
-  const routerResult = routerForConfiguredProfiles(context);
+  const routerResult = await routerForConfiguredProfiles(context, mandateId);
   if (!routerResult.ok) {
     return {
       id,
@@ -378,7 +409,8 @@ async function callConfiguredTool(
   id: string,
   context: DaemonSocketContext,
   name: string,
-  args: Record<string, unknown> | undefined
+  args: Record<string, unknown> | undefined,
+  mandateId?: string
 ): Promise<{
   id: string;
   ok: boolean;
@@ -387,7 +419,7 @@ async function callConfiguredTool(
   result?: unknown;
   error?: string;
 }> {
-  const routerResult = routerForConfiguredProfiles(context);
+  const routerResult = await routerForConfiguredProfiles(context, mandateId);
   if (!routerResult.ok) {
     return {
       id,
@@ -417,19 +449,47 @@ async function callConfiguredTool(
   }
 }
 
-function routerForConfiguredProfiles(
-  context: DaemonSocketContext
-):
+async function routerForConfiguredProfiles(
+  context: DaemonSocketContext,
+  mandateId?: string
+): Promise<
   | { ok: true; router: GenericMcpRouter }
-  | { ok: false; error: string } {
+  | { ok: false; error: string }
+> {
   const loaded = loadSwitchboardConfig(optionsFromCwd(context.cwd));
   const validationError = loadedConfigError(loaded);
   if (validationError) {
     return { ok: false, error: validationError };
   }
 
+  let mandate: MandateWithStatus | undefined;
+  if (mandateId) {
+    try {
+      const repoPath = configCwdBase(loaded, context.cwd);
+      mandate = await resolveActiveMandate({
+        id: mandateId,
+        repoPath
+      });
+      const gitBinding = resolveGitWorktreeBinding(repoPath);
+      if (gitBinding && gitBinding.branch !== mandate.branch) {
+        return {
+          ok: false,
+          error: `mandate "${mandate.id}" is scoped to branch "${mandate.branch}", but current git branch is "${gitBinding.branch}" in ${gitBinding.worktreePath}`
+        };
+      }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   const profiles = stdioProfilesFromConfig(
-    loaded.config.profiles,
+    mandate
+      ? Object.fromEntries(
+          Object.entries(loaded.config.profiles).filter(([profileName]) =>
+            mandate.profiles.includes(profileName)
+          )
+        )
+      : loaded.config.profiles,
     configCwdBase(loaded, context.cwd)
   );
   if (profiles.length === 0) {
@@ -439,7 +499,8 @@ function routerForConfiguredProfiles(
   return {
     ok: true,
     router: new GenericMcpRouter(profiles, {
-      auditLogger: createJsonlAuditLogger()
+      auditLogger: createJsonlAuditLogger(),
+      ...(mandate ? { mandateId: mandate.id } : {})
     })
   };
 }
@@ -484,6 +545,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isValidMandateId(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
 function configCwdBase(
   loaded: ReturnType<typeof loadSwitchboardConfig>,
   cwd: string | undefined
@@ -497,6 +562,35 @@ function configCwdBase(
   }
 
   return cwd ? resolve(cwd) : process.cwd();
+}
+
+function resolveGitWorktreeBinding(
+  cwd: string
+): { worktreePath: string; branch: string } | undefined {
+  const worktreePath = runGit(["rev-parse", "--show-toplevel"], cwd);
+  if (!worktreePath) {
+    return undefined;
+  }
+
+  const branch = runGit(["branch", "--show-current"], cwd);
+  if (!branch) {
+    throw new Error(`git worktree at ${worktreePath} has no current branch`);
+  }
+
+  return { worktreePath, branch };
+}
+
+function runGit(args: string[], cwd: string): string | undefined {
+  try {
+    const output = execFileSync("git", ["-C", cwd, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    const trimmed = output.trim();
+    return trimmed || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function listen(server: Server, socketPath: string): Promise<void> {

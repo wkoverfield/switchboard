@@ -42,16 +42,18 @@ export type DaemonResponse =
 
 export type DaemonRequest =
   | { id: string; type: "ping" }
-  | { id: string; type: "list_tools" }
+  | { id: string; type: "list_tools"; mandateId?: string }
   | {
       id: string;
       type: "call_tool";
       name: string;
       arguments?: Record<string, unknown>;
+      mandateId?: string;
     };
 
 export interface DaemonClientOptions {
   timeoutMs?: number;
+  mandateId?: string;
 }
 
 export async function pingDaemon(
@@ -82,12 +84,16 @@ export async function listDaemonTools(
   options: DaemonClientOptions = {}
 ): Promise<DaemonToolsResponse> {
   const id = randomRequestId();
+  const request: DaemonRequest = {
+    id,
+    type: "list_tools"
+  };
+  if (options.mandateId) {
+    request.mandateId = options.mandateId;
+  }
   const response = await requestDaemon(
     socketPath,
-    {
-      id,
-      type: "list_tools"
-    },
+    request,
     { timeoutMs: options.timeoutMs ?? 5000 }
   );
 
@@ -118,6 +124,9 @@ export async function callDaemonTool(
   };
   if (args !== undefined) {
     request.arguments = args;
+  }
+  if (options.mandateId) {
+    request.mandateId = options.mandateId;
   }
   const response = await requestDaemon(socketPath, request, {
     timeoutMs: options.timeoutMs ?? 60000

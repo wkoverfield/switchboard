@@ -36,6 +36,20 @@ try {
       "        - daemon-mcp"
     ].join("\n")
   );
+  runCli(
+    "mandate",
+    "create",
+    "fix-daemon",
+    "--agent",
+    "implementer",
+    "--profiles",
+    "daemon_mcp",
+    "--branch",
+    "fix/daemon",
+    "--lease",
+    "2h",
+    "--json"
+  );
 
   const client = new Client({
     name: "switchboard-daemon-mcp-smoke",
@@ -43,7 +57,16 @@ try {
   });
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [cliPath, "--cwd", tmpRoot, "mcp", "--runtime-dir", runtimeDir],
+    args: [
+      cliPath,
+      "--cwd",
+      tmpRoot,
+      "mcp",
+      "--runtime-dir",
+      runtimeDir,
+      "--mandate",
+      "fix-daemon"
+    ],
     cwd: repoRoot,
     env: {
       ...process.env,
@@ -77,9 +100,10 @@ try {
         (entry) =>
           entry.action === "tool_call" &&
           entry.status === "ok" &&
-          entry.toolName === "daemon_mcp_echo"
+          entry.toolName === "daemon_mcp_echo" &&
+          entry.mandateId === "fix-daemon"
       ),
-      "expected daemon routed tool call audit entry"
+      "expected mandate-linked daemon routed tool call audit entry"
     );
   } finally {
     await client.close();
@@ -87,6 +111,25 @@ try {
 } finally {
   runDaemon("stop", { allowFailure: true });
   rmSync(tmpRoot, { recursive: true, force: true });
+}
+
+function runCli(...args) {
+  const result = spawnSync(process.execPath, [cliPath, "--cwd", tmpRoot, ...args], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      XDG_STATE_HOME: tmpRoot,
+      SWITCHBOARD_RUNTIME_DIR: runtimeDir
+    }
+  });
+
+  if (result.status !== 0) {
+    throw new Error(
+      `switchboard ${args.join(" ")} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`
+    );
+  }
+
+  return result.stdout.trim() ? JSON.parse(result.stdout) : {};
 }
 
 function runDaemon(command, options = {}) {
