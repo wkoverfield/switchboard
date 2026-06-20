@@ -11,6 +11,7 @@ import {
   evaluateMandateToolPolicy,
   listApprovalRequests,
   loadSwitchboardConfig,
+  markApprovalRequestStale,
   removeDaemonState,
   resolveActiveMandate,
   resolveDaemonPaths,
@@ -225,8 +226,15 @@ export interface DaemonSocketContext {
 function handleDaemonSocket(socket: Socket, context: DaemonSocketContext): void {
   let buffered = "";
   let answered = false;
+  let completed = false;
+  const abortController = new AbortController();
 
   socket.setEncoding("utf8");
+  socket.on("close", () => {
+    if (answered && !completed) {
+      abortController.abort();
+    }
+  });
   socket.on("error", () => {
     socket.destroy();
   });
@@ -260,12 +268,16 @@ function handleDaemonSocket(socket: Socket, context: DaemonSocketContext): void 
         return;
       }
 
-      void handleDaemonRequest(request, context)
+      void handleDaemonRequest(request, context, {
+        signal: abortController.signal
+      })
         .then((response) => {
+          completed = true;
           socket.write(`${JSON.stringify(response)}\n`);
           socket.end();
         })
         .catch((error: unknown) => {
+          completed = true;
           socket.write(
             `${JSON.stringify({
               id: "unknown",
@@ -280,7 +292,11 @@ function handleDaemonSocket(socket: Socket, context: DaemonSocketContext): void 
   });
 }
 
-export async function handleDaemonRequest(raw: string, context: DaemonSocketContext): Promise<{
+export async function handleDaemonRequest(
+  raw: string,
+  context: DaemonSocketContext,
+  options: { signal?: AbortSignal } = {}
+): Promise<{
   id: string;
   ok: boolean;
   type?: "pong" | "tools" | "tool_result";
@@ -366,7 +382,8 @@ export async function handleDaemonRequest(raw: string, context: DaemonSocketCont
         request.name,
         request.arguments,
         request.mandateId,
-        request.approvalWaitMs
+        request.approvalWaitMs,
+        options.signal
       );
     }
 
@@ -431,7 +448,8 @@ async function callConfiguredTool(
   name: string,
   args: Record<string, unknown> | undefined,
   mandateId?: string,
-  approvalWaitMs = 0
+  approvalWaitMs = 0,
+  signal?: AbortSignal
 ): Promise<{
   id: string;
   ok: boolean;
@@ -495,8 +513,32 @@ async function callConfiguredTool(
             const decision = await waitForApprovalDecision({
               requestId: request.id,
               mandate: routerResult.mandate,
-              timeoutMs: approvalWaitMs
+              timeoutMs: approvalWaitMs,
+              ...(signal ? { signal } : {})
             });
+            if (decision === "aborted") {
+              const staleRequest = await markApprovalRequestStale({
+                id: request.id,
+                reason: "client disconnected during approval wait"
+              });
+              const error = `${policyDecision.reason}; approval request ${request.id} is stale because the client disconnected.`;
+              await auditApprovalBlockedCall({
+                toolName: name,
+                mandate: routerResult.mandate,
+                approvalRequestId: request.id,
+                approvalGateId: policyDecision.approvalGate.id,
+                approvalGatePattern: policyDecision.approvalGate.toolPattern,
+                error
+              });
+              return {
+                id,
+                ok: false,
+                error:
+                  staleRequest.runtimeStatus === "stale"
+                    ? error
+                    : `${policyDecision.reason}; approval request ${request.id} is ${staleRequest.runtimeStatus}.`
+              };
+            }
             if (decision?.runtimeStatus === "approved") {
               await router.close().catch(() => undefined);
               return callConfiguredTool(id, context, name, args, mandateId, 0);
@@ -519,6 +561,22 @@ async function callConfiguredTool(
             }
             if (decision?.runtimeStatus === "expired") {
               const error = `${policyDecision.reason}; approval request ${request.id} expired before it was approved.`;
+              await auditApprovalBlockedCall({
+                toolName: name,
+                mandate: routerResult.mandate,
+                approvalRequestId: request.id,
+                approvalGateId: policyDecision.approvalGate.id,
+                approvalGatePattern: policyDecision.approvalGate.toolPattern,
+                error
+              });
+              return {
+                id,
+                ok: false,
+                error
+              };
+            }
+            if (decision?.runtimeStatus === "stale") {
+              const error = `${policyDecision.reason}; approval request ${request.id} is stale. Retry the original gated tool call to create a fresh approval request.`;
               await auditApprovalBlockedCall({
                 toolName: name,
                 mandate: routerResult.mandate,
@@ -583,9 +641,13 @@ async function waitForApprovalDecision(options: {
   requestId: string;
   mandate: MandateWithStatus;
   timeoutMs: number;
-}): Promise<ApprovalRequestWithStatus | undefined> {
+  signal?: AbortSignal;
+}): Promise<ApprovalRequestWithStatus | "aborted" | undefined> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < options.timeoutMs) {
+    if (options.signal?.aborted) {
+      return "aborted";
+    }
     const requests = await listApprovalRequests({
       repoPath: options.mandate.repoPath,
       mandateId: options.mandate.id
@@ -595,12 +657,19 @@ async function waitForApprovalDecision(options: {
       request &&
       (request.runtimeStatus === "approved" ||
         request.runtimeStatus === "denied" ||
-        request.runtimeStatus === "expired")
+        request.runtimeStatus === "expired" ||
+        request.runtimeStatus === "stale")
     ) {
       return request;
     }
     const remainingMs = options.timeoutMs - (Date.now() - startedAt);
-    await delay(Math.min(approvalWaitPollIntervalMs, Math.max(0, remainingMs)));
+    const completed = await delay(
+      Math.min(approvalWaitPollIntervalMs, Math.max(0, remainingMs)),
+      options.signal
+    );
+    if (!completed) {
+      return "aborted";
+    }
   }
 
   return undefined;
@@ -626,8 +695,23 @@ async function auditApprovalBlockedCall(options: {
   });
 }
 
-async function delay(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
+async function delay(ms: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) {
+    return false;
+  }
+
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve(true);
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timeout);
+      resolve(false);
+    };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 async function routerForConfiguredProfiles(

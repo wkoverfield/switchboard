@@ -835,14 +835,14 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--mandate <id>", "filter approval requests by mandate id")
     .option(
       "--status <status>",
-      "filter by runtime status: pending, approved, denied, or expired"
+      "filter by runtime status: pending, approved, denied, stale, or expired"
     )
     .action(
       async (options: {
         json?: boolean;
         all?: boolean;
         mandate?: string;
-        status?: "pending" | "approved" | "denied" | "expired";
+        status?: "pending" | "approved" | "denied" | "stale" | "expired";
       }) => {
         const globalOptions = program.opts<{ cwd?: string }>();
         const repoPath = options.all
@@ -850,10 +850,10 @@ export function createProgram(io: ProgramIo = {}): Command {
           : installTargetCwd(globalOptions.cwd);
         if (
           options.status &&
-          !["pending", "approved", "denied", "expired"].includes(options.status)
+          !["pending", "approved", "denied", "stale", "expired"].includes(options.status)
         ) {
           writeErr(
-            "error: --status must be pending, approved, denied, or expired"
+            "error: --status must be pending, approved, denied, stale, or expired"
           );
           process.exitCode = 1;
           return;
@@ -1336,6 +1336,10 @@ function approvalRequestNextAction(
   }
 
   if (request.runtimeStatus === "expired") {
+    return "retry the original gated tool call to create a fresh approval request";
+  }
+
+  if (request.runtimeStatus === "stale") {
     return "retry the original gated tool call to create a fresh approval request";
   }
 

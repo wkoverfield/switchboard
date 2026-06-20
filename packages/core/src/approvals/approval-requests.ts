@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import * as z from "zod";
 import type { PathResolutionOptions } from "../config/paths.js";
 
-export type ApprovalRequestStatus = "pending" | "approved" | "denied";
+export type ApprovalRequestStatus = "pending" | "approved" | "denied" | "stale";
 export type ApprovalRequestRuntimeStatus =
   | ApprovalRequestStatus
   | "expired";
@@ -21,7 +21,7 @@ export const approvalRequestSchema = z.object({
   toolName: z.string().min(1),
   approvalGateId: z.string().min(1),
   approvalGatePattern: z.string().min(1),
-  status: z.enum(["pending", "approved", "denied"]),
+  status: z.enum(["pending", "approved", "denied", "stale"]),
   createdAt: z.string().min(1),
   expiresAt: z.string().min(1),
   decidedAt: z.string().min(1).optional(),
@@ -67,6 +67,13 @@ export interface DecideApprovalRequestOptions {
   now?: () => Date;
 }
 
+export interface MarkApprovalRequestStaleOptions {
+  id: string;
+  reason?: string;
+  path?: string;
+  now?: () => Date;
+}
+
 export interface FindApprovedApprovalRequestOptions {
   mandateId: string;
   repoPath: string;
@@ -92,15 +99,16 @@ export function approvalRequestRuntimeStatus(
   request: Pick<ApprovalRequest, "status" | "expiresAt">,
   now: Date = new Date()
 ): ApprovalRequestRuntimeStatus {
+  if (request.status === "stale") {
+    return "stale";
+  }
+
   const expiresAtMs = Date.parse(request.expiresAt);
   if (Number.isNaN(expiresAtMs)) {
     return "expired";
   }
 
-  if (
-    request.status !== "denied" &&
-    expiresAtMs <= now.getTime()
-  ) {
+  if (expiresAtMs <= now.getTime()) {
     return "expired";
   }
 
@@ -212,11 +220,57 @@ export async function decideApprovalRequest(
     if (approvalRequestRuntimeStatus(current, decidedAt) === "expired") {
       throw new Error(`approval request "${options.id}" is expired`);
     }
+    if (approvalRequestRuntimeStatus(current, decidedAt) === "stale") {
+      throw new Error(`approval request "${options.id}" is stale`);
+    }
+    if (current.status !== "pending") {
+      throw new Error(
+        `approval request "${options.id}" is already ${current.status}`
+      );
+    }
 
     const reason = options.reason?.trim();
     const updated: ApprovalRequest = {
       ...current,
       status: options.status,
+      decidedAt: decidedAt.toISOString(),
+      ...(reason ? { decisionReason: reason } : {})
+    };
+    store.requests[index] = updated;
+    await writeApprovalRequestStore(store, { path });
+    return withRuntimeStatus(updated, decidedAt);
+  });
+}
+
+export async function markApprovalRequestStale(
+  options: MarkApprovalRequestStaleOptions
+): Promise<ApprovalRequestWithStatus> {
+  const now = options.now ?? (() => new Date());
+  const decidedAt = now();
+  const path = options.path ?? resolveApprovalRequestStorePath();
+
+  return withApprovalStoreLock(path, async () => {
+    const store = await readApprovalRequestStore({ path });
+    const index = store.requests.findIndex((request) => request.id === options.id);
+    if (index < 0) {
+      throw new Error(`approval request "${options.id}" was not found`);
+    }
+
+    const current = store.requests[index];
+    if (!current) {
+      throw new Error(`approval request "${options.id}" was not found`);
+    }
+    if (approvalRequestRuntimeStatus(current, decidedAt) === "expired") {
+      return withRuntimeStatus(current, decidedAt);
+    }
+    if (current.status === "denied" || current.status === "stale") {
+      return withRuntimeStatus(current, decidedAt);
+    }
+
+    const reason = options.reason?.trim();
+    const updated: ApprovalRequest = {
+      ...current,
+      status: "stale",
       decidedAt: decidedAt.toISOString(),
       ...(reason ? { decisionReason: reason } : {})
     };

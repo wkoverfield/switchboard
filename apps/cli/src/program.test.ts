@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createApprovalRequest } from "@switchboard-mcp/core";
+import { createApprovalRequest, markApprovalRequestStale } from "@switchboard-mcp/core";
 import { createProgram } from "./program.js";
 
 describe("switchboard CLI program", () => {
@@ -1777,6 +1777,22 @@ describe("switchboard CLI program", () => {
       approvalGatePattern: "github_findu_expired",
       expiresAt: pastExpiresAt
     });
+    await createApprovalRequest({
+      path: approvalStorePath,
+      now: () => createdAt,
+      mandateId: "fix-ci",
+      repoPath: root,
+      branch: "fix/ci",
+      toolName: "github_findu_stale",
+      approvalGateId: "gate-4",
+      approvalGatePattern: "github_findu_stale",
+      expiresAt: futureExpiresAt
+    });
+    await markApprovalRequestStale({
+      path: approvalStorePath,
+      id: "approval-4",
+      reason: "client disconnected"
+    });
 
     const output: string[] = [];
     const errors: string[] = [];
@@ -1795,7 +1811,8 @@ describe("switchboard CLI program", () => {
       requests: [
         { id: "approval-1", runtimeStatus: "pending" },
         { id: "approval-2", runtimeStatus: "pending" },
-        { id: "approval-3", runtimeStatus: "expired" }
+        { id: "approval-3", runtimeStatus: "expired" },
+        { id: "approval-4", runtimeStatus: "stale" }
       ]
     });
 
@@ -1840,11 +1857,17 @@ describe("switchboard CLI program", () => {
     await program.parseAsync(["deny", "approval-2"], { from: "user" });
     expect(output[5]).toContain("Status: denied");
 
-    await program.parseAsync(["approvals", "--status", "stale"], {
+    await program.parseAsync(["--cwd", root, "approvals", "--status", "stale"], {
+      from: "user"
+    });
+    expect(output[6]).toContain("approval-4 stale");
+    expect(output[6]).not.toContain("approval-1");
+
+    await program.parseAsync(["--cwd", root, "approvals", "--status", "weird"], {
       from: "user"
     });
     expect(errors).toEqual([
-      "error: --status must be pending, approved, denied, or expired"
+      "error: --status must be pending, approved, denied, stale, or expired"
     ]);
     expect(process.exitCode).toBe(1);
   });
