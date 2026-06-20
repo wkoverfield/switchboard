@@ -28,3 +28,4 @@
 - Added mandate strategy docs and updated the roadmap toward task-scoped authority for coding agents.
 - Added local mandate persistence plus `switchboard mandate create`, `switchboard mandate status`, and `switchboard logs --mandate`.
 - Added mandate-scoped MCP runtime context through `switchboard mcp --mandate` and `switchboard serve --mandate`.
+- Added mandate allow/deny tool patterns with denied-call audit entries.

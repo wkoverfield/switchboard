@@ -48,6 +48,8 @@ try {
     "fix/daemon",
     "--lease",
     "2h",
+    "--allow-tool",
+    "daemon_mcp_echo",
     "--json"
   );
 

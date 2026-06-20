@@ -139,7 +139,9 @@ switchboard mandate create fix-ci \
   --agent implementer \
   --profiles github_findu,vercel_preview \
   --branch fix/ci \
-  --lease 2h
+  --lease 2h \
+  --allow-tool 'github_findu_*' \
+  --deny-tool '*_deploy_prod'
 
 switchboard mandate status
 switchboard logs --mandate fix-ci

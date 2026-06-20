@@ -500,7 +500,15 @@ async function routerForConfiguredProfiles(
     ok: true,
     router: new GenericMcpRouter(profiles, {
       auditLogger: createJsonlAuditLogger(),
-      ...(mandate ? { mandateId: mandate.id } : {})
+      ...(mandate
+        ? {
+            mandateId: mandate.id,
+            toolPolicy: {
+              allowedTools: mandate.allowedTools,
+              deniedTools: mandate.deniedTools
+            }
+          }
+        : {})
     })
   };
 }

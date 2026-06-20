@@ -40,7 +40,7 @@ Switchboard should win by making delegated coding-agent work bounded:
 
 ## Current State
 
-Implemented on `main` through PR #23, plus the current mandate-runtime-context branch:
+Implemented on `main` through PR #24, plus the current mandate-tool-policy branch:
 
 - TypeScript pnpm workspace
 - `@switchboard-mcp/cli`
@@ -96,11 +96,13 @@ Implemented on `main` through PR #23, plus the current mandate-runtime-context b
 - `switchboard serve --mandate`
 - mandate-scoped MCP profile mounting
 - mandate-linked MCP tool-call audit entries
+- mandate allow/deny tool patterns
+- call-time mandate tool policy enforcement
+- denied-call audit entries
 
 Not started:
 
-- mandate-aware tool-level policy enforcement
-- policy engine
+- richer policy engine and operating modes
 - approval broker
 - secrets/keychain
 - provider presets
@@ -523,21 +525,22 @@ Acceptance:
 - Provider presets are explicitly gated behind mandate/secrets/policy work
 - Next build slice is mandate foundation rather than provider integrations
 
-### Current Slice: Mandate Runtime Context
+### Current Slice: Mandate Tool Policy
 
-Goal: make the MCP runtime aware of active mandates without claiming full
-tool-level policy or approval enforcement yet.
+Goal: add the thinnest enforceable tool policy around active mandate context
+without building approvals, secrets, or provider-specific integrations.
 
 Acceptance:
 
-- `switchboard mcp --mandate <id>`
-- `switchboard serve --mandate <id>`
-- runtime validates the mandate is active for the repo
-- runtime mounts only profiles bound to the mandate
-- routed MCP tool-call audit entries include mandate id
+- `switchboard mandate create --allow-tool <pattern>`
+- `switchboard mandate create --deny-tool <pattern>`
+- policy patterns match namespaced tool names, with `*` wildcard support
+- deny patterns win over allow patterns
+- non-empty allow lists deny unmatched tools
+- denied MCP tool calls are blocked before upstream routing
+- denied MCP tool calls are audited with mandate id and policy error
 - no provider integrations
 - no secret broker
-- no full policy engine yet
 - no full approval broker yet
 
 ## Rules For Future Agents

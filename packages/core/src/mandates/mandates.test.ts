@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   createMandate,
+  evaluateMandateToolPolicy,
   listMandates,
   mandateRuntimeStatus,
   normalizeMandateId,
@@ -40,6 +41,31 @@ describe("mandates", () => {
     expect(() => parseMandateLease("forever")).toThrow("lease must use");
   });
 
+  it("evaluates allow and deny tool patterns", () => {
+    expect(
+      evaluateMandateToolPolicy("github_findu_checks_list", {
+        allowedTools: ["github_findu_*"]
+      })
+    ).toEqual({ allowed: true });
+    expect(
+      evaluateMandateToolPolicy("vercel_preview_logs", {
+        allowedTools: ["github_findu_*"]
+      })
+    ).toEqual({
+      allowed: false,
+      reason: 'tool "vercel_preview_logs" is not allowed by mandate policy'
+    });
+    expect(
+      evaluateMandateToolPolicy("github_findu_deploy_prod", {
+        allowedTools: ["github_findu_*"],
+        deniedTools: ["*_deploy_prod"]
+      })
+    ).toEqual({
+      allowed: false,
+      reason: 'tool "github_findu_deploy_prod" is denied by mandate policy'
+    });
+  });
+
   it("creates and lists persisted mandates with runtime status", async () => {
     const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
     const path = join(root, "mandates.json");
@@ -53,7 +79,9 @@ describe("mandates", () => {
       branch: "fix/ci",
       agentRole: "implementer",
       profiles: ["github_findu", "vercel_preview", "github_findu"],
-      lease: "2h"
+      lease: "2h",
+      allowedTools: ["github_findu_*", "github_findu_*"],
+      deniedTools: ["*_deploy_prod"]
     });
 
     expect(mandate).toMatchObject({
@@ -62,11 +90,11 @@ describe("mandates", () => {
       branch: "fix/ci",
       agentRole: "implementer",
       profiles: ["github_findu", "vercel_preview"],
+      allowedTools: ["github_findu_*"],
+      deniedTools: ["*_deploy_prod"],
       createdAt: "2026-06-19T16:00:00.000Z",
       expiresAt: "2026-06-19T18:00:00.000Z",
       runtimeStatus: "active",
-      allowedTools: [],
-      deniedTools: [],
       approvalGates: [],
       handoffState: "open"
     });

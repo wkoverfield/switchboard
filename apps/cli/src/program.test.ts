@@ -497,6 +497,10 @@ describe("switchboard CLI program", () => {
         "fix/ci",
         "--lease",
         "2h",
+        "--allow-tool",
+        "github_findu_*",
+        "--deny-tool",
+        "*_deploy_prod",
         "--json"
       ],
       { from: "user" }
@@ -832,12 +836,17 @@ describe("switchboard CLI program", () => {
     const served: Array<{
       profiles: unknown[];
       mandateId: string | undefined;
+      toolPolicy: unknown;
     }> = [];
     const program = createProgram({
       mandateStorePath,
       writeOut: () => undefined,
       serveMcp: async (profiles, options) => {
-        served.push({ profiles, mandateId: options?.mandateId });
+        served.push({
+          profiles,
+          mandateId: options?.mandateId,
+          toolPolicy: options?.toolPolicy
+        });
       }
     });
     await program.parseAsync(
@@ -855,6 +864,8 @@ describe("switchboard CLI program", () => {
         "fix/ci",
         "--lease",
         "2h",
+        "--allow-tool",
+        "github_findu_*",
         "--json"
       ],
       { from: "user" }
@@ -866,6 +877,10 @@ describe("switchboard CLI program", () => {
     expect(served).toEqual([
       {
         mandateId: "fix-ci",
+        toolPolicy: {
+          allowedTools: ["github_findu_*"],
+          deniedTools: []
+        },
         profiles: [
           {
             profileName: "github_findu",
@@ -1477,6 +1492,10 @@ describe("switchboard CLI program", () => {
         "fix/ci",
         "--lease",
         "2h",
+        "--allow-tool",
+        "github_findu_*",
+        "--deny-tool",
+        "*_deploy_prod",
         "--json"
       ],
       {
@@ -1494,6 +1513,8 @@ describe("switchboard CLI program", () => {
         branch: "fix/ci",
         agentRole: "implementer",
         profiles: ["github_findu", "vercel_preview"],
+        allowedTools: ["github_findu_*"],
+        deniedTools: ["*_deploy_prod"],
         lease: "2h",
         runtimeStatus: "active"
       }
@@ -1511,6 +1532,8 @@ describe("switchboard CLI program", () => {
           id: "fix-ci",
           branch: "fix/ci",
           agentRole: "implementer",
+          allowedTools: ["github_findu_*"],
+          deniedTools: ["*_deploy_prod"],
           runtimeStatus: "active"
         }
       ]
