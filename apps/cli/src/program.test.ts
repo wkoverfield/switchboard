@@ -1694,27 +1694,41 @@ describe("switchboard CLI program", () => {
   it("lists, approves, and denies local approval requests", async () => {
     const root = makeTempProject();
     const approvalStorePath = join(root, "state", "approvals.json");
+    const createdAt = new Date();
+    const futureExpiresAt = new Date(Date.now() + 3_600_000).toISOString();
+    const pastExpiresAt = new Date(Date.now() - 3_600_000).toISOString();
     await createApprovalRequest({
       path: approvalStorePath,
-      now: () => new Date("2026-06-20T15:00:00.000Z"),
+      now: () => createdAt,
       mandateId: "fix-ci",
       repoPath: root,
       branch: "fix/ci",
       toolName: "github_findu_deploy",
       approvalGateId: "gate-1",
       approvalGatePattern: "github_findu_deploy",
-      expiresAt: "2026-06-20T17:00:00.000Z"
+      expiresAt: futureExpiresAt
     });
     await createApprovalRequest({
       path: approvalStorePath,
-      now: () => new Date("2026-06-20T15:01:00.000Z"),
+      now: () => createdAt,
       mandateId: "fix-ci",
       repoPath: root,
       branch: "fix/ci",
       toolName: "github_findu_delete",
       approvalGateId: "gate-2",
       approvalGatePattern: "github_findu_delete",
-      expiresAt: "2026-06-20T17:00:00.000Z"
+      expiresAt: futureExpiresAt
+    });
+    await createApprovalRequest({
+      path: approvalStorePath,
+      now: () => createdAt,
+      mandateId: "fix-ci",
+      repoPath: root,
+      branch: "fix/ci",
+      toolName: "github_findu_expired",
+      approvalGateId: "gate-3",
+      approvalGatePattern: "github_findu_expired",
+      expiresAt: pastExpiresAt
     });
 
     const output: string[] = [];
@@ -1733,15 +1747,26 @@ describe("switchboard CLI program", () => {
       repoPath: root,
       requests: [
         { id: "approval-1", runtimeStatus: "pending" },
-        { id: "approval-2", runtimeStatus: "pending" }
+        { id: "approval-2", runtimeStatus: "pending" },
+        { id: "approval-3", runtimeStatus: "expired" }
       ]
     });
+
+    await program.parseAsync(["--cwd", root, "approvals"], {
+      from: "user"
+    });
+    expect(output[1]).toContain(
+      "next: switchboard approve approval-1 or switchboard deny approval-1; then retry github_findu_deploy"
+    );
+    expect(output[1]).toContain(
+      "next: retry the original gated tool call to create a fresh approval request"
+    );
 
     await program.parseAsync(
       ["approve", "approval-1", "--reason", "preview deploy", "--json"],
       { from: "user" }
     );
-    expect(JSON.parse(output[1] ?? "{}")).toMatchObject({
+    expect(JSON.parse(output[2] ?? "{}")).toMatchObject({
       path: approvalStorePath,
       request: {
         id: "approval-1",
@@ -1755,16 +1780,25 @@ describe("switchboard CLI program", () => {
       ["--cwd", root, "approvals", "--status", "approved"],
       { from: "user" }
     );
-    expect(output[2]).toContain("approval-1 approved");
-    expect(output[2]).not.toContain("approval-2");
+    expect(output[3]).toContain("approval-1 approved");
+    expect(output[3]).not.toContain("approval-2");
+
+    await program.parseAsync(
+      ["--cwd", root, "approvals", "--status", "expired"],
+      { from: "user" }
+    );
+    expect(output[4]).toContain("approval-3 expired");
+    expect(output[4]).not.toContain("approval-1");
 
     await program.parseAsync(["deny", "approval-2"], { from: "user" });
-    expect(output[3]).toContain("Status: denied");
+    expect(output[5]).toContain("Status: denied");
 
     await program.parseAsync(["approvals", "--status", "stale"], {
       from: "user"
     });
-    expect(errors).toEqual(["error: --status must be pending, approved, or denied"]);
+    expect(errors).toEqual([
+      "error: --status must be pending, approved, denied, or expired"
+    ]);
     expect(process.exitCode).toBe(1);
   });
 

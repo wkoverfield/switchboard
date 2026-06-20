@@ -55,7 +55,7 @@ export interface ListApprovalRequestsOptions {
   path?: string;
   repoPath?: string;
   mandateId?: string;
-  status?: ApprovalRequestStatus;
+  status?: ApprovalRequestRuntimeStatus;
   now?: () => Date;
 }
 
@@ -163,8 +163,10 @@ export async function listApprovalRequests(
     .filter((request) =>
       options.mandateId ? request.mandateId === options.mandateId : true
     )
-    .filter((request) => (options.status ? request.status === options.status : true))
-    .map((request) => withRuntimeStatus(request, now));
+    .map((request) => withRuntimeStatus(request, now))
+    .filter((request) =>
+      options.status ? request.runtimeStatus === options.status : true
+    );
 }
 
 export async function findApprovedApprovalRequest(

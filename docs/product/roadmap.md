@@ -282,7 +282,7 @@ context is the differentiator.
 
 ### Milestone 6: Approval Broker
 
-Status: local approval request store foundation in progress; full broker not
+Status: local approval request store foundation shipped; full broker not
 started.
 
 Original intent:
@@ -298,7 +298,7 @@ Do not build before:
 - audit log: shipped
 - basic policy classification: thin allow/deny shipped
 
-Next acceptable slice:
+Shipped foundation:
 
 - replace the placeholder `approvalGates` array with typed gate records on
   mandates
@@ -310,6 +310,13 @@ Next acceptable slice:
 - `switchboard approve <id>` / `switchboard deny <id>`
 - runtime honors fresh approved decisions within mandate lease
 - no provider integrations
+
+Next acceptable slice:
+
+- approval lifecycle polish for stale/expired visibility and retry guidance
+- optional in-call wait/poll behavior for clients that can tolerate pending
+  tool calls
+- client elicitation research before implementing client-specific approval UX
 
 ### Milestone 7: Secrets
 
@@ -615,7 +622,7 @@ Acceptance:
 - no secret broker
 - no full approval broker yet
 
-### Current Slice: Product Compass Reset
+### Completed Slice: Product Compass Reset
 
 Goal: land the roadmap adjustment before more build momentum accumulates around
 the older MCP-profile-manager thesis.
@@ -628,7 +635,7 @@ Acceptance:
 - next build sequence prioritizes approval/policy/audit depth
 - agent instructions no longer describe the active scope as Milestone 0/1 only
 
-### Recommended Next Build Slice: Approval Gate Foundation
+### Completed Slice: Approval Gate Foundation
 
 Goal: make mandate policy express "allowed only with approval" without building
 provider-specific integrations or a cloud service.
@@ -638,9 +645,23 @@ Acceptance:
 - mandate schema can store typed approval gates for namespaced tool patterns
 - `switchboard mandate create` can add approval-gated tool patterns
 - daemon/runtime detects approval-required calls under an active mandate
-- initial behavior is conservative: block with an auditable approval-required
-  error until an approval store exists
+- approval-required calls create local approval requests through the daemon path
 - audit entries include mandate id, tool name, gate id or pattern, and status
+- no provider presets
+- no secrets broker
+- no remote service
+
+### Current Slice: Approval Lifecycle Polish
+
+Goal: make the local approval loop understandable and auditable before adding
+in-call waits or client elicitation.
+
+Acceptance:
+
+- `switchboard approvals --status expired` filters by runtime status
+- human approval output shows next actions for pending and expired requests
+- daemon approval-required errors tell the agent/user how to approve and retry
+- approved gated calls remain audit-linked to approval request id
 - no provider presets
 - no secrets broker
 - no remote service
@@ -648,7 +669,6 @@ Acceptance:
 Follow-up slice:
 
 - in-call wait/poll behavior for clients that can tolerate pending tool calls
-- stale approval invalidation beyond lease expiry
 - richer approval reasons and policy labels
 
 ## Rules For Future Agents

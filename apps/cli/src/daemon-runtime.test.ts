@@ -162,7 +162,7 @@ describe("daemon runtime mandate context", () => {
       id: "call",
       ok: false,
       error:
-        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1'
+        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 is pending. Run "switchboard approvals" and "switchboard approve approval-1", then retry this tool call.'
     });
     await expect(
       listApprovalRequests({ repoPath: root, mandateId: "fix-ci" })
@@ -277,7 +277,7 @@ describe("daemon runtime mandate context", () => {
       id: "call",
       ok: false,
       error:
-        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1'
+        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 is pending. Run "switchboard approvals" and "switchboard approve approval-1", then retry this tool call.'
     });
   });
 });

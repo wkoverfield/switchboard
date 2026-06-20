@@ -819,14 +819,14 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--mandate <id>", "filter approval requests by mandate id")
     .option(
       "--status <status>",
-      "filter by stored status: pending, approved, or denied"
+      "filter by runtime status: pending, approved, denied, or expired"
     )
     .action(
       async (options: {
         json?: boolean;
         all?: boolean;
         mandate?: string;
-        status?: "pending" | "approved" | "denied";
+        status?: "pending" | "approved" | "denied" | "expired";
       }) => {
         const globalOptions = program.opts<{ cwd?: string }>();
         const repoPath = options.all
@@ -834,9 +834,11 @@ export function createProgram(io: ProgramIo = {}): Command {
           : installTargetCwd(globalOptions.cwd);
         if (
           options.status &&
-          !["pending", "approved", "denied"].includes(options.status)
+          !["pending", "approved", "denied", "expired"].includes(options.status)
         ) {
-          writeErr("error: --status must be pending, approved, or denied");
+          writeErr(
+            "error: --status must be pending, approved, denied, or expired"
+          );
           process.exitCode = 1;
           return;
         }
@@ -1301,9 +1303,27 @@ function formatApprovalRequests(result: {
         `expires:${request.expiresAt}`
       ].join(" ")
     );
+    const nextAction = approvalRequestNextAction(request);
+    if (nextAction) {
+      lines.push(`  next: ${nextAction}`);
+    }
   }
 
   return lines.join("\n");
+}
+
+function approvalRequestNextAction(
+  request: ApprovalRequestWithStatus
+): string | undefined {
+  if (request.runtimeStatus === "pending") {
+    return `switchboard approve ${request.id} or switchboard deny ${request.id}; then retry ${request.toolName}`;
+  }
+
+  if (request.runtimeStatus === "expired") {
+    return "retry the original gated tool call to create a fresh approval request";
+  }
+
+  return undefined;
 }
 
 function formatApprovalDecision(
