@@ -232,31 +232,51 @@ Switchboard now has the first local mandate foundation:
 - optional bounded approval waits
 - stale approval semantics for disconnected approval waits
 - daemon-start invalidation for leftover pending approval requests
+- `switchboard mandate create --json` returns an MCP launch payload for external
+  harnesses
 
 This is intentionally still local and thin. It proves the product primitive
 without building provider integrations, secret brokerage, or a full approval
 broker.
 
+## Harness Surface
+
+Active mandate use is now easier for external harnesses without making
+Switchboard the orchestrator:
+
+- `switchboard mandate create --json` returns stable mandate data and a
+  scoped MCP command/args payload
+- the launch payload includes a schema/version marker, mandate id, repo cwd,
+  command, and args
+- launch args carry `--cwd <repo> mcp --mandate <id>`
+- `docs/use-cases/harness-scoped-mandates.md` documents the "request scoped
+  authority, launch agent, inspect logs" flow
+
 ## Next Mandate Slice
 
-Make active mandate use easier for external harnesses without building a full
-orchestrator:
+Recommended follow-up:
 
-- ensure `switchboard mandate create --json` returns stable mandate data and a
-  scoped MCP command/args payload
-- include at least a schema/version marker, mandate id, repo cwd, command, and
-  args in the launch payload; args should carry `--cwd <repo> mcp --mandate
-  <id>`
-- keep `switchboard mandate status --json` and `switchboard logs --mandate
-  <id> --json` stable for harness polling and post-run inspection
-- document the "request scoped authority, launch agent, inspect logs" flow
+- client elicitation research before implementing client-specific approval UX
+- structured policy labels/risk classes beyond free-form approval reasons
 - keep enforcement claims modest and tied to actual runtime behavior
-- sketch parent/child mandate fields for the future, but do not enforce
+- sketch parent/child mandate fields further if useful, but do not enforce
   delegation trees until the basic active-mandate flow is solid
 - no provider presets
 - no secret broker
 - no remote service
 - no full agent orchestrator
+
+Future child mandates should eventually include fields such as:
+
+- `parentMandateId`
+- `delegatedBy`
+- `delegationPath`
+- `maxLeaseExpiresAt`
+- narrowed profile and tool scopes
+- inherited or stricter approval gates
+
+Child mandates must not exceed parent repo, worktree, branch, profile, tool,
+lease, or approval scope.
 
 ## Original First Mandate Slice
 

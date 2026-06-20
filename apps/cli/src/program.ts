@@ -60,6 +60,16 @@ import {
 } from "./daemon-runtime.js";
 
 const version = "0.1.0";
+const mandateMcpLaunchSchemaVersion = "switchboard.mcp-launch.v1";
+
+interface MandateMcpLaunchPayload {
+  schemaVersion: typeof mandateMcpLaunchSchemaVersion;
+  transport: "stdio";
+  mandateId: string;
+  cwd: string;
+  command: "switchboard";
+  args: string[];
+}
 
 export interface ProgramIo {
   writeOut?: (message: string) => void;
@@ -799,7 +809,17 @@ export function createProgram(io: ProgramIo = {}): Command {
                 )
               });
               if (options.json) {
-                writeOut(JSON.stringify({ path, mandate }, null, 2));
+                writeOut(
+                  JSON.stringify(
+                    {
+                      path,
+                      mandate,
+                      mcpLaunch: createMandateMcpLaunchPayload(mandate)
+                    },
+                    null,
+                    2
+                  )
+                );
               } else {
                 writeOut(formatMandateCreated(path, mandate));
               }
@@ -1266,6 +1286,19 @@ function formatMandateCreated(path: string, mandate: MandateWithStatus): string 
     `Expires: ${mandate.expiresAt}`,
     `Store: ${path}`
   ].join("\n");
+}
+
+function createMandateMcpLaunchPayload(
+  mandate: MandateWithStatus
+): MandateMcpLaunchPayload {
+  return {
+    schemaVersion: mandateMcpLaunchSchemaVersion,
+    transport: "stdio",
+    mandateId: mandate.id,
+    cwd: mandate.repoPath,
+    command: "switchboard",
+    args: ["--cwd", mandate.repoPath, "mcp", "--mandate", mandate.id]
+  };
 }
 
 function formatMandateStatus(result: {

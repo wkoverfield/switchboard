@@ -1,19 +1,22 @@
 # For Agents
 
-Switchboard is the local mandate layer for coding agents. The MCP
-profile/router runtime is the substrate: it gives agents one endpoint while
-keeping account, project, environment, namespace, policy, and audit concerns
-explicit.
+Switchboard gives coding agents the right tools for each repo, environment, and
+task. The simple entry point is repo-aware MCP setup. Mandates are the deeper
+power layer for temporary, task-scoped authority.
 
 Current commands:
 
 ```bash
 switchboard status
 switchboard doctor
-switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration>
+switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --json
 switchboard mandate status
 switchboard approvals
 switchboard logs --mandate <id>
 ```
+
+Harnesses can use the `mcpLaunch` payload from `switchboard mandate create
+--json` to launch an agent with `switchboard --cwd <repo> mcp --mandate <id>`,
+then inspect results with `switchboard logs --mandate <id> --json`.
 
 Never suggest putting provider tokens into repo config or agent MCP config. Switchboard config should use secret references once the secrets milestone is implemented.

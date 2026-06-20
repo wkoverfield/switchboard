@@ -177,6 +177,7 @@ Implemented in the current codebase:
 - stale approval request status for disconnected approval waits
 - daemon-start invalidation for leftover pending approval requests
 - approval gate reason metadata in mandates and approval requests
+- `switchboard mandate create --json` MCP launch payloads for harnesses
 
 Not started:
 
@@ -186,7 +187,6 @@ Not started:
 - provider presets
 - mandate-aware advanced onboarding
 - mandate tree / child mandate delegation
-- harness launch payloads and stable JSON integration docs
 - global/user-scope client installers
 - Supabase, Stripe, PostHog, or Sentry integrations
 
@@ -776,7 +776,7 @@ Follow-up slice:
 - client elicitation research before implementing client-specific approval UX
 - policy labels/risk classes beyond free-form reasons
 
-### Recommended Next Slice: Harness-Friendly Mandate Surfaces
+### Completed Slice: Harness-Friendly Mandate Surfaces
 
 Goal: make active mandate use scriptable for external harnesses without turning
 Switchboard into an orchestrator.
@@ -799,6 +799,12 @@ Acceptance:
 - no provider presets
 - no secrets broker
 - no full orchestrator
+
+Recommended next slice:
+
+- client elicitation research before implementing client-specific approval UX
+- structured policy labels/risk classes beyond free-form approval reasons
+- keep provider presets deferred unless needed for profile/mandate safety
 
 ## Rules For Future Agents
 
