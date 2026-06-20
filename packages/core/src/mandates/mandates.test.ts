@@ -74,6 +74,32 @@ describe("mandates", () => {
       allowed: false,
       reason: 'tool "github_findu_deploy_prod" is denied by mandate policy'
     });
+    expect(
+      evaluateMandateToolPolicy("github_findu_checks_rerun", {
+        allowedTools: ["github_findu_*"],
+        approvalGates: [
+          { id: "gate-1", toolPattern: "github_findu_checks_rerun" }
+        ]
+      })
+    ).toEqual({
+      allowed: false,
+      approvalRequired: true,
+      approvalGate: { id: "gate-1", toolPattern: "github_findu_checks_rerun" },
+      reason:
+        'tool "github_findu_checks_rerun" requires approval by mandate gate "gate-1"'
+    });
+    expect(
+      evaluateMandateToolPolicy("github_findu_deploy_prod", {
+        allowedTools: ["github_findu_read"],
+        approvalGates: [
+          { id: "gate-1", toolPattern: "github_findu_deploy_prod" }
+        ]
+      })
+    ).toMatchObject({
+      allowed: false,
+      approvalRequired: true,
+      approvalGate: { id: "gate-1", toolPattern: "github_findu_deploy_prod" }
+    });
   });
 
   it("creates and lists persisted mandates with runtime status", async () => {
@@ -91,7 +117,8 @@ describe("mandates", () => {
       profiles: ["github_findu", "vercel_preview", "github_findu"],
       lease: "2h",
       allowedTools: ["github_findu_*", "github_findu_*"],
-      deniedTools: ["*_deploy_prod"]
+      deniedTools: ["*_deploy_prod"],
+      approvalRequiredTools: ["github_findu_checks_rerun", "github_findu_checks_rerun"]
     });
 
     expect(mandate).toMatchObject({
@@ -102,10 +129,12 @@ describe("mandates", () => {
       profiles: ["github_findu", "vercel_preview"],
       allowedTools: ["github_findu_*"],
       deniedTools: ["*_deploy_prod"],
+      approvalGates: [
+        { id: "gate-1", toolPattern: "github_findu_checks_rerun" }
+      ],
       createdAt: "2026-06-19T16:00:00.000Z",
       expiresAt: "2026-06-19T18:00:00.000Z",
       runtimeStatus: "active",
-      approvalGates: [],
       handoffState: "open"
     });
 

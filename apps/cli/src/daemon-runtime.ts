@@ -435,7 +435,8 @@ async function callConfiguredTool(
     if (routerResult.mandate) {
       const policyDecision = evaluateMandateToolPolicy(name, {
         allowedTools: routerResult.mandate.allowedTools,
-        deniedTools: routerResult.mandate.deniedTools
+        deniedTools: routerResult.mandate.deniedTools,
+        approvalGates: routerResult.mandate.approvalGates
       });
       if (!policyDecision.allowed) {
         await safeAuditLog(createJsonlAuditLogger(), {
@@ -443,6 +444,12 @@ async function callConfiguredTool(
           status: "error",
           toolName: name,
           mandateId: routerResult.mandate.id,
+          ...("approvalRequired" in policyDecision
+            ? {
+                approvalGateId: policyDecision.approvalGate.id,
+                approvalGatePattern: policyDecision.approvalGate.toolPattern
+              }
+            : {}),
           error: policyDecision.reason
         });
         return {
@@ -529,7 +536,8 @@ async function routerForConfiguredProfiles(
             mandateId: mandate.id,
             toolPolicy: {
               allowedTools: mandate.allowedTools,
-              deniedTools: mandate.deniedTools
+              deniedTools: mandate.deniedTools,
+              approvalGates: mandate.approvalGates
             }
           }
         : {})

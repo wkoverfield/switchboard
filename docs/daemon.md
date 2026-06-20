@@ -81,10 +81,11 @@ switchboard --cwd <repo> mcp --mandate fix-ci
 ```
 
 The adapter validates that the mandate is active for the repo, asks the daemon
-to mount only the mandate's profiles, enforces the mandate's allow/deny
-namespaced tool patterns before routing calls, and attaches the mandate id to
-routed tool-call audit entries. This is basic local tool policy, not approval
-brokering or secret access yet.
+to mount only the mandate's profiles, enforces the mandate's allow, deny, and
+approval-required namespaced tool patterns before routing calls, and attaches
+the mandate id to routed tool-call audit entries. Approval-required tools are
+blocked conservatively until the approval store/broker exists. This is basic
+local tool policy, not approval brokering or secret access yet.
 
 Use `switchboard mcp --no-auto-start` to fail fast unless a daemon is already
 running.

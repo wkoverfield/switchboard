@@ -160,6 +160,50 @@ describe("GenericMcpRouter", () => {
     }
   });
 
+  it("blocks approval-gated tool calls with audit metadata", async () => {
+    const auditEntries: unknown[] = [];
+    const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {
+      mandateId: "fix-ci",
+      toolPolicy: {
+        allowedTools: ["alpha_tools_*"],
+        approvalGates: [{ id: "gate-1", toolPattern: "alpha_tools_echo" }]
+      },
+      auditLogger: {
+        async log(entry) {
+          auditEntries.push(entry);
+        }
+      }
+    });
+
+    try {
+      const tools = await router.discoverTools();
+      expect(tools.map((tool) => tool.name)).toEqual(["alpha_tools_whoami"]);
+      await expect(
+        router.callTool("alpha_tools_echo", { message: "hello" })
+      ).rejects.toThrow(
+        'tool "alpha_tools_echo" requires approval by mandate gate "gate-1"'
+      );
+
+      expect(auditEntries).toMatchObject([
+        {
+          action: "tool_call",
+          status: "error",
+          mandateId: "fix-ci",
+          profileName: "alpha",
+          namespace: "alpha_tools",
+          toolName: "alpha_tools_echo",
+          upstreamName: "echo",
+          approvalGateId: "gate-1",
+          approvalGatePattern: "alpha_tools_echo",
+          error:
+            'tool "alpha_tools_echo" requires approval by mandate gate "gate-1"'
+        }
+      ]);
+    } finally {
+      await router.close();
+    }
+  });
+
   it("lets deny patterns win over allow patterns", async () => {
     const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {
       toolPolicy: {

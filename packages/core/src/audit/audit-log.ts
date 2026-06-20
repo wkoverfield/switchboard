@@ -16,6 +16,8 @@ export interface AuditLogEntry {
   toolName?: string;
   upstreamName?: string;
   mandateId?: string;
+  approvalGateId?: string;
+  approvalGatePattern?: string;
   durationMs?: number;
   error?: string;
 }

@@ -111,6 +111,12 @@ export class GenericMcpRouter {
           profileName: route.profileName,
           toolName: route.namespacedName,
           upstreamName: route.upstreamName,
+          ...("approvalRequired" in policyDecision
+            ? {
+                approvalGateId: policyDecision.approvalGate.id,
+                approvalGatePattern: policyDecision.approvalGate.toolPattern
+              }
+            : {}),
           durationMs: Date.now() - startedAt,
           error: policyDecision.reason
         },

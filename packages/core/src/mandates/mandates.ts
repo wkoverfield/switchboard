@@ -14,11 +14,29 @@ import * as z from "zod";
 import type { PathResolutionOptions } from "../config/paths.js";
 
 export type MandateRuntimeStatus = "active" | "expired";
+export interface MandateApprovalGate {
+  id: string;
+  toolPattern: string;
+  reason?: string | undefined;
+}
+
 export type MandateToolPolicyDecision =
   | { allowed: true }
-  | { allowed: false; reason: string };
+  | { allowed: false; reason: string }
+  | {
+      allowed: false;
+      reason: string;
+      approvalRequired: true;
+      approvalGate: MandateApprovalGate;
+    };
 const mandateStoreLockTimeoutMs = 5_000;
 const mandateStoreStaleLockMs = 30_000;
+
+export const mandateApprovalGateSchema = z.object({
+  id: z.string().min(1),
+  toolPattern: z.string().min(1),
+  reason: z.string().min(1).optional()
+});
 
 export const mandateSchema = z.object({
   version: z.literal(1),
@@ -34,7 +52,9 @@ export const mandateSchema = z.object({
   expiresAt: z.string().min(1),
   allowedTools: z.array(z.string()),
   deniedTools: z.array(z.string()),
-  approvalGates: z.array(z.string()),
+  approvalGates: z
+    .array(z.union([mandateApprovalGateSchema, z.string().min(1)]))
+    .transform((gates) => normalizeApprovalGates(gates)),
   handoffState: z.literal("open")
 });
 
@@ -60,6 +80,7 @@ export interface CreateMandateOptions {
   lease: string;
   allowedTools?: string[];
   deniedTools?: string[];
+  approvalRequiredTools?: string[];
   path?: string;
   now?: () => Date;
 }
@@ -67,6 +88,7 @@ export interface CreateMandateOptions {
 export interface MandateToolPolicy {
   allowedTools?: string[];
   deniedTools?: string[];
+  approvalGates?: MandateApprovalGate[];
 }
 
 export interface ListMandatesOptions {
@@ -138,11 +160,24 @@ export function evaluateMandateToolPolicy(
 ): MandateToolPolicyDecision {
   const allowedTools = uniqueTrimmed(policy.allowedTools ?? []);
   const deniedTools = uniqueTrimmed(policy.deniedTools ?? []);
+  const approvalGates = normalizeApprovalGates(policy.approvalGates ?? []);
 
   if (matchesAnyToolPattern(toolName, deniedTools)) {
     return {
       allowed: false,
       reason: `tool "${toolName}" is denied by mandate policy`
+    };
+  }
+
+  const approvalGate = approvalGates.find((gate) =>
+    toolPatternToRegExp(gate.toolPattern).test(toolName)
+  );
+  if (approvalGate) {
+    return {
+      allowed: false,
+      approvalRequired: true,
+      approvalGate,
+      reason: `tool "${toolName}" requires approval by mandate gate "${approvalGate.id}"`
     };
   }
 
@@ -185,6 +220,9 @@ export async function createMandate(
   }
   const allowedTools = uniqueTrimmed(options.allowedTools ?? []);
   const deniedTools = uniqueTrimmed(options.deniedTools ?? []);
+  const approvalGates = normalizeApprovalGates(
+    options.approvalRequiredTools ?? []
+  );
 
   const leaseMs = parseMandateLease(options.lease);
   const repoPath = resolve(options.repoPath);
@@ -219,7 +257,7 @@ export async function createMandate(
       expiresAt: new Date(createdAt.getTime() + leaseMs).toISOString(),
       allowedTools,
       deniedTools,
-      approvalGates: [],
+      approvalGates,
       handoffState: "open"
     };
 
@@ -401,6 +439,36 @@ function uniqueTrimmed(values: string[]): string[] {
     }
     seen.add(trimmed);
     result.push(trimmed);
+  }
+
+  return result;
+}
+
+function normalizeApprovalGates(
+  gates: Array<string | MandateApprovalGate>
+): MandateApprovalGate[] {
+  const seen = new Set<string>();
+  const result: MandateApprovalGate[] = [];
+
+  for (const gate of gates) {
+    const toolPattern =
+      typeof gate === "string" ? gate.trim() : gate.toolPattern.trim();
+    if (!toolPattern || seen.has(toolPattern)) {
+      continue;
+    }
+
+    seen.add(toolPattern);
+    const id =
+      typeof gate === "string" || !gate.id.trim()
+        ? `gate-${result.length + 1}`
+        : gate.id.trim();
+    const reason =
+      typeof gate === "string" ? undefined : gate.reason?.trim() || undefined;
+    result.push({
+      id,
+      toolPattern,
+      ...(reason ? { reason } : {})
+    });
   }
 
   return result;

@@ -131,6 +131,8 @@ Switchboard now has the first local mandate foundation:
 - allowed and denied namespaced tool patterns
 - policy-filtered tool listing under an active mandate
 - pre-discovery denial for disallowed daemon-routed tool calls
+- approval-required tool patterns
+- conservative approval-required runtime blocking
 
 This is intentionally still local and thin. It proves the product primitive
 without building provider integrations, secret brokerage, or a full approval
@@ -145,12 +147,13 @@ Build the smallest approval-gate foundation:
 - CLI creation syntax for approval-gated namespaced tool patterns
 - conservative runtime behavior that blocks approval-required calls until an
   approval exists
-- local approval request records
-- `switchboard approvals` / `switchboard approve <id>` skeleton
 - audit entries tied to mandate id, tool name, gate, decision, and reason
 - no provider integrations
 - no secret broker
 - no remote service
+
+Then add the local approval request store and `switchboard approvals` /
+`switchboard approve <id>` in a follow-up slice.
 
 ## Original First Mandate Slice
 
