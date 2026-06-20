@@ -494,7 +494,7 @@ async function callConfiguredTool(
           id,
           ok: false,
           error: approvalRequestId
-            ? `${policyDecision.reason}; approval request ${approvalRequestId}`
+            ? `${policyDecision.reason}; approval request ${approvalRequestId} is pending. Run "switchboard approvals" and "switchboard approve ${approvalRequestId}", then retry this tool call.`
             : policyDecision.reason
         };
       }

@@ -106,3 +106,6 @@ running.
 - Approval handling is local request/decision storage only; the daemon does not
   wait inside a pending tool call, cache upstream sessions, enforce provider
   policy packs, or read secrets yet.
+- Approval-required call errors include the pending approval request id and the
+  retry commands. Approve or deny the request, then retry the original tool
+  call.

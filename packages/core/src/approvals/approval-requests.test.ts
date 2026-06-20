@@ -72,6 +72,14 @@ describe("approval requests", () => {
         mandateId: "fix-ci"
       })
     ).toEqual([expect.objectContaining({ id: "approval-1" })]);
+    expect(
+      await listApprovalRequests({
+        path,
+        repoPath: join(root, "repo"),
+        mandateId: "fix-ci",
+        status: "pending"
+      })
+    ).toEqual([expect.objectContaining({ id: "approval-1" })]);
     expect(await readApprovalRequestStore({ path })).toMatchObject({
       version: 1,
       requests: [expect.objectContaining({ id: "approval-1" })]
@@ -216,5 +224,13 @@ describe("approval requests", () => {
         now: () => new Date("2026-06-20T15:02:00.000Z")
       })
     ).resolves.toBeUndefined();
+    expect(
+      await listApprovalRequests({
+        path,
+        repoPath: join(root, "repo"),
+        mandateId: "fix-ci",
+        status: "expired"
+      })
+    ).toEqual([expect.objectContaining({ id: "approval-1" })]);
   });
 });
