@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { PathResolutionOptions } from "../config/paths.js";
 
-export type AuditAction = "profile_test" | "tool_call";
+export type AuditAction = "profile_test" | "tool_call" | "approval_elicitation";
 export type AuditStatus = "ok" | "error";
 
 export interface AuditLogEntry {
@@ -19,6 +19,7 @@ export interface AuditLogEntry {
   approvalRequestId?: string;
   approvalGateId?: string;
   approvalGatePattern?: string;
+  approvalDecision?: "approved" | "denied" | "declined" | "cancelled" | "failed";
   durationMs?: number;
   error?: string;
 }

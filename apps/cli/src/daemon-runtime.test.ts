@@ -222,7 +222,21 @@ describe("daemon runtime mandate context", () => {
       id: "call",
       ok: false,
       error:
-        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 is pending. Run "switchboard approvals" and "switchboard approve approval-1", then retry this tool call.'
+        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 is pending. Run "switchboard approvals" and "switchboard approve approval-1", then retry this tool call.',
+      approvalRequired: {
+        approvalRequestId: "approval-1",
+        mandateId: "fix-ci",
+        repoPath: root,
+        branch: "fix/ci",
+        task: "fix-ci",
+        agentRole: "implementer",
+        toolName: "github_findu_echo",
+        approvalGateId: "gate-1",
+        approvalGatePattern: "github_findu_echo",
+        approvalGateReason: "rerunning CI changes remote state",
+        approvalGateRisk: "high",
+        approvalGateLabels: ["remote-state", "ci"]
+      }
     });
     await expect(
       listApprovalRequests({ repoPath: root, mandateId: "fix-ci" })
@@ -295,24 +309,24 @@ describe("daemon runtime mandate context", () => {
     const root = await makeApprovalRepo();
     const denial = decideWhenRequestExists(root, "approval-1", "denied");
 
-    await expect(
-      handleDaemonRequest(
-        JSON.stringify({
-          id: "call",
-          type: "call_tool",
-          name: "github_findu_echo",
-          mandateId: "fix-ci",
-          approvalWaitMs: 1_000,
-          arguments: { message: "hello" }
-        }),
-        { cwd: root }
-      )
-    ).resolves.toMatchObject({
+    const response = await handleDaemonRequest(
+      JSON.stringify({
+        id: "call",
+        type: "call_tool",
+        name: "github_findu_echo",
+        mandateId: "fix-ci",
+        approvalWaitMs: 1_000,
+        arguments: { message: "hello" }
+      }),
+      { cwd: root }
+    );
+    expect(response).toMatchObject({
       id: "call",
       ok: false,
       error:
         'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 was denied.'
     });
+    expect(response).not.toHaveProperty("approvalRequired");
     await denial;
     await expect(
       readAuditLogEntries({ path: resolveAuditLogPath(), mandateId: "fix-ci" })

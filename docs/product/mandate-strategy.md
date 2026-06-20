@@ -235,6 +235,8 @@ Switchboard now has the first local mandate foundation:
 - `switchboard mandate create --json` returns an MCP launch payload for external
   harnesses
 - approval gates carry optional risk classes and structured labels
+- daemon-backed MCP can use form-mode elicitation for approval decisions when
+  the connected client advertises support, while preserving CLI fallback
 
 This is intentionally still local and thin. It proves the product primitive
 without building provider integrations, secret brokerage, or a full approval
@@ -257,7 +259,8 @@ Switchboard the orchestrator:
 
 Recommended follow-up:
 
-- client elicitation research before implementing client-specific approval UX
+- harden the approval elicitation client matrix and fallback behavior with real
+  Codex/Claude smoke notes
 - keep enforcement claims modest and tied to actual runtime behavior
 - sketch parent/child mandate fields further if useful, but do not enforce
   delegation trees until the basic active-mandate flow is solid

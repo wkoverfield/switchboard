@@ -825,7 +825,7 @@ Recommended next slice:
 - client elicitation research before implementing client-specific approval UX
 - keep provider presets deferred unless needed for profile/mandate safety
 
-### Current Slice: Approval Elicitation Research
+### Completed Slice: Approval Elicitation Research
 
 Goal: decide how Switchboard should integrate approval prompts with MCP clients
 without assuming every client supports the same user-interaction surface.
@@ -840,6 +840,32 @@ Acceptance:
 - no provider presets
 - no secrets broker
 - no full orchestrator
+
+### Current Slice: MCP Form-Mode Approval Elicitation
+
+Goal: let MCP clients that advertise form elicitation decide mandate approval
+requests in-client while keeping the local approval store and CLI fallback as
+the source of truth.
+
+Acceptance:
+
+- daemon approval-required responses include structured non-secret approval
+  context for the MCP adapter
+- the daemon-backed MCP front door detects client form elicitation support
+- form-capable clients receive a non-secret approve/deny elicitation prompt
+- accepted approve/deny decisions persist through the existing approval request
+  store
+- approved decisions retry the original tool call
+- declined, cancelled, unsupported, or errored elicitation falls back to current
+  pending approval retry behavior
+- approval elicitation attempts and decisions are audit-linked to mandate id and
+  approval request id
+- current `switchboard approvals`, `switchboard approve`, `switchboard deny`,
+  and `--approval-wait` behavior remains available
+- no URL-mode elicitation
+- no provider OAuth/secrets flows
+- no remote approval service
+- no child mandate delegation
 
 ## Rules For Future Agents
 

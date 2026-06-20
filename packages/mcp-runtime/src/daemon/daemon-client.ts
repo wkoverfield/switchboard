@@ -5,6 +5,22 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { NamespacedTool } from "../runtime/namespaced-tools.js";
 
+export interface DaemonApprovalRequired {
+  approvalRequestId: string;
+  mandateId: string;
+  repoPath: string;
+  branch: string;
+  task: string;
+  agentRole: string;
+  toolName: string;
+  approvalGateId: string;
+  approvalGatePattern: string;
+  approvalGateReason?: string;
+  approvalGateRisk?: "low" | "medium" | "high" | "critical";
+  approvalGateLabels?: string[];
+  expiresAt: string;
+}
+
 export interface DaemonPingResponse {
   id: string;
   ok: true;
@@ -32,6 +48,7 @@ export interface DaemonErrorResponse {
   id: string;
   ok: false;
   error: string;
+  approvalRequired?: DaemonApprovalRequired;
 }
 
 export type DaemonResponse =
@@ -72,7 +89,7 @@ export async function pingDaemon(
     throw new Error("Daemon response id did not match request id.");
   }
   if (!response.ok) {
-    throw new Error(response.error);
+    throw new DaemonRequestError(response);
   }
   if (response.type !== "pong") {
     throw new Error("Unexpected daemon response.");
@@ -103,7 +120,7 @@ export async function listDaemonTools(
     throw new Error("Daemon response id did not match request id.");
   }
   if (!response.ok) {
-    throw new Error(response.error);
+    throw new DaemonRequestError(response);
   }
   if (response.type !== "tools") {
     throw new Error("Unexpected daemon response.");
@@ -141,7 +158,7 @@ export async function callDaemonTool(
     throw new Error("Daemon response id did not match request id.");
   }
   if (!response.ok) {
-    throw new Error(response.error);
+    throw new DaemonRequestError(response);
   }
   if (response.type !== "tool_result") {
     throw new Error("Unexpected daemon response.");
@@ -267,11 +284,18 @@ export function parseDaemonResponse(raw: string): DaemonResponse {
     throw new Error("Daemon error response message is missing or invalid.");
   }
 
-  return {
+  const errorResponse: DaemonErrorResponse = {
     id: parsed.id,
     ok: false,
     error: parsed.error
   };
+  const approvalRequired = parseDaemonApprovalRequired(
+    (parsed as Record<string, unknown>).approvalRequired
+  );
+  if (approvalRequired) {
+    errorResponse.approvalRequired = approvalRequired;
+  }
+  return errorResponse;
 }
 
 function parseNamespacedTool(value: unknown): NamespacedTool {
@@ -319,8 +343,84 @@ function parseNamespacedTool(value: unknown): NamespacedTool {
   return parsed;
 }
 
+export class DaemonRequestError extends Error {
+  readonly response: DaemonErrorResponse;
+
+  constructor(response: DaemonErrorResponse) {
+    super(response.error);
+    this.name = "DaemonRequestError";
+    this.response = response;
+  }
+}
+
+function parseDaemonApprovalRequired(
+  value: unknown
+): DaemonApprovalRequired | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  if (
+    !isNonEmptyString(value.approvalRequestId) ||
+    !isNonEmptyString(value.mandateId) ||
+    !isNonEmptyString(value.repoPath) ||
+    !isNonEmptyString(value.branch) ||
+    !isNonEmptyString(value.task) ||
+    !isNonEmptyString(value.agentRole) ||
+    !isNonEmptyString(value.toolName) ||
+    !isNonEmptyString(value.approvalGateId) ||
+    !isNonEmptyString(value.approvalGatePattern) ||
+    !isNonEmptyString(value.expiresAt)
+  ) {
+    return undefined;
+  }
+
+  const approval: DaemonApprovalRequired = {
+    approvalRequestId: value.approvalRequestId,
+    mandateId: value.mandateId,
+    repoPath: value.repoPath,
+    branch: value.branch,
+    task: value.task,
+    agentRole: value.agentRole,
+    toolName: value.toolName,
+    approvalGateId: value.approvalGateId,
+    approvalGatePattern: value.approvalGatePattern,
+    expiresAt: value.expiresAt
+  };
+
+  if (isNonEmptyString(value.approvalGateReason)) {
+    approval.approvalGateReason = value.approvalGateReason;
+  }
+  if (isApprovalRisk(value.approvalGateRisk)) {
+    approval.approvalGateRisk = value.approvalGateRisk;
+  }
+  if (
+    Array.isArray(value.approvalGateLabels) &&
+    value.approvalGateLabels.every(isNonEmptyString)
+  ) {
+    approval.approvalGateLabels = value.approvalGateLabels;
+  }
+
+  return approval;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isApprovalRisk(
+  value: unknown
+): value is NonNullable<DaemonApprovalRequired["approvalGateRisk"]> {
+  return (
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "critical"
+  );
 }
 
 function isToolSchema(value: unknown): value is NamespacedTool["inputSchema"] {

@@ -92,8 +92,11 @@ to mount only the mandate's profiles, enforces the mandate's allow, deny, and
 approval-required namespaced tool patterns before routing calls, and attaches
 the mandate id to routed tool-call audit entries. Approval-required daemon calls
 create local approval requests that can be listed with `switchboard approvals`
-and decided with `switchboard approve <id>` or `switchboard deny <id>`. With
-`--approval-wait`, the daemon polls for that local decision for up to the
+and decided with `switchboard approve <id>` or `switchboard deny <id>`. If the
+connected MCP client advertises form elicitation support, the daemon-backed MCP
+front door can ask for an in-client approve/deny decision, persist the decision
+through that same local approval store, and retry approved tool calls. With
+`--approval-wait`, the daemon polls for a local CLI decision for up to the
 requested duration. If the MCP client disconnects during that wait, the daemon
 marks the approval request `stale` so it cannot be approved after the
 originating call is gone. This is basic local approval handling, not
@@ -113,12 +116,13 @@ running.
 - Mandate-scoped MCP mounts currently validate active mandates, narrow mounted
   profiles, enforce allow/deny/approval-required tool patterns, and annotate
   audit entries.
-- Approval handling is local request/decision storage only. The daemon can wait
-  inside a pending tool call when `switchboard mcp --approval-wait <duration>`
-  is set, marks waiting requests stale when the client disconnects, and marks
-  leftover pending requests for the repo stale when the daemon starts. It does
-  not cache upstream sessions, enforce provider policy packs, read secrets, or
-  do client-specific elicitation yet.
+- Approval handling is local request/decision storage only. The daemon-backed
+  MCP adapter can use MCP form elicitation when the connected client advertises
+  support, can wait inside a pending tool call when
+  `switchboard mcp --approval-wait <duration>` is set, marks waiting requests
+  stale when the client disconnects, and marks leftover pending requests for the
+  repo stale when the daemon starts. It does not cache upstream sessions,
+  enforce provider policy packs, read secrets, or use URL-mode elicitation.
 - Approval-required call errors include the pending approval request id and the
   retry commands when no decision arrives during the wait. Approve or deny the
   request, then retry the original tool call.
