@@ -1,8 +1,10 @@
 # Switchboard
 
-Task-scoped authority for agentic software work.
+Repo-aware MCP setup and task-scoped authority for agentic software work.
 
-Switchboard is evolving into the local mandate layer for coding agents: a way to give agents bounded jobs without giving them your whole life. The current foundation is a local-first MCP router for developers using Codex, Claude Code, Cursor, VS Code, and other MCP-compatible agents. It makes multi-account, multi-project, and dev/staging/prod tool access explicit, namespaced, policy-aware, and locally auditable.
+Switchboard gives coding agents the right tools for each repo, environment, and task. The simple entry point is local-first MCP setup for developers using Codex, Claude Code, Cursor, VS Code, and other MCP-compatible agents: project-scoped config, correct accounts/projects per repo, dev/prod separation, fewer duplicate MCP configs, safer defaults, and local auditability. Codex and Claude Code are shipped installer targets today; Cursor and VS Code remain planned surfaces.
+
+The deeper power layer is mandates: temporary, task-scoped authority that lets agents do bounded jobs without inheriting a human's whole tool surface. Mandates stay optional for simple setup, but they give advanced users and external harnesses a way to bind profiles, tools, leases, approvals, and audit logs to a specific task.
 
 This repository is in foundation work for the local mandate layer. It currently ships the TypeScript workspace, CLI shell, config/profile schemas, namespace normalization, collision detection, `switchboard status`, `switchboard doctor`, generic stdio MCP upstream mounting, namespaced tool routing, a stdio MCP front door, client config dry-run and write-mode installers for Codex and Claude Code, project client config and existing MCP server detection in doctor, local audit logs, daemon lifecycle commands, daemon-side tool discovery, a daemon-backed MCP adapter for tool listing and routed calls, local mandate creation/status, mandate-scoped MCP runtime context, mandate allow/deny tool policy, and end-to-end MCP smoke checks.
 
