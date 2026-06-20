@@ -1278,6 +1278,121 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("creates and shows repo-scoped mandate JSON", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu,vercel_preview",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--json"
+      ],
+      {
+        from: "user"
+      }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      path: mandateStorePath,
+      mandate: {
+        id: "fix-ci",
+        task: "fix-ci",
+        repoPath: root,
+        worktreePath: root,
+        branch: "fix/ci",
+        agentRole: "implementer",
+        profiles: ["github_findu", "vercel_preview"],
+        lease: "2h",
+        runtimeStatus: "active"
+      }
+    });
+
+    await program.parseAsync(["--cwd", root, "mandate", "status", "--json"], {
+      from: "user"
+    });
+
+    expect(JSON.parse(output[1] ?? "{}")).toMatchObject({
+      path: mandateStorePath,
+      repoPath: root,
+      mandates: [
+        {
+          id: "fix-ci",
+          branch: "fix/ci",
+          agentRole: "implementer",
+          runtimeStatus: "active"
+        }
+      ]
+    });
+  });
+
+  it("fails mandate status for a missing id", async () => {
+    const root = makeTempProject();
+    const errors: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message),
+      mandateStorePath: join(root, "state", "mandates.json")
+    });
+
+    await program.parseAsync(["--cwd", root, "mandate", "status", "missing"], {
+      from: "user"
+    });
+
+    expect(errors).toEqual(['error: mandate "missing" was not found']);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("fails mandate create for missing profiles", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const errors: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message),
+      mandateStorePath: join(root, "state", "mandates.json")
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu,missing",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h"
+      ],
+      {
+        from: "user"
+      }
+    );
+
+    expect(errors).toEqual(["error: mandate profiles were not found: missing"]);
+    expect(process.exitCode).toBe(1);
+  });
+
   it("prints local audit logs as JSON", async () => {
     const root = makeTempProject();
     const logPath = join(root, "switchboard.jsonl");
@@ -1313,6 +1428,7 @@ describe("switchboard CLI program", () => {
 
     expect(JSON.parse(output[0] ?? "{}")).toEqual({
       path: logPath,
+      mandateId: null,
       entries: [
         {
           version: 1,
@@ -1321,6 +1437,67 @@ describe("switchboard CLI program", () => {
           status: "ok",
           profileName: "two",
           toolName: "two_echo"
+        }
+      ]
+    });
+  });
+
+  it("filters local audit logs by mandate id", async () => {
+    const root = makeTempProject();
+    const logPath = join(root, "switchboard.jsonl");
+    writeFileSync(
+      logPath,
+      [
+        JSON.stringify({
+          version: 1,
+          timestamp: "2026-06-19T14:00:00.000Z",
+          action: "tool_call",
+          status: "ok",
+          profileName: "one",
+          mandateId: "fix-ci"
+        }),
+        JSON.stringify({
+          version: 1,
+          timestamp: "2026-06-19T14:01:00.000Z",
+          action: "tool_call",
+          status: "ok",
+          profileName: "two",
+          mandateId: "other"
+        }),
+        JSON.stringify({
+          version: 1,
+          timestamp: "2026-06-19T14:02:00.000Z",
+          action: "tool_call",
+          status: "ok",
+          profileName: "three",
+          mandateId: "fix-ci"
+        })
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      auditLogPath: logPath
+    });
+    await program.parseAsync(
+      ["logs", "--json", "--limit", "1", "--mandate", "fix-ci"],
+      {
+        from: "user"
+      }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toEqual({
+      path: logPath,
+      mandateId: "fix-ci",
+      entries: [
+        {
+          version: 1,
+          timestamp: "2026-06-19T14:02:00.000Z",
+          action: "tool_call",
+          status: "ok",
+          profileName: "three",
+          mandateId: "fix-ci"
         }
       ]
     });
@@ -1351,6 +1528,21 @@ function writeStdioConfig(root: string): void {
       "      command: node",
       "      args:",
       "        - fixture.mjs"
+    ].join("\n")
+  );
+}
+
+function writeMandateConfig(root: string): void {
+  writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+  writeFileSync(
+    join(root, ".switchboard.yaml"),
+    [
+      "version: 1",
+      "profiles:",
+      "  github_findu:",
+      "    provider: generic",
+      "  vercel_preview:",
+      "    provider: generic"
     ].join("\n")
   );
 }

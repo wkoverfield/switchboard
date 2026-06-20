@@ -131,3 +131,16 @@ Build the smallest local foundation:
 
 The first slice should prove that Switchboard can name, persist, inspect, and
 audit task-scoped authority before trying to enforce every possible permission.
+
+Demo shape:
+
+```bash
+switchboard mandate create fix-ci \
+  --agent implementer \
+  --profiles github_findu,vercel_preview \
+  --branch fix/ci \
+  --lease 2h
+
+switchboard mandate status
+switchboard logs --mandate fix-ci
+```

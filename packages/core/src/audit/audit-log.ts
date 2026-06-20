@@ -15,6 +15,7 @@ export interface AuditLogEntry {
   namespace?: string;
   toolName?: string;
   upstreamName?: string;
+  mandateId?: string;
   durationMs?: number;
   error?: string;
 }
@@ -31,6 +32,7 @@ export interface JsonlAuditLoggerOptions extends PathResolutionOptions {
 export interface ReadAuditLogOptions {
   path?: string;
   limit?: number;
+  mandateId?: string;
 }
 
 export interface SafeAuditLogOptions {
@@ -109,7 +111,10 @@ export async function readAuditLogEntries(
   const entries = raw
     .split("\n")
     .filter(Boolean)
-    .flatMap((line) => parseAuditLogLine(line));
+    .flatMap((line) => parseAuditLogLine(line))
+    .filter((entry) =>
+      options.mandateId ? entry.mandateId === options.mandateId : true
+    );
 
   if (options.limit === undefined) {
     return entries;

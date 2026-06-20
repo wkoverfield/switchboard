@@ -48,6 +48,7 @@ describe("audit log", () => {
       namespace: "stripe_live",
       toolName: "stripe_live_customers_list",
       upstreamName: "customers_list",
+      mandateId: "fix-ci",
       durationMs: 5
     });
 
@@ -73,6 +74,7 @@ describe("audit log", () => {
         namespace: "stripe_live",
         toolName: "stripe_live_customers_list",
         upstreamName: "customers_list",
+        mandateId: "fix-ci",
         durationMs: 5
       }
     ]);
@@ -91,6 +93,35 @@ describe("audit log", () => {
     expect(await readAuditLogEntries({ path, limit: 1 })).toMatchObject([
       { profileName: "two" }
     ]);
+  });
+
+  it("filters by mandate id before applying the tail limit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-audit-"));
+    const path = join(root, "switchboard.jsonl");
+    const logger = createJsonlAuditLogger({ path });
+
+    await logger.log({
+      action: "tool_call",
+      status: "ok",
+      profileName: "one",
+      mandateId: "fix-ci"
+    });
+    await logger.log({
+      action: "tool_call",
+      status: "ok",
+      profileName: "two",
+      mandateId: "other"
+    });
+    await logger.log({
+      action: "tool_call",
+      status: "ok",
+      profileName: "three",
+      mandateId: "fix-ci"
+    });
+
+    expect(
+      await readAuditLogEntries({ path, mandateId: "fix-ci", limit: 1 })
+    ).toMatchObject([{ profileName: "three", mandateId: "fix-ci" }]);
   });
 
   it("returns an empty list when the log file does not exist", async () => {

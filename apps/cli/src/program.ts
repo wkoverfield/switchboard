@@ -4,15 +4,19 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import {
   type AuditLogger,
   checkLocalConfigIgnored,
+  createMandate,
   createInitConfigPlan,
   inspectProjectClientConfigs,
+  listMandates,
   type LoadConfigOptions,
   loadSwitchboardConfig,
+  type MandateWithStatus,
   noopAuditLogger,
   namespacesForProfiles,
   readAuditLogEntries,
   renderSwitchboardClientConfig,
   resolveAuditLogPath,
+  resolveMandateStorePath,
   rollbackSwitchboardClientConfig,
   safeAuditLog,
   type PathResolutionOptions,
@@ -55,6 +59,7 @@ export interface ProgramIo {
   writeErr?: (message: string) => void;
   auditLogger?: AuditLogger;
   auditLogPath?: string;
+  mandateStorePath?: string;
   serveMcp?: (
     profiles: StdioUpstreamProfile[],
     options?: { auditLogger?: AuditLogger }
@@ -568,11 +573,124 @@ export function createProgram(io: ProgramIo = {}): Command {
     );
 
   program
+    .command("mandate")
+    .description("Create and inspect task-scoped coding-agent mandates.")
+    .addCommand(
+      new Command("create")
+        .description("Create a local task-scoped mandate.")
+        .argument("<task>", "task name or summary")
+        .requiredOption("--agent <role>", "agent role for this mandate")
+        .requiredOption(
+          "--profiles <profiles>",
+          "comma-separated Switchboard profiles to bind"
+        )
+        .requiredOption("--branch <branch>", "branch the mandate is scoped to")
+        .requiredOption("--lease <duration>", "lease duration, like 30m, 2h, or 1d")
+        .option("--json", "print machine-readable JSON")
+        .action(
+          async (
+            task: string,
+            options: {
+              agent: string;
+              profiles: string;
+              branch: string;
+              lease: string;
+              json?: boolean;
+            }
+          ) => {
+            const globalOptions = program.opts<{ cwd?: string }>();
+            const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
+            if (!validateLoadedConfigForCommand(loaded, writeErr)) {
+              return;
+            }
+
+            const profiles = parseCommaSeparatedList(options.profiles);
+            const missingProfiles = profiles.filter(
+              (profile) => !loaded.config.profiles[profile]
+            );
+            if (missingProfiles.length > 0) {
+              writeErr(
+                `error: mandate profiles were not found: ${missingProfiles.join(", ")}`
+              );
+              process.exitCode = 1;
+              return;
+            }
+
+            const repoPath = configCwdBase(loaded, globalOptions.cwd);
+            const path = io.mandateStorePath ?? resolveMandateStorePath();
+
+            try {
+              const mandate = await createMandate({
+                path,
+                task,
+                repoPath,
+                worktreePath: repoPath,
+                branch: options.branch,
+                agentRole: options.agent,
+                profiles,
+                lease: options.lease
+              });
+              if (options.json) {
+                writeOut(JSON.stringify({ path, mandate }, null, 2));
+              } else {
+                writeOut(formatMandateCreated(path, mandate));
+              }
+            } catch (error) {
+              writeErr(`error: ${messageFromError(error)}`);
+              process.exitCode = 1;
+            }
+          }
+        )
+    )
+    .addCommand(
+      new Command("status")
+        .description("Show local task-scoped mandates.")
+        .argument("[id]", "mandate id to inspect")
+        .option("--json", "print machine-readable JSON")
+        .option("--all", "show mandates for all repos")
+        .action(
+          async (
+            id: string | undefined,
+            options: { json?: boolean; all?: boolean }
+          ) => {
+            const globalOptions = program.opts<{ cwd?: string }>();
+            const repoPath = options.all
+              ? undefined
+              : installTargetCwd(globalOptions.cwd);
+            const path = io.mandateStorePath ?? resolveMandateStorePath();
+            const mandates = await listMandates({
+              path,
+              ...(repoPath ? { repoPath } : {}),
+              ...(id ? { id } : {})
+            });
+            const result = {
+              path,
+              repoPath: repoPath ?? null,
+              mandates
+            };
+
+            if (id && mandates.length === 0) {
+              writeErr(`error: mandate "${id}" was not found`);
+              process.exitCode = 1;
+              return;
+            }
+
+            if (options.json) {
+              writeOut(JSON.stringify(result, null, 2));
+            } else {
+              writeOut(formatMandateStatus(result));
+            }
+          }
+        )
+    );
+
+  program
     .command("logs")
     .description("Show local Switchboard audit log entries.")
     .option("--json", "print machine-readable JSON")
     .option("--limit <count>", "maximum entries to print", "20")
-    .action(async (options: { json?: boolean; limit: string }) => {
+    .option("--mandate <id>", "filter entries by mandate id")
+    .action(async (options: { json?: boolean; limit: string; mandate?: string }) => {
       const limit = parsePositiveInteger(options.limit);
       if (limit === undefined) {
         writeErr("error: --limit must be a positive integer");
@@ -581,9 +699,19 @@ export function createProgram(io: ProgramIo = {}): Command {
       }
 
       const path = io.auditLogPath ?? resolveAuditLogPath();
-      const entries = await readAuditLogEntries({ path, limit });
+      const entries = await readAuditLogEntries({
+        path,
+        limit,
+        ...(options.mandate ? { mandateId: options.mandate } : {})
+      });
       if (options.json) {
-        writeOut(JSON.stringify({ path, entries }, null, 2));
+        writeOut(
+          JSON.stringify(
+            { path, mandateId: options.mandate ?? null, entries },
+            null,
+            2
+          )
+        );
         return;
       }
 
@@ -867,6 +995,55 @@ function formatProfileTest(result: StdioProfileTestResult): string {
   return lines.join("\n");
 }
 
+function formatMandateCreated(path: string, mandate: MandateWithStatus): string {
+  return [
+    `Created mandate ${mandate.id}`,
+    `Task: ${mandate.task}`,
+    `Agent: ${mandate.agentRole}`,
+    `Repo: ${mandate.repoPath}`,
+    `Worktree: ${mandate.worktreePath}`,
+    `Branch: ${mandate.branch}`,
+    `Profiles: ${mandate.profiles.join(", ")}`,
+    `Lease: ${mandate.lease}`,
+    `Status: ${mandate.runtimeStatus}`,
+    `Expires: ${mandate.expiresAt}`,
+    `Store: ${path}`
+  ].join("\n");
+}
+
+function formatMandateStatus(result: {
+  path: string;
+  repoPath: string | null;
+  mandates: MandateWithStatus[];
+}): string {
+  const lines = [
+    "Switchboard mandates",
+    `Store: ${result.path}`,
+    `Repo: ${result.repoPath ?? "all"}`
+  ];
+
+  if (result.mandates.length === 0) {
+    lines.push("", "No mandates found.");
+    return lines.join("\n");
+  }
+
+  lines.push("");
+  for (const mandate of result.mandates) {
+    lines.push(
+      [
+        mandate.id,
+        mandate.runtimeStatus,
+        mandate.agentRole,
+        mandate.branch,
+        `profiles:${mandate.profiles.join(",")}`,
+        `expires:${mandate.expiresAt}`
+      ].join(" ")
+    );
+  }
+
+  return lines.join("\n");
+}
+
 function formatAuditLogs(
   path: string,
   entries: Awaited<ReturnType<typeof readAuditLogEntries>>
@@ -888,6 +1065,9 @@ function formatAuditLogs(
     ];
     if (entry.toolName) {
       labelParts.push(entry.toolName);
+    }
+    if (entry.mandateId) {
+      labelParts.push(`mandate:${entry.mandateId}`);
     }
     if (entry.durationMs !== undefined) {
       labelParts.push(`${entry.durationMs}ms`);
@@ -1059,6 +1239,13 @@ function parsePositiveInteger(value: string): number | undefined {
   }
 
   return parsed;
+}
+
+function parseCommaSeparatedList(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function parseSupportedClient(value: string): SupportedClient | undefined {
