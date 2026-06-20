@@ -18,6 +18,7 @@ import {
   writeDaemonState,
   type DaemonPaths,
   type DaemonStatus,
+  type ApprovalRequestWithStatus,
   type MandateWithStatus
 } from "@switchboard-mcp/core";
 import {
@@ -46,6 +47,8 @@ export interface StopDaemonResult {
 }
 
 const daemonProtocolVersion = "0.1.0";
+const maxApprovalWaitMs = 600_000;
+const approvalWaitPollIntervalMs = 250;
 
 export async function daemonStatus(
   options: DaemonCommandOptions = {}
@@ -293,6 +296,7 @@ export async function handleDaemonRequest(raw: string, context: DaemonSocketCont
       name?: unknown;
       arguments?: unknown;
       mandateId?: unknown;
+      approvalWaitMs?: unknown;
     };
     const id = typeof request.id === "string" ? request.id : "unknown";
     if (request.type === "ping") {
@@ -345,13 +349,24 @@ export async function handleDaemonRequest(raw: string, context: DaemonSocketCont
           error: "Daemon request mandateId must be a non-empty string."
         };
       }
+      if (
+        request.approvalWaitMs !== undefined &&
+        !isValidApprovalWaitMs(request.approvalWaitMs)
+      ) {
+        return {
+          id,
+          ok: false,
+          error: `Daemon call_tool request approvalWaitMs must be an integer from 0 to ${maxApprovalWaitMs}.`
+        };
+      }
 
       return callConfiguredTool(
         id,
         context,
         request.name,
         request.arguments,
-        request.mandateId
+        request.mandateId,
+        request.approvalWaitMs
       );
     }
 
@@ -415,7 +430,8 @@ async function callConfiguredTool(
   context: DaemonSocketContext,
   name: string,
   args: Record<string, unknown> | undefined,
-  mandateId?: string
+  mandateId?: string,
+  approvalWaitMs = 0
 ): Promise<{
   id: string;
   ok: boolean;
@@ -474,6 +490,50 @@ async function callConfiguredTool(
             expiresAt: routerResult.mandate.expiresAt
           });
           approvalRequestId = request.id;
+
+          if (approvalWaitMs > 0) {
+            const decision = await waitForApprovalDecision({
+              requestId: request.id,
+              mandate: routerResult.mandate,
+              timeoutMs: approvalWaitMs
+            });
+            if (decision?.runtimeStatus === "approved") {
+              await router.close().catch(() => undefined);
+              return callConfiguredTool(id, context, name, args, mandateId, 0);
+            }
+            if (decision?.runtimeStatus === "denied") {
+              const error = `${policyDecision.reason}; approval request ${request.id} was denied.`;
+              await auditApprovalBlockedCall({
+                toolName: name,
+                mandate: routerResult.mandate,
+                approvalRequestId: request.id,
+                approvalGateId: policyDecision.approvalGate.id,
+                approvalGatePattern: policyDecision.approvalGate.toolPattern,
+                error
+              });
+              return {
+                id,
+                ok: false,
+                error
+              };
+            }
+            if (decision?.runtimeStatus === "expired") {
+              const error = `${policyDecision.reason}; approval request ${request.id} expired before it was approved.`;
+              await auditApprovalBlockedCall({
+                toolName: name,
+                mandate: routerResult.mandate,
+                approvalRequestId: request.id,
+                approvalGateId: policyDecision.approvalGate.id,
+                approvalGatePattern: policyDecision.approvalGate.toolPattern,
+                error
+              });
+              return {
+                id,
+                ok: false,
+                error
+              };
+            }
+          }
         }
 
         await safeAuditLog(createJsonlAuditLogger(), {
@@ -517,6 +577,57 @@ async function callConfiguredTool(
   } finally {
     await router.close().catch(() => undefined);
   }
+}
+
+async function waitForApprovalDecision(options: {
+  requestId: string;
+  mandate: MandateWithStatus;
+  timeoutMs: number;
+}): Promise<ApprovalRequestWithStatus | undefined> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < options.timeoutMs) {
+    const requests = await listApprovalRequests({
+      repoPath: options.mandate.repoPath,
+      mandateId: options.mandate.id
+    });
+    const request = requests.find((item) => item.id === options.requestId);
+    if (
+      request &&
+      (request.runtimeStatus === "approved" ||
+        request.runtimeStatus === "denied" ||
+        request.runtimeStatus === "expired")
+    ) {
+      return request;
+    }
+    const remainingMs = options.timeoutMs - (Date.now() - startedAt);
+    await delay(Math.min(approvalWaitPollIntervalMs, Math.max(0, remainingMs)));
+  }
+
+  return undefined;
+}
+
+async function auditApprovalBlockedCall(options: {
+  toolName: string;
+  mandate: MandateWithStatus;
+  approvalRequestId: string;
+  approvalGateId: string;
+  approvalGatePattern: string;
+  error: string;
+}): Promise<void> {
+  await safeAuditLog(createJsonlAuditLogger(), {
+    action: "tool_call",
+    status: "error",
+    toolName: options.toolName,
+    mandateId: options.mandate.id,
+    approvalRequestId: options.approvalRequestId,
+    approvalGateId: options.approvalGateId,
+    approvalGatePattern: options.approvalGatePattern,
+    error: options.error
+  });
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function routerForConfiguredProfiles(
@@ -648,6 +759,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isValidMandateId(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function isValidApprovalWaitMs(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= maxApprovalWaitMs
+  );
 }
 
 function configCwdBase(

@@ -80,14 +80,22 @@ To run under an active task-scoped mandate, use:
 switchboard --cwd <repo> mcp --mandate fix-ci
 ```
 
+To keep approval-gated tool calls open while a local decision arrives, add a
+bounded wait:
+
+```bash
+switchboard --cwd <repo> mcp --mandate fix-ci --approval-wait 30s
+```
+
 The adapter validates that the mandate is active for the repo, asks the daemon
 to mount only the mandate's profiles, enforces the mandate's allow, deny, and
 approval-required namespaced tool patterns before routing calls, and attaches
 the mandate id to routed tool-call audit entries. Approval-required daemon calls
 create local approval requests that can be listed with `switchboard approvals`
-and decided with `switchboard approve <id>` or `switchboard deny <id>`. This is
-basic local approval handling, not provider-specific policy or secret access
-yet.
+and decided with `switchboard approve <id>` or `switchboard deny <id>`. With
+`--approval-wait`, the daemon polls for that local decision for up to the
+requested duration. This is basic local approval handling, not provider-specific
+policy or secret access yet.
 
 Use `switchboard mcp --no-auto-start` to fail fast unless a daemon is already
 running.
@@ -103,9 +111,10 @@ running.
 - Mandate-scoped MCP mounts currently validate active mandates, narrow mounted
   profiles, enforce allow/deny/approval-required tool patterns, and annotate
   audit entries.
-- Approval handling is local request/decision storage only; the daemon does not
-  wait inside a pending tool call, cache upstream sessions, enforce provider
-  policy packs, or read secrets yet.
+- Approval handling is local request/decision storage only. The daemon can wait
+  inside a pending tool call when `switchboard mcp --approval-wait <duration>`
+  is set, but it does not cache upstream sessions, enforce provider policy
+  packs, read secrets, or do client-specific elicitation yet.
 - Approval-required call errors include the pending approval request id and the
-  retry commands. Approve or deny the request, then retry the original tool
-  call.
+  retry commands when no decision arrives during the wait. Approve or deny the
+  request, then retry the original tool call.

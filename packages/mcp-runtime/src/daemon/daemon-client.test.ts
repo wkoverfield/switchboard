@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   callDaemonTool,
+  daemonToolCallTimeoutMs,
   listDaemonTools,
   parseDaemonResponse
 } from "./daemon-client.js";
@@ -193,6 +194,33 @@ describe("daemon client response validation", () => {
     } finally {
       await closeServer(server);
     }
+  });
+
+  it("sends approval wait duration on call_tool requests", async () => {
+    const { socketPath, server, requests } = await startCaptureDaemon();
+    try {
+      await callDaemonTool(
+        socketPath,
+        "github_checks_rerun",
+        { owner: "findu" },
+        { mandateId: "fix-ci", approvalWaitMs: 30_000 }
+      );
+      expect(requests[0]).toMatchObject({
+        type: "call_tool",
+        name: "github_checks_rerun",
+        arguments: { owner: "findu" },
+        mandateId: "fix-ci",
+        approvalWaitMs: 30_000
+      });
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("keeps a full tool-call timeout budget after approval waits", () => {
+    expect(daemonToolCallTimeoutMs()).toBe(60_000);
+    expect(daemonToolCallTimeoutMs({ approvalWaitMs: 30_000 })).toBe(90_000);
+    expect(daemonToolCallTimeoutMs({ approvalWaitMs: 600_000 })).toBe(660_000);
   });
 });
 

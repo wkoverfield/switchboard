@@ -191,6 +191,129 @@ describe("daemon runtime mandate context", () => {
     ]);
   });
 
+  it("waits for approval and routes approval-gated daemon calls", async () => {
+    const root = await makeApprovalRepo();
+    const approval = decideWhenRequestExists(root, "approval-1", "approved");
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "call",
+          type: "call_tool",
+          name: "github_findu_echo",
+          mandateId: "fix-ci",
+          approvalWaitMs: 1_000,
+          arguments: { message: "hello" }
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "call",
+      ok: true,
+      type: "tool_result"
+    });
+    await approval;
+    await expect(
+      readAuditLogEntries({ path: resolveAuditLogPath(), mandateId: "fix-ci" })
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "tool_call",
+          status: "ok",
+          mandateId: "fix-ci",
+          toolName: "github_findu_echo",
+          approvalRequestId: "approval-1"
+        })
+      ])
+    );
+  });
+
+  it("returns denied approval decisions during approval waits", async () => {
+    const root = await makeApprovalRepo();
+    const denial = decideWhenRequestExists(root, "approval-1", "denied");
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "call",
+          type: "call_tool",
+          name: "github_findu_echo",
+          mandateId: "fix-ci",
+          approvalWaitMs: 1_000,
+          arguments: { message: "hello" }
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "call",
+      ok: false,
+      error:
+        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 was denied.'
+    });
+    await denial;
+    await expect(
+      readAuditLogEntries({ path: resolveAuditLogPath(), mandateId: "fix-ci" })
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "tool_call",
+          status: "error",
+          mandateId: "fix-ci",
+          toolName: "github_findu_echo",
+          approvalRequestId: "approval-1",
+          error:
+            'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 was denied.'
+        })
+      ])
+    );
+  });
+
+  it("times out approval waits with retry guidance", async () => {
+    const root = await makeApprovalRepo();
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "call",
+          type: "call_tool",
+          name: "github_findu_echo",
+          mandateId: "fix-ci",
+          approvalWaitMs: 10,
+          arguments: { message: "hello" }
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "call",
+      ok: false,
+      error:
+        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 is pending. Run "switchboard approvals" and "switchboard approve approval-1", then retry this tool call.'
+    });
+  });
+
+  it("rejects invalid approval wait daemon requests", async () => {
+    const root = await makeApprovalRepo();
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "call",
+          type: "call_tool",
+          name: "github_findu_echo",
+          mandateId: "fix-ci",
+          approvalWaitMs: 600_001,
+          arguments: {}
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "call",
+      ok: false,
+      error:
+        "Daemon call_tool request approvalWaitMs must be an integer from 0 to 600000."
+    });
+  });
+
   it("routes approval-gated daemon calls after a request is approved", async () => {
     const root = await makeApprovalRepo();
 
@@ -309,6 +432,30 @@ async function makeMandateRepoOnWrongBranch(): Promise<string> {
   });
 
   return root;
+}
+
+async function decideWhenRequestExists(
+  root: string,
+  id: string,
+  status: "approved" | "denied"
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 1_000) {
+    const requests = await listApprovalRequests({
+      repoPath: root,
+      mandateId: "fix-ci"
+    });
+    if (requests.some((request) => request.id === id)) {
+      await decideApprovalRequest({
+        id,
+        status
+      });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error(`approval request "${id}" was not created`);
 }
 
 async function makeBrokenPolicyRepo(): Promise<string> {

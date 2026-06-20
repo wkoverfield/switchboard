@@ -49,11 +49,13 @@ export type DaemonRequest =
       name: string;
       arguments?: Record<string, unknown>;
       mandateId?: string;
+      approvalWaitMs?: number;
     };
 
 export interface DaemonClientOptions {
   timeoutMs?: number;
   mandateId?: string;
+  approvalWaitMs?: number;
 }
 
 export async function pingDaemon(
@@ -128,8 +130,11 @@ export async function callDaemonTool(
   if (options.mandateId) {
     request.mandateId = options.mandateId;
   }
+  if (options.approvalWaitMs !== undefined) {
+    request.approvalWaitMs = options.approvalWaitMs;
+  }
   const response = await requestDaemon(socketPath, request, {
-    timeoutMs: options.timeoutMs ?? 60000
+    timeoutMs: options.timeoutMs ?? daemonToolCallTimeoutMs(options)
   });
 
   if (response.id !== id) {
@@ -143,6 +148,10 @@ export async function callDaemonTool(
   }
 
   return response;
+}
+
+export function daemonToolCallTimeoutMs(options: DaemonClientOptions = {}): number {
+  return Math.max(60_000, (options.approvalWaitMs ?? 0) + 60_000);
 }
 
 export async function requestDaemon(
