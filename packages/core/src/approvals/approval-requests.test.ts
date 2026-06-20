@@ -41,6 +41,8 @@ describe("approval requests", () => {
       toolName: "github_findu_deploy",
       approvalGateId: "gate-1",
       approvalGatePattern: "github_findu_deploy",
+      approvalGateRisk: "high",
+      approvalGateLabels: ["remote-state", "deploy", "DEPLOY"],
       expiresAt: "2026-06-20T17:00:00.000Z"
     });
 
@@ -50,8 +52,44 @@ describe("approval requests", () => {
       status: "pending",
       runtimeStatus: "pending",
       toolName: "github_findu_deploy",
-      approvalGateId: "gate-1"
+      approvalGateId: "gate-1",
+      approvalGateRisk: "high",
+      approvalGateLabels: ["remote-state", "deploy"]
     });
+
+    await expect(
+      createApprovalRequest({
+        path,
+        now: () => new Date("2026-06-20T15:03:00.000Z"),
+        mandateId: "fix-ci",
+        repoPath: join(root, "repo"),
+        branch: "fix/ci",
+        toolName: "github_findu_delete",
+        approvalGateId: "gate-2",
+        approvalGatePattern: "github_findu_delete",
+        approvalGateRisk: "urgent" as "high",
+        expiresAt: "2026-06-20T17:00:00.000Z"
+      })
+    ).rejects.toThrow(
+      "approval gate risk must be one of: low, medium, high, critical"
+    );
+
+    await expect(
+      createApprovalRequest({
+        path,
+        now: () => new Date("2026-06-20T15:04:00.000Z"),
+        mandateId: "fix-ci",
+        repoPath: join(root, "repo"),
+        branch: "fix/ci",
+        toolName: "github_findu_delete",
+        approvalGateId: "gate-2",
+        approvalGatePattern: "github_findu_delete",
+        approvalGateLabels: ["remote state"],
+        expiresAt: "2026-06-20T17:00:00.000Z"
+      })
+    ).rejects.toThrow(
+      "approval gate labels must use lowercase letters, digits, dots, colons, underscores, or hyphens"
+    );
 
     await expect(
       createApprovalRequest({

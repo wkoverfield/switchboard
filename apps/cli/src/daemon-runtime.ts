@@ -520,6 +520,13 @@ async function callConfiguredTool(
             ...(policyDecision.approvalGate.reason
               ? { approvalGateReason: policyDecision.approvalGate.reason }
               : {}),
+            ...(policyDecision.approvalGate.risk
+              ? { approvalGateRisk: policyDecision.approvalGate.risk }
+              : {}),
+            ...(policyDecision.approvalGate.labels &&
+            policyDecision.approvalGate.labels.length > 0
+              ? { approvalGateLabels: policyDecision.approvalGate.labels }
+              : {}),
             expiresAt: routerResult.mandate.expiresAt
           });
           approvalRequestId = request.id;

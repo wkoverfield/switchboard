@@ -178,6 +178,7 @@ Implemented in the current codebase:
 - daemon-start invalidation for leftover pending approval requests
 - approval gate reason metadata in mandates and approval requests
 - `switchboard mandate create --json` MCP launch payloads for harnesses
+- approval gate risk classes and structured labels
 
 Not started:
 
@@ -800,10 +801,27 @@ Acceptance:
 - no secrets broker
 - no full orchestrator
 
+### Current Slice: Approval Risk Labels
+
+Goal: make approval gates easier to scan and automate by adding descriptive
+structured metadata without changing enforcement semantics.
+
+Acceptance:
+
+- mandate approval gates can carry risk classes: `low`, `medium`, `high`, or
+  `critical`
+- mandate approval gates can carry normalized structured labels
+- `switchboard mandate create` accepts repeatable approval risk and label flags
+- daemon-created approval requests copy gate risk and labels
+- `mandate status`, `approvals`, and JSON output expose risk and labels
+- invalid risk/label values are rejected before persistence
+- no provider presets
+- no secrets broker
+- no new enforcement claims
+
 Recommended next slice:
 
 - client elicitation research before implementing client-specific approval UX
-- structured policy labels/risk classes beyond free-form approval reasons
 - keep provider presets deferred unless needed for profile/mandate safety
 
 ## Rules For Future Agents

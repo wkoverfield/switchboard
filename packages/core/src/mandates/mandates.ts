@@ -14,15 +14,20 @@ import * as z from "zod";
 import type { PathResolutionOptions } from "../config/paths.js";
 
 export type MandateRuntimeStatus = "active" | "expired";
+export type MandateApprovalRisk = "low" | "medium" | "high" | "critical";
 export interface MandateApprovalGate {
   id: string;
   toolPattern: string;
   reason?: string | undefined;
+  risk?: MandateApprovalRisk | undefined;
+  labels?: string[] | undefined;
 }
 export interface CreateMandateApprovalGate {
   id?: string | undefined;
   toolPattern: string;
   reason?: string | undefined;
+  risk?: string | undefined;
+  labels?: string[] | undefined;
 }
 
 export type MandateToolPolicyDecision =
@@ -40,7 +45,9 @@ const mandateStoreStaleLockMs = 30_000;
 export const mandateApprovalGateSchema = z.object({
   id: z.string().min(1),
   toolPattern: z.string().min(1),
-  reason: z.string().min(1).optional()
+  reason: z.string().min(1).optional(),
+  risk: z.enum(["low", "medium", "high", "critical"]).optional(),
+  labels: z.array(z.string().min(1)).optional()
 });
 
 export const mandateSchema = z.object({
@@ -490,11 +497,61 @@ function normalizeApprovalGates(
     if (reason && hasControlCharacters(reason)) {
       throw new Error("approval gate reason must not contain control characters");
     }
+    const risk = typeof gate === "string" ? undefined : normalizeApprovalRisk(gate.risk);
+    const labels =
+      typeof gate === "string" ? [] : normalizeApprovalLabels(gate.labels ?? []);
     result.push({
       id,
       toolPattern,
-      ...(reason ? { reason } : {})
+      ...(reason ? { reason } : {}),
+      ...(risk ? { risk } : {}),
+      ...(labels.length > 0 ? { labels } : {})
     });
+  }
+
+  return result;
+}
+
+function normalizeApprovalRisk(
+  value: string | undefined
+): MandateApprovalRisk | undefined {
+  const risk = value?.trim().toLowerCase();
+  if (!risk) {
+    return undefined;
+  }
+  if (
+    risk !== "low" &&
+    risk !== "medium" &&
+    risk !== "high" &&
+    risk !== "critical"
+  ) {
+    throw new Error(
+      "approval gate risk must be one of: low, medium, high, critical"
+    );
+  }
+
+  return risk;
+}
+
+function normalizeApprovalLabels(labels: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const rawLabel of labels) {
+    const label = rawLabel.trim().toLowerCase();
+    if (!label || seen.has(label)) {
+      continue;
+    }
+    if (hasControlCharacters(label)) {
+      throw new Error("approval gate labels must not contain control characters");
+    }
+    if (!/^[a-z0-9][a-z0-9_.:-]*$/.test(label)) {
+      throw new Error(
+        "approval gate labels must use lowercase letters, digits, dots, colons, underscores, or hyphens"
+      );
+    }
+    seen.add(label);
+    result.push(label);
   }
 
   return result;

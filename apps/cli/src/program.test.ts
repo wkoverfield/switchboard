@@ -514,6 +514,12 @@ describe("switchboard CLI program", () => {
         "github_findu_checks_rerun",
         "--require-approval-reason",
         "rerunning CI changes remote state",
+        "--require-approval-risk",
+        "high",
+        "--require-approval-label",
+        "remote-state",
+        "--require-approval-label",
+        "ci",
         "--json"
       ],
       { from: "user" }
@@ -1554,6 +1560,12 @@ describe("switchboard CLI program", () => {
         "github_findu_checks_rerun",
         "--require-approval-reason",
         "rerunning CI changes remote state",
+        "--require-approval-risk",
+        "high",
+        "--require-approval-label",
+        "remote-state",
+        "--require-approval-label",
+        "ci",
         "--json"
       ],
       {
@@ -1577,7 +1589,9 @@ describe("switchboard CLI program", () => {
           {
             id: "gate-1",
             toolPattern: "github_findu_checks_rerun",
-            reason: "rerunning CI changes remote state"
+            reason: "rerunning CI changes remote state",
+            risk: "high",
+            labels: ["remote-state", "ci"]
           }
         ],
         lease: "2h",
@@ -1611,7 +1625,9 @@ describe("switchboard CLI program", () => {
             {
               id: "gate-1",
               toolPattern: "github_findu_checks_rerun",
-              reason: "rerunning CI changes remote state"
+              reason: "rerunning CI changes remote state",
+              risk: "high",
+              labels: ["remote-state", "ci"]
             }
           ],
           runtimeStatus: "active"
@@ -1625,7 +1641,7 @@ describe("switchboard CLI program", () => {
     expect(output[2]).toContain("allow:github_findu_*");
     expect(output[2]).toContain("deny:*_deploy_prod");
     expect(output[2]).toContain(
-      "approval:gate-1:github_findu_checks_rerun(rerunning CI changes remote state)"
+      "approval:gate-1:github_findu_checks_rerun(risk:high labels:remote-state+ci reason:rerunning CI changes remote state)"
     );
   });
 
@@ -1661,6 +1677,42 @@ describe("switchboard CLI program", () => {
 
     expect(errors).toEqual([
       "error: --require-approval-reason must be provided once for each --require-approval-tool"
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("rejects mismatched approval gate risk counts", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const errors: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message),
+      mandateStorePath: join(root, "state", "mandates.json")
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--require-approval-risk",
+        "high"
+      ],
+      { from: "user" }
+    );
+
+    expect(errors).toEqual([
+      "error: --require-approval-risk must be provided once for each --require-approval-tool"
     ]);
     expect(process.exitCode).toBe(1);
   });
@@ -1812,6 +1864,8 @@ describe("switchboard CLI program", () => {
       approvalGateId: "gate-1",
       approvalGatePattern: "github_findu_deploy",
       approvalGateReason: "preview deploy touches remote state",
+      approvalGateRisk: "high",
+      approvalGateLabels: ["remote-state", "deploy"],
       expiresAt: futureExpiresAt
     });
     await createApprovalRequest({
@@ -1882,6 +1936,8 @@ describe("switchboard CLI program", () => {
       "next: switchboard approve approval-1 or switchboard deny approval-1; then retry github_findu_deploy"
     );
     expect(output[1]).toContain("reason:preview deploy touches remote state");
+    expect(output[1]).toContain("risk:high");
+    expect(output[1]).toContain("labels:remote-state+deploy");
     expect(output[1]).toContain(
       "next: retry the original gated tool call to create a fresh approval request"
     );
@@ -1897,6 +1953,8 @@ describe("switchboard CLI program", () => {
         status: "approved",
         runtimeStatus: "approved",
         approvalGateReason: "preview deploy touches remote state",
+        approvalGateRisk: "high",
+        approvalGateLabels: ["remote-state", "deploy"],
         decisionReason: "preview deploy"
       }
     });
