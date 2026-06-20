@@ -16,6 +16,7 @@ with this roadmap or `docs/product/mandate-strategy.md`.
 - `docs/product/source/switchboard-agent-research-synthesis.md`
 - `docs/product/source/switchboard-competitive-landscape.md`
 - `docs/product/mandate-strategy.md`
+- `docs/product/approval-elicitation-research.md`
 
 ## Product North Star
 
@@ -801,7 +802,7 @@ Acceptance:
 - no secrets broker
 - no full orchestrator
 
-### Current Slice: Approval Risk Labels
+### Completed Slice: Approval Risk Labels
 
 Goal: make approval gates easier to scan and automate by adding descriptive
 structured metadata without changing enforcement semantics.
@@ -823,6 +824,22 @@ Recommended next slice:
 
 - client elicitation research before implementing client-specific approval UX
 - keep provider presets deferred unless needed for profile/mandate safety
+
+### Current Slice: Approval Elicitation Research
+
+Goal: decide how Switchboard should integrate approval prompts with MCP clients
+without assuming every client supports the same user-interaction surface.
+
+Acceptance:
+
+- document MCP elicitation capabilities and safety constraints
+- document Codex and Claude Code approval/elicitation surfaces from current docs
+- recommend the smallest compatible Switchboard behavior
+- keep current CLI approval store as the fallback path
+- do not build client-specific approval UX in this slice
+- no provider presets
+- no secrets broker
+- no full orchestrator
 
 ## Rules For Future Agents
 
