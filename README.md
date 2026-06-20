@@ -4,7 +4,7 @@ Task-scoped authority for agentic software work.
 
 Switchboard is evolving into the local mandate layer for coding agents: a way to give agents bounded jobs without giving them your whole life. The current foundation is a local-first MCP router for developers using Codex, Claude Code, Cursor, VS Code, and other MCP-compatible agents. It makes multi-account, multi-project, and dev/staging/prod tool access explicit, namespaced, policy-aware, and locally auditable.
 
-This repository is in Milestone 4 foundation work. It currently ships the TypeScript workspace, CLI shell, config/profile schemas, namespace normalization, collision detection, `switchboard status`, `switchboard doctor`, generic stdio MCP upstream mounting, namespaced tool routing, a stdio MCP front door, client config dry-run and write-mode installers for Codex and Claude Code, project client config and existing MCP server detection in doctor, local audit logs, daemon lifecycle commands, daemon-side tool discovery, a daemon-backed MCP adapter for tool listing and routed calls, and end-to-end MCP smoke checks.
+This repository is in foundation work for the local mandate layer. It currently ships the TypeScript workspace, CLI shell, config/profile schemas, namespace normalization, collision detection, `switchboard status`, `switchboard doctor`, generic stdio MCP upstream mounting, namespaced tool routing, a stdio MCP front door, client config dry-run and write-mode installers for Codex and Claude Code, project client config and existing MCP server detection in doctor, local audit logs, daemon lifecycle commands, daemon-side tool discovery, a daemon-backed MCP adapter for tool listing and routed calls, local mandate creation/status, and end-to-end MCP smoke checks.
 
 ## Install From Source
 
@@ -27,7 +27,10 @@ switchboard test <profile>
 switchboard install <codex|claude>
 switchboard install <codex|claude> --write
 switchboard install <codex|claude> --rollback <backup>
+switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration>
+switchboard mandate status [id]
 switchboard logs
+switchboard logs --mandate <id>
 switchboard daemon <status|start|ping|tools|stop>
 switchboard mcp
 switchboard serve
@@ -61,4 +64,4 @@ Precedence, highest to lowest:
 5. global config
 6. built-in defaults
 
-Start with `docs/install/quickstart.md`. `switchboard init` prints or writes a starter repo config, and `switchboard doctor` tells you the next command to run, including whether project Codex/Claude config is missing, stale, installed, or invalid. `switchboard test <profile>` checks that a configured stdio upstream starts and lists tools. `switchboard mcp` auto-starts the local daemon when needed and supports daemon-backed tool listing and routed tool calls. `switchboard install <codex|claude>` prints dry-run client config snippets for the daemon-backed MCP adapter; add `--write` to update project-scoped client config with a timestamped backup, or `--rollback <backup>` to restore one. `switchboard serve` exposes configured stdio upstream profiles as one daemonless MCP server for debugging and CI. `switchboard logs` reads the local JSONL audit log. `switchboard daemon <status|start|ping|tools|stop>` manages the local daemon lifecycle foundation and daemon-side tool discovery. Provider integrations, secrets, and policy enforcement come in later milestones.
+Start with `docs/install/quickstart.md`. `switchboard init` prints or writes a starter repo config, and `switchboard doctor` tells you the next command to run, including whether project Codex/Claude config is missing, stale, installed, or invalid. `switchboard test <profile>` checks that a configured stdio upstream starts and lists tools. `switchboard mcp` auto-starts the local daemon when needed and supports daemon-backed tool listing and routed tool calls. `switchboard install <codex|claude>` prints dry-run client config snippets for the daemon-backed MCP adapter; add `--write` to update project-scoped client config with a timestamped backup, or `--rollback <backup>` to restore one. `switchboard mandate create` persists a local task-scoped authority record bound to a repo, worktree, branch, agent role, profiles, and lease; `switchboard mandate status` lists those records. `switchboard serve` exposes configured stdio upstream profiles as one daemonless MCP server for debugging and CI. `switchboard logs` reads the local JSONL audit log and can filter entries with `--mandate <id>`. `switchboard daemon <status|start|ping|tools|stop>` manages the local daemon lifecycle foundation and daemon-side tool discovery. Provider integrations, secrets, and policy enforcement come in later milestones.

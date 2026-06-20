@@ -40,7 +40,7 @@ Switchboard should win by making delegated coding-agent work bounded:
 
 ## Current State
 
-Implemented on `main` through PR #21:
+Implemented on `main` through PR #22, plus the current mandate-foundation branch:
 
 - TypeScript pnpm workspace
 - `@switchboard-mcp/cli`
@@ -86,10 +86,16 @@ Implemented on `main` through PR #21:
 - project Codex/Claude client config detection in `switchboard doctor`
 - existing project MCP server name discovery in `switchboard doctor`
 - mandate strategy and roadmap pivot toward task-scoped authority
+- local mandate schema and persistence
+- `switchboard mandate create`
+- repo/worktree/branch/agent/profile/lease binding for mandates
+- `switchboard mandate status`
+- optional audit log mandate ids
+- `switchboard logs --mandate`
 
 Not started:
 
-- mandate schema and CLI
+- mandate-aware runtime enforcement
 - policy engine
 - approval broker
 - secrets/keychain

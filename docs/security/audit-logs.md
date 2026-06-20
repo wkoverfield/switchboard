@@ -22,10 +22,11 @@ Use:
 switchboard logs
 switchboard logs --json
 switchboard logs --limit 50
+switchboard logs --mandate fix-ci
 ```
 
 Audit entries include timestamps, action, status, profile, namespace, tool name,
-upstream tool name, duration, and redacted error text when present. Tool
+upstream tool name, optional mandate id, duration, and redacted error text when present. Tool
 arguments, tool results, prompts, provider credentials, and raw payloads are not
 logged by this foundation slice.
 

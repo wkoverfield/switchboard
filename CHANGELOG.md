@@ -26,3 +26,4 @@
 - Added project Codex/Claude client config detection to `switchboard doctor`.
 - Added existing project MCP server name discovery to `switchboard doctor`.
 - Added mandate strategy docs and updated the roadmap toward task-scoped authority for coding agents.
+- Added local mandate persistence plus `switchboard mandate create`, `switchboard mandate status`, and `switchboard logs --mandate`.
