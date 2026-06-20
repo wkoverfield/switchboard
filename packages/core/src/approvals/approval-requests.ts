@@ -74,6 +74,14 @@ export interface MarkApprovalRequestStaleOptions {
   now?: () => Date;
 }
 
+export interface MarkPendingApprovalRequestsStaleOptions {
+  repoPath?: string;
+  mandateId?: string;
+  reason?: string;
+  path?: string;
+  now?: () => Date;
+}
+
 export interface FindApprovedApprovalRequestOptions {
   mandateId: string;
   repoPath: string;
@@ -277,6 +285,52 @@ export async function markApprovalRequestStale(
     store.requests[index] = updated;
     await writeApprovalRequestStore(store, { path });
     return withRuntimeStatus(updated, decidedAt);
+  });
+}
+
+export async function markPendingApprovalRequestsStale(
+  options: MarkPendingApprovalRequestsStaleOptions = {}
+): Promise<ApprovalRequestWithStatus[]> {
+  const now = options.now ?? (() => new Date());
+  const decidedAt = now();
+  const path = options.path ?? resolveApprovalRequestStorePath();
+  const repoPath = options.repoPath ? resolve(options.repoPath) : undefined;
+
+  return withApprovalStoreLock(path, async () => {
+    const store = await readApprovalRequestStore({ path });
+    const staleRequests: ApprovalRequestWithStatus[] = [];
+    let changed = false;
+    const reason = options.reason?.trim();
+
+    store.requests = store.requests.map((request) => {
+      const matchesRepo = repoPath ? request.repoPath === repoPath : true;
+      const matchesMandate = options.mandateId
+        ? request.mandateId === options.mandateId
+        : true;
+      if (
+        !matchesRepo ||
+        !matchesMandate ||
+        approvalRequestRuntimeStatus(request, decidedAt) !== "pending"
+      ) {
+        return request;
+      }
+
+      changed = true;
+      const updated: ApprovalRequest = {
+        ...request,
+        status: "stale",
+        decidedAt: decidedAt.toISOString(),
+        ...(reason ? { decisionReason: reason } : {})
+      };
+      staleRequests.push(withRuntimeStatus(updated, decidedAt));
+      return updated;
+    });
+
+    if (changed) {
+      await writeApprovalRequestStore(store, { path });
+    }
+
+    return staleRequests;
   });
 }
 

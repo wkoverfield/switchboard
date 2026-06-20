@@ -142,11 +142,12 @@ Implemented in the current codebase:
 - approved approval decisions honored by daemon-routed mandate calls
 - optional bounded approval waits with `switchboard mcp --approval-wait <duration>`
 - stale approval request status for disconnected approval waits
+- daemon-start invalidation for leftover pending approval requests
 
 Not started:
 
 - richer policy engine and operating modes
-- full approval broker, daemon-restart invalidation, and client-specific elicitation
+- full approval broker and client-specific elicitation
 - secrets/keychain
 - provider presets
 - mandate-first onboarding
@@ -314,12 +315,13 @@ Shipped foundation:
 - optional bounded in-call wait/poll behavior for daemon-backed MCP calls
 - stale approval request status when a client disconnects during an approval
   wait
+- daemon-start invalidation for leftover pending approval requests
 - no provider integrations
 
 Next acceptable slice:
 
-- daemon restart invalidation for pending approval requests
 - client elicitation research before implementing client-specific approval UX
+- richer approval reasons and policy labels
 
 ### Milestone 7: Secrets
 
@@ -686,7 +688,7 @@ Acceptance:
 - no secrets broker
 - no remote service
 
-### Current Slice: Approval Stale Semantics
+### Completed Slice: Approval Stale Semantics
 
 Goal: make stale approval requests explicit so approvals cannot be granted
 after the originating call disappears.
@@ -703,9 +705,23 @@ Acceptance:
 - no secrets broker
 - no remote service
 
+### Current Slice: Daemon Restart Approval Invalidation
+
+Goal: prevent leftover pending approval requests from surviving daemon restarts.
+
+Acceptance:
+
+- core can mark pending approval requests stale by repo
+- daemon startup marks leftover pending approval requests for its repo stale
+- approved, denied, expired, stale, and other-repo requests are not rewritten
+- stale requests cannot be approved later
+- no provider presets
+- no secrets broker
+- no remote service
+
 Follow-up slice:
 
-- daemon restart invalidation for pending approval requests
+- client elicitation research before implementing client-specific approval UX
 - richer approval reasons and policy labels
 
 ## Rules For Future Agents

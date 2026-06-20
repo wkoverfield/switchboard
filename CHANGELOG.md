@@ -35,3 +35,4 @@
 - Added approval lifecycle polish: expired-status filtering, human next-action hints, and retry guidance in approval-required daemon errors.
 - Added bounded approval waits for daemon-backed mandate MCP calls with `switchboard mcp --approval-wait <duration>`.
 - Added stale approval request status for disconnected approval waits.
+- Added daemon-start invalidation for leftover pending approval requests.

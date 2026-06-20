@@ -9,6 +9,7 @@ import {
   findApprovedApprovalRequest,
   listApprovalRequests,
   markApprovalRequestStale,
+  markPendingApprovalRequestsStale,
   readApprovalRequestStore,
   resolveApprovalRequestStorePath
 } from "./approval-requests.js";
@@ -298,6 +299,74 @@ describe("approval requests", () => {
         now: () => new Date("2026-06-20T15:03:00.000Z")
       })
     ).resolves.toBeUndefined();
+  });
+
+  it("marks only matching pending approval requests stale in batches", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-approvals-"));
+    const path = join(root, "approvals.json");
+    const repoPath = join(root, "repo");
+    const otherRepoPath = join(root, "other-repo");
+
+    await createApprovalRequest({
+      path,
+      now: () => new Date("2026-06-20T15:00:00.000Z"),
+      mandateId: "fix-ci",
+      repoPath,
+      branch: "fix/ci",
+      toolName: "github_findu_deploy",
+      approvalGateId: "gate-1",
+      approvalGatePattern: "github_findu_deploy",
+      expiresAt: "2026-06-20T17:00:00.000Z"
+    });
+    await createApprovalRequest({
+      path,
+      now: () => new Date("2026-06-20T15:01:00.000Z"),
+      mandateId: "fix-ci",
+      repoPath: otherRepoPath,
+      branch: "fix/ci",
+      toolName: "github_other_deploy",
+      approvalGateId: "gate-2",
+      approvalGatePattern: "github_other_deploy",
+      expiresAt: "2026-06-20T17:00:00.000Z"
+    });
+    await createApprovalRequest({
+      path,
+      now: () => new Date("2026-06-20T15:02:00.000Z"),
+      mandateId: "fix-ci",
+      repoPath,
+      branch: "fix/ci",
+      toolName: "github_findu_approved",
+      approvalGateId: "gate-3",
+      approvalGatePattern: "github_findu_approved",
+      expiresAt: "2026-06-20T17:00:00.000Z"
+    });
+    await decideApprovalRequest({
+      path,
+      id: "approval-3",
+      status: "approved",
+      now: () => new Date("2026-06-20T15:03:00.000Z")
+    });
+
+    await expect(
+      markPendingApprovalRequestsStale({
+        path,
+        repoPath,
+        reason: "daemon restarted",
+        now: () => new Date("2026-06-20T15:04:00.000Z")
+      })
+    ).resolves.toMatchObject([
+      {
+        id: "approval-1",
+        status: "stale",
+        runtimeStatus: "stale",
+        decisionReason: "daemon restarted"
+      }
+    ]);
+    await expect(listApprovalRequests({ path })).resolves.toMatchObject([
+      { id: "approval-1", runtimeStatus: "stale" },
+      { id: "approval-2", runtimeStatus: "pending" },
+      { id: "approval-3", runtimeStatus: "approved" }
+    ]);
   });
 
   it("treats malformed expiry timestamps as expired", async () => {

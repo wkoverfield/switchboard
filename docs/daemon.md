@@ -115,10 +115,10 @@ running.
   audit entries.
 - Approval handling is local request/decision storage only. The daemon can wait
   inside a pending tool call when `switchboard mcp --approval-wait <duration>`
-  is set and marks waiting requests stale when the client disconnects, but it
-  does not cache upstream sessions, invalidate pending requests on daemon
-  restart, enforce provider policy packs, read secrets, or do client-specific
-  elicitation yet.
+  is set, marks waiting requests stale when the client disconnects, and marks
+  leftover pending requests for the repo stale when the daemon starts. It does
+  not cache upstream sessions, enforce provider policy packs, read secrets, or
+  do client-specific elicitation yet.
 - Approval-required call errors include the pending approval request id and the
   retry commands when no decision arrives during the wait. Approve or deny the
   request, then retry the original tool call.
