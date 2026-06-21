@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
@@ -87,6 +88,119 @@ try {
     ),
     "expected routed tool call audit entry"
   );
+
+  const mandateCreate = spawnSync(
+    process.execPath,
+    [
+      cliEntryPath,
+      "--cwd",
+      tmpRoot,
+      "mandate",
+      "create",
+      "fix-ci",
+      "--agent",
+      "implementer",
+      "--profiles",
+      "smoke_echo",
+      "--branch",
+      "fix/ci",
+      "--lease",
+      "2h",
+      "--allow-tool",
+      "smoke_echo_*",
+      "--require-approval-tool",
+      "smoke_echo_echo",
+      "--require-approval-reason",
+      "rerunning CI changes remote state",
+      "--require-approval-risk",
+      "high",
+      "--require-approval-label",
+      "ci",
+      "--require-approval-label",
+      "remote-state",
+      "--json"
+    ],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        XDG_STATE_HOME: tmpRoot
+      }
+    }
+  );
+  assert(
+    mandateCreate.status === 0,
+    `expected mandate create to pass\nstdout:\n${mandateCreate.stdout}\nstderr:\n${mandateCreate.stderr}`
+  );
+
+  const mandateClient = new Client({
+    name: "switchboard-serve-mandate-smoke",
+    version: "0.1.0"
+  });
+  const mandateTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: [cliEntryPath, "--cwd", tmpRoot, "serve", "--mandate", "fix-ci"],
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      XDG_STATE_HOME: tmpRoot
+    },
+    stderr: "pipe"
+  });
+
+  mandateTransport.stderr?.resume();
+
+  try {
+    await mandateClient.connect(mandateTransport);
+
+    const mandateTools = await mandateClient.listTools();
+    const gatedTool = mandateTools.tools.find(
+      (tool) => tool.name === "smoke_echo_echo"
+    );
+    const ungatedTool = mandateTools.tools.find(
+      (tool) => tool.name === "smoke_echo_whoami"
+    );
+
+    assert(gatedTool, "expected gated smoke_echo_echo tool");
+    assert(ungatedTool, "expected ungated smoke_echo_whoami tool");
+    assert(
+      gatedTool._meta?.switchboard?.approvalRequired?.gateId === "gate-1",
+      "expected gated tool approval metadata"
+    );
+    assert(
+      gatedTool._meta?.switchboard?.profileName === "smoke_echo" &&
+        gatedTool._meta?.switchboard?.namespace === "smoke_echo" &&
+        gatedTool._meta?.switchboard?.upstreamName === "echo",
+      "expected gated tool routing metadata"
+    );
+    assert(
+      gatedTool._meta?.switchboard?.approvalRequired?.reason ===
+        "rerunning CI changes remote state",
+      "expected gated tool approval reason"
+    );
+    assert(
+      gatedTool._meta?.switchboard?.approvalRequired?.risk === "high",
+      "expected gated tool approval risk"
+    );
+    assert(
+      gatedTool._meta?.switchboard?.approvalRequired?.labels?.join(",") ===
+        "ci,remote-state",
+      "expected gated tool approval labels"
+    );
+    assert(
+      ungatedTool._meta?.switchboard?.profileName === "smoke_echo" &&
+        ungatedTool._meta?.switchboard?.namespace === "smoke_echo" &&
+        ungatedTool._meta?.switchboard?.upstreamName === "whoami",
+      "expected ungated tool routing metadata"
+    );
+    assert(
+      !("approvalRequired" in (ungatedTool._meta?.switchboard ?? {})),
+      "expected ungated tool to omit approval metadata"
+    );
+  } finally {
+    await mandateClient.close();
+  }
 } finally {
   await client.close();
   rmSync(tmpRoot, { recursive: true, force: true });

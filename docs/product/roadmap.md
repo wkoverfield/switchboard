@@ -1195,7 +1195,7 @@ Acceptance:
 - no changes to tool discovery semantics, MCP routing, mandate enforcement,
   providers, or daemon behavior
 
-### Current Slice: Front-Door Approval Metadata Smoke V0
+### Completed Slice: Front-Door Approval Metadata Smoke V0
 
 Goal: prove that approval-required tool metadata survives the actual MCP
 front-door `tools/list` path for daemonless mandate-scoped servers.
@@ -1207,6 +1207,23 @@ Acceptance:
 - listed gated tool includes non-secret gate reason, risk, and labels
 - listed ungated tools still include normal Switchboard routing metadata
 - listed ungated tools do not receive approval-required metadata
+- no changes to runtime behavior, approval execution, daemon behavior,
+  provider integrations, or client installers
+
+### Current Slice: Launched Serve Mandate Approval Metadata Smoke V0
+
+Goal: prove that approval-required tool metadata survives a built CLI
+`switchboard serve --mandate <id>` stdio session, not only in-process MCP tests.
+
+Acceptance:
+
+- existing built CLI `serve` smoke still lists and calls fixture tools
+- smoke creates a local mandate bound to the fixture stdio profile
+- smoke launches built CLI `switchboard serve --mandate fix-ci`
+- MCP `tools/list` exposes `_meta.switchboard.approvalRequired` for the gated
+  fixture tool
+- gated metadata includes non-secret reason, risk, and labels
+- ungated fixture tools keep routing metadata and omit approval metadata
 - no changes to runtime behavior, approval execution, daemon behavior,
   provider integrations, or client installers
 
