@@ -280,6 +280,8 @@ Switchboard the orchestrator:
   harness preflight and UI without launching an agent client
 - the tool surface payload is explicitly versioned as
   `switchboard.tool-surface.v1`
+- `switchboard logs --mandate <id> --json` exposes versioned local audit log
+  entries with `switchboard.audit-log.v1`
 - contracted mandate command failures under `--json` return a versioned
   `switchboard.error.v1` envelope on stdout with a non-zero exit code
 - `docs/use-cases/harness-json-contracts.md` documents the current versioned
@@ -293,7 +295,7 @@ Recommended follow-up:
 
 - clarify inherited approval-gate override UX for child mandates
 - extend `switchboard.error.v1` to additional non-mandate JSON surfaces when
-  they become harness-facing contracts
+  they become harness-facing contracts beyond audit logs
 - harden the approval elicitation and gated-tool metadata client matrix with
   real Codex/Claude smoke notes
 - no provider presets

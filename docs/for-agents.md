@@ -40,9 +40,10 @@ queues across a lead/worker mandate tree. Mandate status JSON is versioned as
 `switchboard.mandate-status.v1`, mandate report JSON is versioned as
 `switchboard.mandate-report.v1`, mandate escalation JSON is versioned as
 `switchboard.mandate-escalation.v1`, approval request JSON is versioned as
-`switchboard.approvals.v1`, and tool surface JSON is versioned as
-`switchboard.tool-surface.v1`. Contracted mandate commands that fail with
-`--json` write a `switchboard.error.v1` envelope to stdout and exit non-zero;
-without `--json`, the same failures stay human-readable on stderr.
+`switchboard.approvals.v1`, tool surface JSON is versioned as
+`switchboard.tool-surface.v1`, and audit log JSON is versioned as
+`switchboard.audit-log.v1`. Contracted JSON commands that fail with `--json`
+write a `switchboard.error.v1` envelope to stdout and exit non-zero; without
+`--json`, the same failures stay human-readable on stderr.
 
 Never suggest putting provider tokens into repo config or agent MCP config. Switchboard config should use secret references once the secrets milestone is implemented.

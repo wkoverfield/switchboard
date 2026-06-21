@@ -3860,8 +3860,18 @@ describe("switchboard CLI program", () => {
     });
 
     expect(JSON.parse(output[0] ?? "{}")).toEqual({
+      ok: true,
+      schemaVersion: "switchboard.audit-log.v1",
       path: logPath,
       mandateId: null,
+      filters: {
+        mandateId: null,
+        limit: 1
+      },
+      counts: {
+        totalMatching: 2,
+        returned: 1
+      },
       entries: [
         {
           version: 1,
@@ -3921,8 +3931,18 @@ describe("switchboard CLI program", () => {
     );
 
     expect(JSON.parse(output[0] ?? "{}")).toEqual({
+      ok: true,
+      schemaVersion: "switchboard.audit-log.v1",
       path: logPath,
       mandateId: "fix-ci",
+      filters: {
+        mandateId: "fix-ci",
+        limit: 1
+      },
+      counts: {
+        totalMatching: 2,
+        returned: 1
+      },
       entries: [
         {
           version: 1,
@@ -3933,6 +3953,60 @@ describe("switchboard CLI program", () => {
           mandateId: "fix-ci"
         }
       ]
+    });
+  });
+
+  it("prints local audit log JSON errors to stdout", async () => {
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["logs", "--json", "--limit", "0"], {
+      from: "user"
+    });
+
+    expect(JSON.parse(output[0] ?? "{}")).toEqual({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "invalid_limit",
+      message: "--limit must be a positive integer",
+      nextActions: ["Pass --limit with a positive integer value."]
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("prints parser errors for audit log JSON commands to stdout", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await expect(
+      program.parseAsync(["--cwd", root, "logs", "--json", "--limit"], {
+        from: "user"
+      })
+    ).rejects.toThrow();
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "invalid_command",
+      message: "option '--limit <count>' argument missing"
+    });
+  });
+
+  it("prints unknown-option audit log JSON parser errors to stdout", async () => {
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await expect(
+      program.parseAsync(["logs", "--json", "--bogus"], {
+        from: "user"
+      })
+    ).rejects.toThrow();
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "unknown_option",
+      message: "unknown option '--bogus'"
     });
   });
 });

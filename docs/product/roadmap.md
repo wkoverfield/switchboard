@@ -1116,7 +1116,7 @@ Acceptance:
 - no changes to approval execution, approval requests, MCP routing, providers,
   or daemon behavior
 
-### Current Slice: Ephemeral Doctor Local Config Hygiene V0
+### Completed Slice: Ephemeral Doctor Local Config Hygiene V0
 
 Goal: keep `switchboard doctor` useful in temporary harness repos and smoke
 test folders without weakening the safety check for real local overrides.
@@ -1134,6 +1134,26 @@ Acceptance:
   doctor behavior
 - no changes to config precedence, profile schemas, MCP routing, mandate
   enforcement, providers, or daemon behavior
+
+### Current Slice: Versioned Audit Log JSON V0
+
+Goal: make post-run mandate audit inspection a stable harness-facing JSON
+contract without changing audit writing or runtime enforcement.
+
+Acceptance:
+
+- `switchboard logs --json` includes `schemaVersion:
+  "switchboard.audit-log.v1"`
+- JSON output keeps compatible top-level `path`, `mandateId`, and `entries`
+  fields
+- JSON output includes explicit `filters` and `counts` metadata
+- `switchboard logs --mandate <id> --json` reports matching and returned entry
+  counts after mandate filtering
+- invalid `logs --json --limit` values return `switchboard.error.v1` on stdout
+  with a non-zero exit code
+- docs move audit logs from provisional to versioned harness contract
+- no changes to audit writing, MCP routing, mandate enforcement, providers, or
+  daemon behavior
 
 ## Rules For Future Agents
 
