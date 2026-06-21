@@ -8,9 +8,17 @@ import {
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApprovalRequest, markApprovalRequestStale } from "@switchboard-mcp/core";
 import { createProgram } from "./program.js";
+
+const fixtureServerPath = fileURLToPath(
+  new URL(
+    "../../../packages/mcp-runtime/fixtures/echo-server.mjs",
+    import.meta.url
+  )
+);
 
 describe("switchboard CLI program", () => {
   afterEach(() => {
@@ -950,6 +958,190 @@ describe("switchboard CLI program", () => {
           }
         ]
       }
+    ]);
+  });
+
+  it("lists mandate-scoped tools with approval metadata", async () => {
+    const root = makeTempProject();
+    const mandateStorePath = join(root, "state", "mandates.json");
+    writeMandateFixtureConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--allow-tool",
+        "github_findu_*",
+        "--require-approval-tool",
+        "github_findu_echo",
+        "--require-approval-reason",
+        "rerunning CI changes remote state",
+        "--require-approval-risk",
+        "high",
+        "--require-approval-label",
+        "ci",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      ["--cwd", root, "tools", "--mandate", "fix-ci", "--json"],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[1] ?? "{}") as {
+      ok: boolean;
+      mandate: { id: string };
+      profileCount: number;
+      toolCount: number;
+      approvalRequiredCount: number;
+      tools: Array<{
+        name: string;
+        profileName: string;
+        _meta?: {
+          switchboard?: {
+            approvalRequired?: {
+              gateId: string;
+              toolPattern: string;
+              reason?: string;
+              risk?: string;
+              labels?: string[];
+            };
+          };
+        };
+      }>;
+    };
+    expect(parsed).toMatchObject({
+      ok: true,
+      mandate: { id: "fix-ci" },
+      profileCount: 1,
+      toolCount: 2,
+      approvalRequiredCount: 1
+    });
+    expect(parsed.tools.map((tool) => tool.name).sort()).toEqual([
+      "github_findu_echo",
+      "github_findu_whoami"
+    ]);
+    expect(
+      parsed.tools.find((tool) => tool.name === "github_findu_echo")
+    ).toMatchObject({
+      profileName: "github_findu",
+      _meta: {
+        switchboard: {
+          approvalRequired: {
+            gateId: "gate-1",
+            toolPattern: "github_findu_echo",
+            reason: "rerunning CI changes remote state",
+            risk: "high",
+            labels: ["ci"]
+          }
+        }
+      }
+    });
+  });
+
+  it("keeps denied and unallowed tools out of mandate tool discovery", async () => {
+    const root = makeTempProject();
+    const mandateStorePath = join(root, "state", "mandates.json");
+    writeMandateFixtureConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "deny-echo",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--allow-tool",
+        "github_findu_*",
+        "--deny-tool",
+        "github_findu_echo",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      ["--cwd", root, "tools", "--mandate", "deny-echo", "--json"],
+      { from: "user" }
+    );
+
+    const denyParsed = JSON.parse(output.at(-1) ?? "{}") as {
+      toolCount: number;
+      tools: Array<{ name: string }>;
+    };
+    expect(denyParsed.toolCount).toBe(1);
+    expect(denyParsed.tools.map((tool) => tool.name)).toEqual([
+      "github_findu_whoami"
+    ]);
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "approval-not-allow",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--allow-tool",
+        "github_findu_whoami",
+        "--require-approval-tool",
+        "github_findu_echo",
+        "--require-approval-reason",
+        "echo needs approval",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      ["--cwd", root, "tools", "--mandate", "approval-not-allow", "--json"],
+      { from: "user" }
+    );
+
+    const approvalParsed = JSON.parse(output.at(-1) ?? "{}") as {
+      approvalRequiredCount: number;
+      toolCount: number;
+      tools: Array<{ name: string }>;
+    };
+    expect(approvalParsed.toolCount).toBe(1);
+    expect(approvalParsed.approvalRequiredCount).toBe(0);
+    expect(approvalParsed.tools.map((tool) => tool.name)).toEqual([
+      "github_findu_whoami"
     ]);
   });
 
@@ -2149,6 +2341,35 @@ function writeMandateConfig(root: string): void {
       "    provider: generic",
       "  vercel_preview:",
       "    provider: generic"
+    ].join("\n")
+  );
+}
+
+function writeMandateFixtureConfig(root: string): void {
+  writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+  writeFileSync(
+    join(root, ".switchboard.yaml"),
+    [
+      "version: 1",
+      "profiles:",
+      "  github_findu:",
+      "    provider: generic",
+      "    namespace: github_findu",
+      "    upstream:",
+      "      type: stdio",
+      `      command: ${JSON.stringify(process.execPath)}`,
+      "      args:",
+      `        - ${JSON.stringify(fixtureServerPath)}`,
+      "        - github-findu",
+      "  vercel_preview:",
+      "    provider: generic",
+      "    namespace: vercel_preview",
+      "    upstream:",
+      "      type: stdio",
+      `      command: ${JSON.stringify(process.execPath)}`,
+      "      args:",
+      `        - ${JSON.stringify(fixtureServerPath)}`,
+      "        - vercel-preview"
     ].join("\n")
   );
 }

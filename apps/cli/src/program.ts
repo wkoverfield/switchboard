@@ -46,6 +46,7 @@ import {
   serveDaemonBackedMcpStdio,
   serveSwitchboardMcpStdio,
   testStdioUpstreamProfile,
+  type NamespacedTool,
   type StdioProfileTestOptions,
   type StdioProfileTestResult,
   type StdioUpstreamProfile
@@ -86,6 +87,14 @@ export interface ProgramIo {
       toolPolicy?: MandateToolPolicy;
     }
   ) => Promise<void>;
+  listTools?: (
+    profiles: StdioUpstreamProfile[],
+    options?: {
+      auditLogger?: AuditLogger;
+      mandateId?: string;
+      toolPolicy?: MandateToolPolicy;
+    }
+  ) => Promise<NamespacedTool[]>;
   testProfile?: (
     profile: StdioUpstreamProfile,
     options?: StdioProfileTestOptions
@@ -102,6 +111,7 @@ export function createProgram(io: ProgramIo = {}): Command {
   const writeOut = io.writeOut ?? ((message: string) => console.log(message));
   const writeErr = io.writeErr ?? ((message: string) => console.error(message));
   const serveMcp = io.serveMcp ?? serveProfilesOverStdio;
+  const listToolsForProfiles = io.listTools ?? listToolsOverProfiles;
   const testProfile = io.testProfile ?? testStdioUpstreamProfile;
   const getDaemonStatus = io.daemonStatus ?? daemonStatus;
   const startDaemonProcess = io.startDaemon ?? startDaemon;
@@ -225,6 +235,85 @@ export function createProgram(io: ProgramIo = {}): Command {
       }
 
       if (!ok) {
+        process.exitCode = 1;
+      }
+    });
+
+  program
+    .command("tools")
+    .description("List the configured Switchboard tool surface.")
+    .option("--json", "print machine-readable JSON")
+    .option("--mandate <id>", "show tools through an active mandate")
+    .action(async (options: { json?: boolean; mandate?: string }) => {
+      const globalOptions = program.opts<{ cwd?: string }>();
+      const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
+
+      if (!validateLoadedConfigForCommand(loaded, writeErr)) {
+        return;
+      }
+      const mandate = options.mandate
+        ? await resolveActiveMandateForCommand({
+            id: options.mandate,
+            cwd: globalOptions.cwd,
+            mandateStorePath: io.mandateStorePath,
+            writeErr
+          })
+        : undefined;
+      if (options.mandate && !mandate) {
+        process.exitCode = 1;
+        return;
+      }
+
+      const profiles = stdioProfilesFromConfig(
+        mandate
+          ? profilesForMandate(loaded.config.profiles, mandate)
+          : loaded.config.profiles,
+        configCwdBase(loaded, globalOptions.cwd)
+      );
+      if (profiles.length === 0) {
+        writeErr("error: no stdio upstream profiles are configured");
+        process.exitCode = 1;
+        return;
+      }
+
+      try {
+        const tools = await listToolsForProfiles(profiles, {
+          auditLogger,
+          ...(mandate
+            ? {
+                mandateId: mandate.id,
+                toolPolicy: {
+                  allowedTools: mandate.allowedTools,
+                  deniedTools: mandate.deniedTools,
+                  approvalGates: mandate.approvalGates,
+                  approvedApprovalRequests:
+                    await approvedApprovalRequestsForMandate(
+                      mandate,
+                      io.approvalStorePath
+                    )
+                }
+              }
+            : {})
+        });
+        const result = {
+          ok: true,
+          mandate: mandate
+            ? { id: mandate.id, runtimeStatus: mandate.runtimeStatus }
+            : null,
+          profileCount: profiles.length,
+          toolCount: tools.length,
+          approvalRequiredCount: tools.filter(hasApprovalRequiredMetadata)
+            .length,
+          tools
+        };
+
+        if (options.json) {
+          writeOut(JSON.stringify(result, null, 2));
+        } else {
+          writeOut(formatToolSurface(result));
+        }
+      } catch (error) {
+        writeErr(`error: ${messageFromError(error)}`);
         process.exitCode = 1;
       }
     });
@@ -565,7 +654,9 @@ export function createProgram(io: ProgramIo = {}): Command {
       }
 
       const profiles = stdioProfilesFromConfig(
-        mandate ? profilesForMandate(loaded.config.profiles, mandate) : loaded.config.profiles,
+        mandate
+          ? profilesForMandate(loaded.config.profiles, mandate)
+          : loaded.config.profiles,
         configCwdBase(loaded, globalOptions.cwd)
       );
       if (profiles.length === 0) {
@@ -583,10 +674,11 @@ export function createProgram(io: ProgramIo = {}): Command {
                 allowedTools: mandate.allowedTools,
                 deniedTools: mandate.deniedTools,
                 approvalGates: mandate.approvalGates,
-                approvedApprovalRequests: await approvedApprovalRequestsForMandate(
-                  mandate,
-                  io.approvalStorePath
-                )
+                approvedApprovalRequests:
+                  await approvedApprovalRequestsForMandate(
+                    mandate,
+                    io.approvalStorePath
+                  )
               }
             }
           : {})
@@ -1282,6 +1374,38 @@ function formatDaemonTools(
   return lines.join("\n");
 }
 
+function formatToolSurface(result: {
+  mandate: { id: string; runtimeStatus: string } | null;
+  profileCount: number;
+  toolCount: number;
+  approvalRequiredCount: number;
+  tools: NamespacedTool[];
+}): string {
+  const lines = [
+    "Switchboard tools",
+    `Mandate: ${
+      result.mandate
+        ? `${result.mandate.id} (${result.mandate.runtimeStatus})`
+        : "none"
+    }`,
+    `Profiles: ${result.profileCount}`,
+    `Tools: ${result.toolCount}`,
+    `Approval required: ${result.approvalRequiredCount}`
+  ];
+
+  if (result.tools.length > 0) {
+    lines.push("", "Tool names:");
+    for (const tool of result.tools) {
+      const approval = hasApprovalRequiredMetadata(tool)
+        ? " approval-required"
+        : "";
+      lines.push(`  ${tool.name} (${tool.profileName})${approval}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 function formatProfileTest(result: StdioProfileTestResult): string {
   const lines = [
     `Switchboard profile test: ${result.ok ? "OK" : "failed"}`,
@@ -1298,6 +1422,16 @@ function formatProfileTest(result: StdioProfileTestResult): string {
   }
 
   return lines.join("\n");
+}
+
+function hasApprovalRequiredMetadata(tool: NamespacedTool): boolean {
+  return isRecord(tool._meta?.switchboard)
+    ? isRecord(tool._meta.switchboard.approvalRequired)
+    : false;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function formatMandateCreated(path: string, mandate: MandateWithStatus): string {
@@ -1839,6 +1973,30 @@ async function serveProfilesOverStdio(
     }
   );
   await serveSwitchboardMcpStdio(router);
+}
+
+async function listToolsOverProfiles(
+  profiles: StdioUpstreamProfile[],
+  options: {
+    auditLogger?: AuditLogger;
+    mandateId?: string;
+    toolPolicy?: MandateToolPolicy;
+  } = {}
+): Promise<NamespacedTool[]> {
+  const router = new GenericMcpRouter(
+    profiles,
+    {
+      ...(options.auditLogger ? { auditLogger: options.auditLogger } : {}),
+      ...(options.mandateId ? { mandateId: options.mandateId } : {}),
+      ...(options.toolPolicy ? { toolPolicy: options.toolPolicy } : {})
+    }
+  );
+
+  try {
+    return await router.discoverTools();
+  } finally {
+    await router.close().catch(() => undefined);
+  }
 }
 
 function configCwdBase(
