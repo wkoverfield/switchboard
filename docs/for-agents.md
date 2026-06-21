@@ -18,8 +18,10 @@ switchboard logs --mandate <id>
 
 Harnesses can use the `mcpLaunch` payload from `switchboard mandate create
 --json` to launch an agent with `switchboard --cwd <repo> mcp --mandate <id>`,
-inspect the scoped tool surface with `switchboard tools --mandate <id> --json`,
-then inspect results with `switchboard logs --mandate <id> --json`. The tool
-surface JSON is versioned as `switchboard.tool-surface.v1`.
+inspect mandate state with `switchboard mandate status <id> --json`, inspect
+the scoped tool surface with `switchboard tools --mandate <id> --json`, then
+inspect results with `switchboard logs --mandate <id> --json`. Mandate status
+JSON is versioned as `switchboard.mandate-status.v1`, and tool surface JSON is
+versioned as `switchboard.tool-surface.v1`.
 
 Never suggest putting provider tokens into repo config or agent MCP config. Switchboard config should use secret references once the secrets milestone is implemented.
