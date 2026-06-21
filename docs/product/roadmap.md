@@ -184,6 +184,13 @@ Implemented in the current codebase:
 - child mandate subset validation for profiles, allowed tools, lease, and
   repo/worktree/branch binding
 - approval gate risk classes and structured labels
+- immutable mandate UIDs for disambiguating repeated human mandate ids
+- `switchboard mandate handoff <id>`
+- closed handoff states remove runtime authority from mandates
+- parent handoff is blocked while child mandates remain open
+- `switchboard mandate report <id> --json`
+- versioned `switchboard.mandate-report.v1` parent/child report payloads
+- mandate reports include related audit entries for the delegation chain
 
 Not started:
 
@@ -192,7 +199,7 @@ Not started:
 - secrets/keychain
 - provider presets
 - mandate-aware advanced onboarding
-- richer mandate tree approval escalation and handoff reporting
+- richer mandate tree approval escalation and result aggregation
 - global/user-scope client installers
 - Supabase, Stripe, PostHog, or Sentry integrations
 
@@ -919,6 +926,28 @@ Acceptance:
 - child lease cannot outlive parent lease
 - child JSON output returns the existing versioned `mcpLaunch` payload
 - mandate status and human output expose parent/delegation context
+- no approval escalation broker
+- no provider OAuth/secrets flows
+- no remote service
+- no full agent orchestrator
+
+### Current Slice: Mandate Handoff / Reporting V0
+
+Goal: give external harnesses a scriptable way to close delegated work, preserve
+handoff context, and inspect the resulting parent/child authority chain.
+
+Acceptance:
+
+- mandate schema persists non-open handoff states plus summary, next steps,
+  artifacts, actor, and timestamp
+- `switchboard mandate handoff <id> --state completed|blocked|cancelled`
+  closes a mandate and makes it unavailable to `switchboard mcp --mandate`
+- parent mandates cannot hand off while child mandates remain open
+- `switchboard mandate report <id> --json` returns a versioned
+  `switchboard.mandate-report.v1` payload
+- report payload includes selected mandate id, root mandate id, children by
+  parent, mandate counts, runtime counts, and related audit entries
+- lifecycle smoke covers create, child, logs, handoff, and report
 - no approval escalation broker
 - no provider OAuth/secrets flows
 - no remote service

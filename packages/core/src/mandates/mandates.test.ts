@@ -12,7 +12,8 @@ import {
   parseMandateLease,
   readMandateStore,
   resolveActiveMandate,
-  resolveMandateStorePath
+  resolveMandateStorePath,
+  updateMandateHandoff
 } from "./mandates.js";
 
 describe("mandates", () => {
@@ -325,6 +326,177 @@ describe("mandates", () => {
         lease: "2h"
       })
     ).rejects.toThrow("child mandate lease cannot outlive parent mandate lease");
+  });
+
+  it("updates mandate handoff reports and closes runtime authority", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+    const repoPath = join(root, "repo");
+
+    await createMandate({
+      path,
+      now: () => new Date("2026-06-19T16:00:00.000Z"),
+      task: "fix-ci",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "fix/ci",
+      agentRole: "lead",
+      profiles: ["github_findu"],
+      lease: "2h"
+    });
+
+    const closed = await updateMandateHandoff({
+      path,
+      now: () => new Date("2026-06-19T16:45:00.000Z"),
+      id: "fix-ci",
+      repoPath,
+      state: "completed",
+      summary: "CI is green",
+      nextSteps: ["merge PR"],
+      artifacts: ["https://github.com/woverfield/switchboard/pull/214"],
+      handoffBy: "lead-agent"
+    });
+
+    expect(closed).toMatchObject({
+      id: "fix-ci",
+      handoffState: "completed",
+      handoffSummary: "CI is green",
+      handoffNextSteps: ["merge PR"],
+      handoffArtifacts: ["https://github.com/woverfield/switchboard/pull/214"],
+      handoffBy: "lead-agent",
+      handoffAt: "2026-06-19T16:45:00.000Z",
+      runtimeStatus: "closed"
+    });
+    await expect(
+      resolveActiveMandate({
+        path,
+        repoPath,
+        id: "fix-ci",
+        now: () => new Date("2026-06-19T16:50:00.000Z")
+      })
+    ).rejects.toThrow(
+      'mandate "fix-ci" is closed with handoff state "completed"'
+    );
+  });
+
+  it("rejects parent handoff while child mandates remain open", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+    const repoPath = join(root, "repo");
+
+    await createMandate({
+      path,
+      now: () => new Date("2026-06-19T16:00:00.000Z"),
+      task: "fix-ci",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "fix/ci",
+      agentRole: "lead",
+      profiles: ["github_findu"],
+      lease: "2h"
+    });
+    await createChildMandate({
+      path,
+      now: () => new Date("2026-06-19T16:10:00.000Z"),
+      parentId: "fix-ci",
+      task: "rerun checks",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "fix/ci",
+      agentRole: "worker",
+      profiles: ["github_findu"],
+      lease: "30m"
+    });
+
+    await expect(
+      updateMandateHandoff({
+        path,
+        now: () => new Date("2026-06-19T16:20:00.000Z"),
+        id: "fix-ci",
+        repoPath,
+        state: "completed",
+        summary: "parent done"
+      })
+    ).rejects.toThrow(
+      'cannot hand off mandate "fix-ci" while child mandates remain open: rerun-checks'
+    );
+
+    await updateMandateHandoff({
+      path,
+      now: () => new Date("2026-06-19T16:25:00.000Z"),
+      id: "rerun-checks",
+      repoPath,
+      state: "completed",
+      summary: "checks are green"
+    });
+    const parent = await updateMandateHandoff({
+      path,
+      now: () => new Date("2026-06-19T16:30:00.000Z"),
+      id: "fix-ci",
+      repoPath,
+      state: "completed",
+      summary: "parent done"
+    });
+
+    expect(parent.runtimeStatus).toBe("closed");
+  });
+
+  it("does not let old same-id child mandates block a newer parent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+    const repoPath = join(root, "repo");
+
+    await createMandate({
+      path,
+      now: () => new Date("2026-06-19T16:00:00.000Z"),
+      task: "fix-ci",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "fix/ci",
+      agentRole: "lead",
+      profiles: ["github_findu"],
+      lease: "2m"
+    });
+    await createChildMandate({
+      path,
+      now: () => new Date("2026-06-19T16:00:30.000Z"),
+      parentId: "fix-ci",
+      task: "rerun checks",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "fix/ci",
+      agentRole: "worker",
+      profiles: ["github_findu"],
+      lease: "1m"
+    });
+
+    await createMandate({
+      path,
+      now: () => new Date("2026-06-19T17:00:00.000Z"),
+      task: "fix-ci",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "fix/ci",
+      agentRole: "lead",
+      profiles: ["github_findu"],
+      lease: "1h"
+    });
+
+    const newerParent = await updateMandateHandoff({
+      path,
+      now: () => new Date("2026-06-19T17:05:00.000Z"),
+      id: "fix-ci",
+      repoPath,
+      state: "completed",
+      summary: "new parent done"
+    });
+
+    expect(newerParent).toMatchObject({
+      id: "fix-ci",
+      mandateUid: "fix-ci:2026-06-19T17:00:00.000Z",
+      handoffState: "completed",
+      runtimeStatus: "closed"
+    });
   });
 
   it("rejects approval gate reasons with control characters", async () => {

@@ -14,6 +14,7 @@ import * as z from "zod";
 import type { PathResolutionOptions } from "../config/paths.js";
 
 export type MandateRuntimeStatus = "active" | "expired";
+export type MandateHandoffState = "open" | "completed" | "blocked" | "cancelled";
 export type MandateApprovalRisk = "low" | "medium" | "high" | "critical";
 export interface MandateApprovalGate {
   id: string;
@@ -44,6 +45,7 @@ const mandateStoreStaleLockMs = 30_000;
 
 interface NormalizedCreateMandateOptions {
   id: string;
+  mandateUid: string;
   task: string;
   repoPath: string;
   worktreePath: string;
@@ -56,8 +58,10 @@ interface NormalizedCreateMandateOptions {
   deniedTools: string[];
   approvalGates: MandateApprovalGate[];
   parentMandateId?: string | undefined;
+  parentMandateUid?: string | undefined;
   delegatedBy?: string | undefined;
   delegationPath?: string[] | undefined;
+  delegationUids?: string[] | undefined;
   maxLeaseExpiresAt?: string | undefined;
 }
 
@@ -69,13 +73,23 @@ export const mandateApprovalGateSchema = z.object({
   labels: z.array(z.string().min(1)).optional()
 });
 
+export const mandateHandoffStateSchema = z.enum([
+  "open",
+  "completed",
+  "blocked",
+  "cancelled"
+]);
+
 export const mandateSchema = z.object({
   version: z.literal(1),
   id: z.string().min(1),
+  mandateUid: z.string().min(1).optional(),
   task: z.string().min(1),
   parentMandateId: z.string().min(1).optional(),
+  parentMandateUid: z.string().min(1).optional(),
   delegatedBy: z.string().min(1).optional(),
   delegationPath: z.array(z.string().min(1)).optional(),
+  delegationUids: z.array(z.string().min(1)).optional(),
   maxLeaseExpiresAt: z.string().min(1).optional(),
   repoPath: z.string().min(1),
   worktreePath: z.string().min(1),
@@ -90,7 +104,12 @@ export const mandateSchema = z.object({
   approvalGates: z
     .array(z.union([mandateApprovalGateSchema, z.string().min(1)]))
     .transform((gates) => normalizeApprovalGates(gates)),
-  handoffState: z.literal("open")
+  handoffState: mandateHandoffStateSchema,
+  handoffSummary: z.string().min(1).optional(),
+  handoffNextSteps: z.array(z.string().min(1)).optional(),
+  handoffArtifacts: z.array(z.string().min(1)).optional(),
+  handoffBy: z.string().min(1).optional(),
+  handoffAt: z.string().min(1).optional()
 });
 
 export const mandateStoreSchema = z.object({
@@ -102,7 +121,7 @@ export type Mandate = z.infer<typeof mandateSchema>;
 export type MandateStore = z.infer<typeof mandateStoreSchema>;
 
 export type MandateWithStatus = Mandate & {
-  runtimeStatus: MandateRuntimeStatus;
+  runtimeStatus: MandateRuntimeStatus | "closed";
 };
 
 export interface CreateMandateOptions {
@@ -133,6 +152,18 @@ export interface CreateChildMandateOptions {
   allowedTools?: string[];
   deniedTools?: string[];
   approvalRequiredTools?: Array<string | CreateMandateApprovalGate>;
+  path?: string;
+  now?: () => Date;
+}
+
+export interface UpdateMandateHandoffOptions {
+  id: string;
+  repoPath: string;
+  state: Exclude<MandateHandoffState, "open">;
+  summary?: string | undefined;
+  nextSteps?: string[];
+  artifacts?: string[];
+  handoffBy?: string | undefined;
   path?: string;
   now?: () => Date;
 }
@@ -203,9 +234,13 @@ export function parseMandateLease(value: string): number {
 }
 
 export function mandateRuntimeStatus(
-  mandate: Pick<Mandate, "expiresAt">,
+  mandate: Pick<Mandate, "expiresAt"> & Partial<Pick<Mandate, "handoffState">>,
   now: Date = new Date()
-): MandateRuntimeStatus {
+): MandateWithStatus["runtimeStatus"] {
+  if (mandate.handoffState && mandate.handoffState !== "open") {
+    return "closed";
+  }
+
   return new Date(mandate.expiresAt).getTime() > now.getTime()
     ? "active"
     : "expired";
@@ -333,6 +368,9 @@ export async function createChildMandate(
     ];
     const parentDelegationPath =
       normalizedParent.delegationPath ?? [normalizedParent.id];
+    const parentUid = mandateUidFor(normalizedParent);
+    const parentDelegationUids =
+      normalizedParent.delegationUids ?? [parentUid];
     const mandate = buildMandate(
       {
         ...child,
@@ -343,8 +381,10 @@ export async function createChildMandate(
         deniedTools: inheritedDeniedTools,
         approvalGates,
         parentMandateId: normalizedParent.id,
+        parentMandateUid: parentUid,
         delegatedBy: options.delegatedBy?.trim() || normalizedParent.id,
         delegationPath: [...parentDelegationPath, child.id],
+        delegationUids: [...parentDelegationUids, child.mandateUid],
         maxLeaseExpiresAt:
           normalizedParent.maxLeaseExpiresAt ?? normalizedParent.expiresAt
       },
@@ -355,6 +395,73 @@ export async function createChildMandate(
     await writeMandateStore(store, { path });
 
     return withRuntimeStatus(mandate, createdAt);
+  });
+}
+
+export async function updateMandateHandoff(
+  options: UpdateMandateHandoffOptions
+): Promise<MandateWithStatus> {
+  const id = normalizeMandateId(options.id);
+  if (!id) {
+    throw new Error("mandate id is required");
+  }
+  const repoPath = resolve(options.repoPath);
+  const now = options.now ?? (() => new Date());
+  const handedOffAt = now();
+  if (!Number.isFinite(handedOffAt.getTime())) {
+    throw new Error("mandate handoff time is invalid");
+  }
+  const path = options.path ?? resolveMandateStorePath();
+
+  return withMandateStoreLock(path, async () => {
+    const store = await readMandateStore({ path });
+    const mandateIndex = findLatestMandateIndex(store.mandates, id, repoPath);
+    if (mandateIndex === -1) {
+      throw new Error(`mandate "${id}" was not found for ${repoPath}`);
+    }
+
+    const mandate = store.mandates[mandateIndex];
+    if (!mandate) {
+      throw new Error(`mandate "${id}" was not found for ${repoPath}`);
+    }
+    const openDescendants = descendantMandates(store.mandates, mandate).filter(
+      (descendant) => descendant.handoffState === "open"
+    );
+    if (openDescendants.length > 0) {
+      throw new Error(
+        `cannot hand off mandate "${id}" while child mandates remain open: ${openDescendants
+          .map((descendant) => descendant.id)
+          .join(", ")}`
+      );
+    }
+
+    const handoffSummary = normalizeOptionalText(
+      options.summary,
+      "handoff summary"
+    );
+    const handoffNextSteps = normalizeOptionalList(
+      options.nextSteps ?? [],
+      "handoff next step"
+    );
+    const handoffArtifacts = normalizeOptionalList(
+      options.artifacts ?? [],
+      "handoff artifact"
+    );
+    const handoffBy = normalizeOptionalText(options.handoffBy, "handoff by");
+    const updatedMandate = {
+      ...mandate,
+      handoffState: options.state,
+      ...(handoffSummary ? { handoffSummary } : {}),
+      ...(handoffNextSteps.length > 0 ? { handoffNextSteps } : {}),
+      ...(handoffArtifacts.length > 0 ? { handoffArtifacts } : {}),
+      ...(handoffBy ? { handoffBy } : {}),
+      handoffAt: handedOffAt.toISOString()
+    };
+
+    store.mandates[mandateIndex] = updatedMandate;
+    await writeMandateStore(store, { path });
+
+    return withRuntimeStatus(updatedMandate, handedOffAt);
   });
 }
 
@@ -391,6 +498,12 @@ export async function resolveActiveMandate(
   }
   const mandate = mandates.find((item) => item.runtimeStatus === "active");
   if (!mandate) {
+    const closedMandate = mandates.find((item) => item.runtimeStatus === "closed");
+    if (closedMandate) {
+      throw new Error(
+        `mandate "${id}" is closed with handoff state "${closedMandate.handoffState}"`
+      );
+    }
     throw new Error(`mandate "${id}" is expired`);
   }
 
@@ -518,6 +631,74 @@ function withRuntimeStatus(mandate: Mandate, now: Date): MandateWithStatus {
   };
 }
 
+function createMandateUid(id: string, createdAt: Date): string {
+  return `${id}:${createdAt.toISOString()}`;
+}
+
+function mandateUidFor(
+  mandate: Pick<Mandate, "id" | "createdAt" | "mandateUid">
+): string {
+  return (
+    mandate.mandateUid ?? createMandateUid(mandate.id, new Date(mandate.createdAt))
+  );
+}
+
+function findLatestMandateIndex(
+  mandates: Mandate[],
+  id: string,
+  repoPath: string
+): number {
+  for (let index = mandates.length - 1; index >= 0; index -= 1) {
+    const mandate = mandates[index];
+    if (mandate?.id === id && mandate.repoPath === repoPath) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+function descendantMandates(mandates: Mandate[], parent: Mandate): Mandate[] {
+  const descendants: Mandate[] = [];
+  const parentIds = new Set([parent.id]);
+  const parentUid = parent.mandateUid;
+  const parentUids = new Set(parentUid ? [parentUid] : []);
+
+  for (const mandate of mandates) {
+    if (
+      mandate.repoPath !== parent.repoPath ||
+      (parentUid ? mandate.mandateUid === parentUid : mandate.id === parent.id)
+    ) {
+      continue;
+    }
+
+    if (parentUid) {
+      const delegationUids = mandate.delegationUids ?? [];
+      if (
+        mandate.parentMandateUid === parentUid ||
+        delegationUids.some((uid) => parentUids.has(uid))
+      ) {
+        descendants.push(mandate);
+        if (mandate.mandateUid) {
+          parentUids.add(mandate.mandateUid);
+        }
+      }
+      continue;
+    }
+
+    const delegationPath = mandate.delegationPath ?? [];
+    if (
+      mandate.parentMandateId === parent.id ||
+      delegationPath.some((id) => parentIds.has(id))
+    ) {
+      descendants.push(mandate);
+      parentIds.add(mandate.id);
+    }
+  }
+
+  return descendants;
+}
+
 function normalizeCreateMandateOptions(
   options: CreateMandateOptions | CreateChildMandateOptions,
   createdAt: Date
@@ -549,6 +730,7 @@ function normalizeCreateMandateOptions(
 
   return {
     id,
+    mandateUid: createMandateUid(id, createdAt),
     task: options.task.trim(),
     repoPath: resolve(options.repoPath),
     worktreePath: resolve(options.worktreePath),
@@ -588,12 +770,17 @@ function buildMandate(
   return {
     version: 1,
     id: options.id,
+    mandateUid: options.mandateUid,
     task: options.task,
     ...(options.parentMandateId
       ? { parentMandateId: options.parentMandateId }
       : {}),
+    ...(options.parentMandateUid
+      ? { parentMandateUid: options.parentMandateUid }
+      : {}),
     ...(options.delegatedBy ? { delegatedBy: options.delegatedBy } : {}),
     ...(options.delegationPath ? { delegationPath: options.delegationPath } : {}),
+    ...(options.delegationUids ? { delegationUids: options.delegationUids } : {}),
     ...(options.maxLeaseExpiresAt
       ? { maxLeaseExpiresAt: options.maxLeaseExpiresAt }
       : {}),
@@ -696,6 +883,35 @@ function uniqueTrimmed(values: string[]): string[] {
   }
 
   return result;
+}
+
+function normalizeOptionalText(
+  value: string | undefined,
+  label: string
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (hasControlCharacters(trimmed)) {
+    throw new Error(`${label} must not contain control characters`);
+  }
+
+  return trimmed;
+}
+
+function normalizeOptionalList(values: string[], label: string): string[] {
+  const normalized = uniqueTrimmed(values);
+  const invalid = normalized.find((value) => hasControlCharacters(value));
+  if (invalid) {
+    throw new Error(`${label} must not contain control characters`);
+  }
+
+  return normalized;
 }
 
 function normalizeApprovalGates(

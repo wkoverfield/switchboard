@@ -261,6 +261,10 @@ Switchboard the orchestrator:
   `switchboard.mandate-status.v1`
 - `switchboard mandate child --parent <id>` creates narrower child mandates
   from active parents
+- `switchboard mandate handoff <id>` closes mandate authority with a handoff
+  summary
+- `switchboard mandate report <id> --json` exposes versioned parent/child
+  handoff reports with related audit entries
 - `switchboard tools --mandate <id> --json` exposes the scoped tool surface for
   harness preflight and UI without launching an agent client
 - the tool surface payload is explicitly versioned as
@@ -274,9 +278,9 @@ Switchboard the orchestrator:
 
 Recommended follow-up:
 
-- add mandate handoff/reporting across parent and child chains
 - decide whether `logs --json` or `approvals --json` need versioning for the
-  first real harness handoff flow
+  first real approval escalation flow
+- add richer result aggregation across mandate trees
 - harden the approval elicitation and gated-tool metadata client matrix with
   real Codex/Claude smoke notes
 - no provider presets
@@ -292,12 +296,14 @@ Child mandates now persist:
 - `maxLeaseExpiresAt`
 - narrowed profile and tool scopes
 - inherited or stricter approval gates
+- handoff state, summary, next steps, artifacts, actor, and timestamp
 
 Child mandates must not exceed parent repo, worktree, branch, profile, tool,
 or lease scope. Approval gates are inherited and may be made stricter, but they
-do not grant access beyond the parent's allowed tool scope. Future work should
-improve approval escalation and reporting, not turn Switchboard into the agent
-orchestrator.
+do not grant access beyond the parent's allowed tool scope. Handoff reporting
+closes runtime authority and preserves the delegation chain for harnesses.
+Future work should improve approval escalation and result aggregation, not turn
+Switchboard into the agent orchestrator.
 
 ## Original First Mandate Slice
 

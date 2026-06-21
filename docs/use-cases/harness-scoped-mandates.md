@@ -63,6 +63,25 @@ The `--cwd` argument is part of the launch payload so the scoped MCP endpoint is
 repo-aware even when the harness process has a different working directory. Use
 the same repo cwd when polling status or reading logs.
 
+6. Close and report the mandate when work is handed back:
+
+```bash
+switchboard --cwd /path/to/repo mandate handoff fix-ci \
+  --state completed \
+  --summary "CI is green" \
+  --next-step "merge PR" \
+  --artifact "https://github.com/org/repo/pull/214" \
+  --by implementer-agent \
+  --json
+
+switchboard --cwd /path/to/repo mandate report fix-ci --json
+```
+
+`mandate handoff` closes runtime authority by moving the mandate out of `open`.
+`mandate report --json` is tagged with
+`schemaVersion: "switchboard.mandate-report.v1"` and includes the mandate tree,
+handoff counts, and recent related audit entries.
+
 ## Child Mandates
 
 A harness or lead agent can create a narrower child mandate from an active
@@ -90,6 +109,10 @@ and parent suffix wildcards like `github_findu_*` can authorize narrower child
 patterns. Broader pattern implication can come later, but V0 should fail closed
 rather than guess.
 
+Parent handoff is intentionally blocked while child mandates remain open. A
+harness should report child mandates first, then report the parent so the
+delegation chain records every worker outcome before the lead authority closes.
+
 ## Future Delegation Work
 
 Parent/child mandates currently persist:
@@ -102,7 +125,9 @@ Parent/child mandates currently persist:
 - narrowed `allowedTools`
 - inherited `deniedTools`
 - inherited or stricter approval gates
+- `handoffState`
+- handoff summary, next steps, artifacts, actor, and timestamp
 
-Future work should add richer approval escalation and handoff/reporting around
+Future work should add richer approval escalation and result aggregation around
 the delegation chain. Switchboard still does not orchestrate which agents run or
 how they communicate.

@@ -120,7 +120,8 @@ try {
         status: "ok",
         profileName: "github_findu",
         toolName: "github_findu_checks_list",
-        mandateId: "fix-ci"
+        mandateId: "fix-ci",
+        repoPath: project
       },
       {
         version: 1,
@@ -129,7 +130,8 @@ try {
         status: "ok",
         profileName: "github_findu",
         toolName: "github_findu_checks_rerun",
-        mandateId: "rerun-checks"
+        mandateId: "rerun-checks",
+        repoPath: project
       }
     ]
       .map((entry) => JSON.stringify(entry))
@@ -145,6 +147,71 @@ try {
   assert(
     childLogs.entries[0]?.mandateId === "rerun-checks",
     "expected child mandate log filter"
+  );
+
+  const blockedParentHandoff = runFailure(
+    "mandate",
+    "handoff",
+    "fix-ci",
+    "--state",
+    "completed",
+    "--summary",
+    "parent done",
+    "--json"
+  );
+  assert(
+    blockedParentHandoff.stderr.includes("child mandates remain open"),
+    "expected parent handoff to require closed children"
+  );
+
+  const childHandoff = run(
+    "mandate",
+    "handoff",
+    "rerun-checks",
+    "--state",
+    "completed",
+    "--summary",
+    "checks are green",
+    "--next-step",
+    "merge PR",
+    "--artifact",
+    "https://github.com/woverfield/switchboard/pull/214",
+    "--by",
+    "worker-agent",
+    "--json"
+  );
+  assert(
+    childHandoff.mandate?.runtimeStatus === "closed",
+    "expected closed child after handoff"
+  );
+
+  const parentHandoff = run(
+    "mandate",
+    "handoff",
+    "fix-ci",
+    "--state",
+    "completed",
+    "--summary",
+    "parent done",
+    "--json"
+  );
+  assert(
+    parentHandoff.mandate?.runtimeStatus === "closed",
+    "expected closed parent after child handoff"
+  );
+
+  const report = run("mandate", "report", "rerun-checks", "--json");
+  assert(
+    report.schemaVersion === "switchboard.mandate-report.v1",
+    "expected report schema version"
+  );
+  assert(report.rootMandateId === "fix-ci", "expected root mandate");
+  assert(report.selectedMandateId === "rerun-checks", "expected selected child");
+  assert(report.counts?.mandates === 2, "expected parent and child in report");
+  assert(report.counts?.closed === 2, "expected closed report chain");
+  assert(
+    report.auditEntries?.length === 2,
+    "expected related audit entries in report"
   );
 } finally {
   rmSync(project, { force: true, recursive: true });
@@ -166,6 +233,24 @@ function run(...args) {
   }
 
   return JSON.parse(result.stdout);
+}
+
+function runFailure(...args) {
+  const result = spawnSync(process.execPath, [cliPath, "--cwd", project, ...args], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      XDG_STATE_HOME: stateRoot
+    }
+  });
+
+  if (result.status === 0) {
+    throw new Error(
+      `switchboard ${args.join(" ")} unexpectedly passed\nstdout:\n${result.stdout}`
+    );
+  }
+
+  return result;
 }
 
 function assert(condition, message) {
