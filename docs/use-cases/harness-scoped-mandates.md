@@ -39,9 +39,10 @@ switchboard mandate create fix-ci \
 switchboard --cwd /path/to/repo tools --mandate fix-ci --json
 ```
 
-The JSON output includes namespaced tools and any trusted
-`_meta.switchboard.approvalRequired` gate metadata so the harness can display or
-preflight the scoped authority it is about to hand to the worker.
+The JSON output is tagged with
+`schemaVersion: "switchboard.tool-surface.v1"` and includes namespaced tools plus
+any trusted `_meta.switchboard.approvalRequired` gate metadata so the harness can
+display or preflight the scoped authority it is about to hand to the worker.
 
 4. Launch the worker agent with that command and args as its MCP server.
 

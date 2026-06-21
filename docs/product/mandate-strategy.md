@@ -259,6 +259,8 @@ Switchboard the orchestrator:
 - launch args carry `--cwd <repo> mcp --mandate <id>`
 - `switchboard tools --mandate <id> --json` exposes the scoped tool surface for
   harness preflight and UI without launching an agent client
+- the tool surface payload is explicitly versioned as
+  `switchboard.tool-surface.v1`
 - `docs/use-cases/harness-scoped-mandates.md` documents the "request scoped
   authority, launch agent, inspect logs" flow
 

@@ -62,6 +62,7 @@ import {
 
 const version = "0.1.0";
 const mandateMcpLaunchSchemaVersion = "switchboard.mcp-launch.v1";
+const toolSurfaceSchemaVersion = "switchboard.tool-surface.v1";
 
 interface MandateMcpLaunchPayload {
   schemaVersion: typeof mandateMcpLaunchSchemaVersion;
@@ -296,6 +297,7 @@ export function createProgram(io: ProgramIo = {}): Command {
             : {})
         });
         const result = {
+          schemaVersion: toolSurfaceSchemaVersion,
           ok: true,
           mandate: mandate
             ? { id: mandate.id, runtimeStatus: mandate.runtimeStatus }
