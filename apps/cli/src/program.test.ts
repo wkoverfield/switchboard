@@ -3826,6 +3826,129 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("prints approval request JSON validation errors to stdout", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "approvals", "--status", "weird", "--json"],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      ["--cwd", root, "approvals", "--include-children", "--json"],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "approvals",
+        "--include-children",
+        "--mandate",
+        "fix-ci",
+        "--all",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toEqual({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "invalid_status",
+      message: "--status must be pending, approved, denied, stale, or expired",
+      nextActions: [
+        "Pass --status as pending, approved, denied, stale, or expired."
+      ]
+    });
+    expect(JSON.parse(output[1] ?? "{}")).toEqual({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "missing_mandate",
+      message: "--include-children requires --mandate <id>",
+      nextActions: ["Pass --mandate <id> with --include-children."]
+    });
+    expect(JSON.parse(output[2] ?? "{}")).toEqual({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "invalid_scope",
+      message: "--include-children must be repo-scoped; remove --all",
+      nextActions: ["Remove --all when using --include-children."]
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("prints missing approval mandate JSON errors to stdout", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const program = createProgram({
+      mandateStorePath: join(root, "state", "mandates.json"),
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "approvals",
+        "--include-children",
+        "--mandate",
+        "fix-ci",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toEqual({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "mandate_not_found",
+      message: 'mandate "fix-ci" was not found',
+      nextActions: []
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("prints missing approval mandate human errors to stderr", async () => {
+    const root = makeTempProject();
+    const errors: string[] = [];
+    const program = createProgram({
+      mandateStorePath: join(root, "state", "mandates.json"),
+      writeErr: (message) => errors.push(message)
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "approvals", "--include-children", "--mandate", "fix-ci"],
+      { from: "user" }
+    );
+
+    expect(errors).toEqual(['error: mandate "fix-ci" was not found']);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("prints parser errors for approval request JSON commands to stdout", async () => {
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message)
+    });
+
+    await expect(
+      program.parseAsync(["approvals", "--json", "--status"], {
+        from: "user"
+      })
+    ).rejects.toThrow();
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "invalid_command",
+      message: "option '--status <status>' argument missing"
+    });
+  });
+
   it("prints local audit logs as JSON", async () => {
     const root = makeTempProject();
     const logPath = join(root, "switchboard.jsonl");
