@@ -15,6 +15,7 @@ preflight the available tool surface, and inspect state afterward.
 | Mandate escalation | `switchboard mandate escalate <id> --json` | `schemaVersion: "switchboard.mandate-escalation.v1"` | Stable enough for local escalation planning |
 | Approval requests | `switchboard approvals --mandate <id> --include-children --json` | `schemaVersion: "switchboard.approvals.v1"` | Stable enough for mandate-tree approval visibility |
 | Tool surface | `switchboard tools --mandate <id> --json` | `schemaVersion: "switchboard.tool-surface.v1"` | Stable enough for harness preflight |
+| Mandate command errors | `switchboard mandate <create\|child\|status\|handoff\|report\|escalate> ... --json` | `schemaVersion: "switchboard.error.v1"` | Stable enough for harness failure handling |
 
 These contracts are additive within a version: consumers should ignore unknown
 fields and should not depend on object key order. A future breaking change should
@@ -62,6 +63,15 @@ trusted `_meta.switchboard.approvalRequired` metadata for tools that require a
 Switchboard approval gate. Approval metadata does not grant access; allow/deny
 policy still controls discovery and execution.
 
+`switchboard.error.v1` gives harnesses a parseable failure payload for
+mandate-facing JSON commands. When one of the contracted mandate commands is
+run with `--json` and cannot complete, including parser failures such as a
+missing required option or unknown option, Switchboard writes this envelope to
+stdout and exits non-zero. Human mode remains unchanged: without `--json`, the
+same failure is printed as `error: ...` on stderr. Error payloads include
+`ok: false`, a stable `code`, a human-readable `message`, and `nextActions`
+when Switchboard can suggest a local recovery command.
+
 ## Not Yet Contracted
 
 The following JSON outputs are useful for humans and scripts, but are not yet
@@ -81,6 +91,8 @@ tool-surface payloads for harness integration today.
 - Check `schemaVersion` before relying on a versioned payload.
 - Ignore unknown fields.
 - Treat missing required fields as unsupported.
+- For contracted mandate commands, parse stdout as either the success payload or
+  `switchboard.error.v1` when the exit code is non-zero.
 - Use `--cwd <repo>` when polling or launching for a repo-scoped mandate.
 - Keep secrets out of repo config, mandate payloads, and MCP client config.
 - Do not assume approval-required metadata means execution will proceed without

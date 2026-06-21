@@ -197,6 +197,8 @@ Implemented in the current codebase:
 - mandate reports include aggregated handoff results, next steps, and artifacts
 - `switchboard mandate escalate <id> --json`
 - versioned `switchboard.mandate-escalation.v1` local escalation plans
+- versioned `switchboard.error.v1` JSON error envelopes for contracted mandate
+  `--json` command failures
 - versioned `switchboard.approvals.v1` approval request payloads
 - `switchboard approvals --mandate <id> --include-children --json`
 - approval request queues can be viewed across a parent/child mandate tree
@@ -1031,7 +1033,7 @@ Acceptance:
 - no remote service
 - no full agent orchestrator
 
-### Current Slice: Local Escalation Plan V0
+### Completed Slice: Local Escalation Plan V0
 
 Goal: give harnesses and humans a local, scriptable escalation plan for a
 mandate tree without building a broker or remote notification service.
@@ -1053,6 +1055,27 @@ Acceptance:
 - no approval decisions are made automatically
 - no remote service, notification channel, provider OAuth/secrets flow, or full
   orchestrator
+
+### Current Slice: JSON Error Envelope V0
+
+Goal: make contracted mandate `--json` command failures parseable for external
+harnesses while preserving normal human stderr behavior.
+
+Acceptance:
+
+- contracted mandate commands emit `schemaVersion: "switchboard.error.v1"` on
+  failure when `--json` is supplied
+- JSON error envelopes include `ok: false`, stable `code`, `message`, and
+  `nextActions`
+- JSON error envelopes are written to stdout and the process exits non-zero
+- parser failures such as missing required options, missing required arguments,
+  and unknown options are covered for contracted mandate commands
+- missing mandate ids use the semantic `mandate_not_found` code across
+  contracted mandate commands
+- non-JSON command failures remain human-readable on stderr
+- tests cover validation failures, missing mandate ids, and readiness-blocked
+  handoffs
+- docs explain success/error parsing for harness consumers
 
 ## Rules For Future Agents
 

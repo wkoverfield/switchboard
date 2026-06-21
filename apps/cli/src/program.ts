@@ -71,6 +71,22 @@ const mandateReportSchemaVersion = "switchboard.mandate-report.v1";
 const mandateEscalationSchemaVersion = "switchboard.mandate-escalation.v1";
 const approvalRequestsSchemaVersion = "switchboard.approvals.v1";
 const toolSurfaceSchemaVersion = "switchboard.tool-surface.v1";
+const errorSchemaVersion = "switchboard.error.v1";
+
+interface CommandErrorEnvelope {
+  ok: false;
+  schemaVersion: typeof errorSchemaVersion;
+  code: string;
+  message: string;
+  nextActions: string[];
+}
+
+interface CommandErrorOptions {
+  json: boolean | undefined;
+  code: string;
+  message: string;
+  nextActions?: string[];
+}
 
 interface MandateMcpLaunchPayload {
   schemaVersion: typeof mandateMcpLaunchSchemaVersion;
@@ -298,6 +314,41 @@ export function createProgram(io: ProgramIo = {}): Command {
   const serveDaemonMcp = io.serveDaemonMcp ?? serveDaemonBackedMcpStdio;
   const auditLogger = io.auditLogger ?? noopAuditLogger;
   const program = new Command();
+  let currentParseArgs: string[] = [];
+  const writeCommandError = (options: CommandErrorOptions): void => {
+    if (options.json) {
+      writeOut(JSON.stringify(commandErrorEnvelope(options), null, 2));
+    } else {
+      writeErr(`error: ${options.message}`);
+    }
+    process.exitCode = 1;
+  };
+  const originalParseAsync = program.parseAsync.bind(program);
+  program.parseAsync = async (...args: Parameters<Command["parseAsync"]>) => {
+    currentParseArgs = userArgsFromParseInput(args[0], args[1]);
+    return originalParseAsync(...args);
+  };
+  const validateLoadedConfigForJsonCommand = (
+    loaded: ReturnType<typeof loadSwitchboardConfig>,
+    json: boolean | undefined
+  ): boolean => {
+    if (!json) {
+      return validateLoadedConfigForCommand(loaded, writeErr);
+    }
+
+    const configError = loadedConfigCommandError(loaded);
+    if (!configError) {
+      return true;
+    }
+
+    writeCommandError({
+      json,
+      code: configError.code,
+      message: configError.message,
+      nextActions: configError.nextActions
+    });
+    return false;
+  };
   const decideApprovalRequestForCommand = async (
     id: string,
     status: "approved" | "denied",
@@ -1030,7 +1081,7 @@ export function createProgram(io: ProgramIo = {}): Command {
           ) => {
             const globalOptions = program.opts<{ cwd?: string }>();
             const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
-            if (!validateLoadedConfigForCommand(loaded, writeErr)) {
+            if (!validateLoadedConfigForJsonCommand(loaded, options.json)) {
               return;
             }
 
@@ -1039,10 +1090,12 @@ export function createProgram(io: ProgramIo = {}): Command {
               (profile) => !loaded.config.profiles[profile]
             );
             if (missingProfiles.length > 0) {
-              writeErr(
-                `error: mandate profiles were not found: ${missingProfiles.join(", ")}`
-              );
-              process.exitCode = 1;
+              writeCommandError({
+                json: options.json,
+                code: "mandate_profiles_not_found",
+                message: `mandate profiles were not found: ${missingProfiles.join(", ")}`,
+                nextActions: ["Run switchboard status to list configured profiles."]
+              });
               return;
             }
 
@@ -1051,16 +1104,23 @@ export function createProgram(io: ProgramIo = {}): Command {
             try {
               gitBinding = resolveGitWorktreeBinding(repoPath);
             } catch (error) {
-              writeErr(`error: ${messageFromError(error)}`);
-              process.exitCode = 1;
+              writeCommandError({
+                json: options.json,
+                code: "mandate_git_binding_failed",
+                message: messageFromError(error)
+              });
               return;
             }
             const branch = options.branch.trim();
             if (gitBinding && gitBinding.branch !== branch) {
-              writeErr(
-                `error: mandate branch "${branch}" does not match current git branch "${gitBinding.branch}" in ${gitBinding.worktreePath}`
-              );
-              process.exitCode = 1;
+              writeCommandError({
+                json: options.json,
+                code: "mandate_branch_mismatch",
+                message: `mandate branch "${branch}" does not match current git branch "${gitBinding.branch}" in ${gitBinding.worktreePath}`,
+                nextActions: [
+                  `Switch to branch "${branch}" or pass --branch "${gitBinding.branch}".`
+                ]
+              });
               return;
             }
             if (
@@ -1068,10 +1128,11 @@ export function createProgram(io: ProgramIo = {}): Command {
               options.requireApprovalReason.length !==
                 options.requireApprovalTool.length
             ) {
-              writeErr(
-                "error: --require-approval-reason must be provided once for each --require-approval-tool"
-              );
-              process.exitCode = 1;
+              writeCommandError({
+                json: options.json,
+                code: "invalid_approval_gate_options",
+                message: "--require-approval-reason must be provided once for each --require-approval-tool"
+              });
               return;
             }
             if (
@@ -1079,10 +1140,11 @@ export function createProgram(io: ProgramIo = {}): Command {
               options.requireApprovalRisk.length !==
                 options.requireApprovalTool.length
             ) {
-              writeErr(
-                "error: --require-approval-risk must be provided once for each --require-approval-tool"
-              );
-              process.exitCode = 1;
+              writeCommandError({
+                json: options.json,
+                code: "invalid_approval_gate_options",
+                message: "--require-approval-risk must be provided once for each --require-approval-tool"
+              });
               return;
             }
             const path = io.mandateStorePath ?? resolveMandateStorePath();
@@ -1130,8 +1192,15 @@ export function createProgram(io: ProgramIo = {}): Command {
                 writeOut(formatMandateCreated(path, mandate));
               }
             } catch (error) {
-              writeErr(`error: ${messageFromError(error)}`);
-              process.exitCode = 1;
+              const commandError = mandateCommandError(
+                error,
+                "mandate_create_failed"
+              );
+              writeCommandError({
+                json: options.json,
+                code: commandError.code,
+                message: commandError.message
+              });
             }
           }
         )
@@ -1207,7 +1276,7 @@ export function createProgram(io: ProgramIo = {}): Command {
           ) => {
             const globalOptions = program.opts<{ cwd?: string }>();
             const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
-            if (!validateLoadedConfigForCommand(loaded, writeErr)) {
+            if (!validateLoadedConfigForJsonCommand(loaded, options.json)) {
               return;
             }
 
@@ -1216,10 +1285,12 @@ export function createProgram(io: ProgramIo = {}): Command {
               (profile) => !loaded.config.profiles[profile]
             );
             if (missingProfiles.length > 0) {
-              writeErr(
-                `error: child mandate profiles were not found: ${missingProfiles.join(", ")}`
-              );
-              process.exitCode = 1;
+              writeCommandError({
+                json: options.json,
+                code: "child_mandate_profiles_not_found",
+                message: `child mandate profiles were not found: ${missingProfiles.join(", ")}`,
+                nextActions: ["Run switchboard status to list configured profiles."]
+              });
               return;
             }
 
@@ -1228,16 +1299,23 @@ export function createProgram(io: ProgramIo = {}): Command {
             try {
               gitBinding = resolveGitWorktreeBinding(repoPath);
             } catch (error) {
-              writeErr(`error: ${messageFromError(error)}`);
-              process.exitCode = 1;
+              writeCommandError({
+                json: options.json,
+                code: "child_mandate_git_binding_failed",
+                message: messageFromError(error)
+              });
               return;
             }
             const branch = options.branch.trim();
             if (gitBinding && gitBinding.branch !== branch) {
-              writeErr(
-                `error: child mandate branch "${branch}" does not match current git branch "${gitBinding.branch}" in ${gitBinding.worktreePath}`
-              );
-              process.exitCode = 1;
+              writeCommandError({
+                json: options.json,
+                code: "child_mandate_branch_mismatch",
+                message: `child mandate branch "${branch}" does not match current git branch "${gitBinding.branch}" in ${gitBinding.worktreePath}`,
+                nextActions: [
+                  `Switch to branch "${branch}" or pass --branch "${gitBinding.branch}".`
+                ]
+              });
               return;
             }
             if (
@@ -1245,10 +1323,11 @@ export function createProgram(io: ProgramIo = {}): Command {
               options.requireApprovalReason.length !==
                 options.requireApprovalTool.length
             ) {
-              writeErr(
-                "error: --require-approval-reason must be provided once for each --require-approval-tool"
-              );
-              process.exitCode = 1;
+              writeCommandError({
+                json: options.json,
+                code: "invalid_approval_gate_options",
+                message: "--require-approval-reason must be provided once for each --require-approval-tool"
+              });
               return;
             }
             if (
@@ -1256,10 +1335,11 @@ export function createProgram(io: ProgramIo = {}): Command {
               options.requireApprovalRisk.length !==
                 options.requireApprovalTool.length
             ) {
-              writeErr(
-                "error: --require-approval-risk must be provided once for each --require-approval-tool"
-              );
-              process.exitCode = 1;
+              writeCommandError({
+                json: options.json,
+                code: "invalid_approval_gate_options",
+                message: "--require-approval-risk must be provided once for each --require-approval-tool"
+              });
               return;
             }
             const path = io.mandateStorePath ?? resolveMandateStorePath();
@@ -1311,8 +1391,15 @@ export function createProgram(io: ProgramIo = {}): Command {
                 writeOut(formatMandateCreated(path, mandate));
               }
             } catch (error) {
-              writeErr(`error: ${messageFromError(error)}`);
-              process.exitCode = 1;
+              const commandError = mandateCommandError(
+                error,
+                "child_mandate_create_failed"
+              );
+              writeCommandError({
+                json: options.json,
+                code: commandError.code,
+                message: commandError.message
+              });
             }
           }
         )
@@ -1359,10 +1446,11 @@ export function createProgram(io: ProgramIo = {}): Command {
           ) => {
             const state = parseHandoffState(options.state);
             if (!state) {
-              writeErr(
-                "error: --state must be completed, blocked, or cancelled"
-              );
-              process.exitCode = 1;
+              writeCommandError({
+                json: options.json,
+                code: "invalid_handoff_state",
+                message: "--state must be completed, blocked, or cancelled"
+              });
               return;
             }
 
@@ -1383,10 +1471,12 @@ export function createProgram(io: ProgramIo = {}): Command {
                   repoPath
                 });
                 if (report.readiness.blockers.length > 0) {
-                  writeErr(
-                    `error: cannot hand off mandate "${normalizeMandateId(id)}" while readiness blockers remain: ${report.readiness.blockers.join("; ")}. Use --ignore-readiness to close anyway.`
-                  );
-                  process.exitCode = 1;
+                  writeCommandError({
+                    json: options.json,
+                    code: "mandate_readiness_blocked",
+                    message: `cannot hand off mandate "${normalizeMandateId(id)}" while readiness blockers remain: ${report.readiness.blockers.join("; ")}. Use --ignore-readiness to close anyway.`,
+                    nextActions: report.readiness.nextActions
+                  });
                   return;
                 }
               }
@@ -1407,8 +1497,15 @@ export function createProgram(io: ProgramIo = {}): Command {
                   : formatMandateHandoff(path, mandate)
               );
             } catch (error) {
-              writeErr(`error: ${messageFromError(error)}`);
-              process.exitCode = 1;
+              const commandError = mandateCommandError(
+                error,
+                "mandate_handoff_failed"
+              );
+              writeCommandError({
+                json: options.json,
+                code: commandError.code,
+                message: commandError.message
+              });
             }
           }
         )
@@ -1427,8 +1524,11 @@ export function createProgram(io: ProgramIo = {}): Command {
           ) => {
             const logLimit = parsePositiveInteger(options.logLimit);
             if (logLimit === undefined) {
-              writeErr("error: --log-limit must be a positive integer");
-              process.exitCode = 1;
+              writeCommandError({
+                json: options.json,
+                code: "invalid_log_limit",
+                message: "--log-limit must be a positive integer"
+              });
               return;
             }
 
@@ -1456,8 +1556,15 @@ export function createProgram(io: ProgramIo = {}): Command {
                   : formatMandateEscalation(escalation)
               );
             } catch (error) {
-              writeErr(`error: ${messageFromError(error)}`);
-              process.exitCode = 1;
+              const commandError = mandateCommandError(
+                error,
+                "mandate_escalate_failed"
+              );
+              writeCommandError({
+                json: options.json,
+                code: commandError.code,
+                message: commandError.message
+              });
             }
           }
         )
@@ -1476,8 +1583,11 @@ export function createProgram(io: ProgramIo = {}): Command {
           ) => {
             const logLimit = parsePositiveInteger(options.logLimit);
             if (logLimit === undefined) {
-              writeErr("error: --log-limit must be a positive integer");
-              process.exitCode = 1;
+              writeCommandError({
+                json: options.json,
+                code: "invalid_log_limit",
+                message: "--log-limit must be a positive integer"
+              });
               return;
             }
 
@@ -1504,8 +1614,15 @@ export function createProgram(io: ProgramIo = {}): Command {
                   : formatMandateReport(report)
               );
             } catch (error) {
-              writeErr(`error: ${messageFromError(error)}`);
-              process.exitCode = 1;
+              const commandError = mandateCommandError(
+                error,
+                "mandate_report_failed"
+              );
+              writeCommandError({
+                json: options.json,
+                code: commandError.code,
+                message: commandError.message
+              });
             }
           }
         )
@@ -1526,11 +1643,21 @@ export function createProgram(io: ProgramIo = {}): Command {
               ? undefined
               : installTargetCwd(globalOptions.cwd);
             const path = io.mandateStorePath ?? resolveMandateStorePath();
-            const mandates = await listMandates({
-              path,
-              ...(repoPath ? { repoPath } : {}),
-              ...(id ? { id } : {})
-            });
+            let mandates: MandateWithStatus[];
+            try {
+              mandates = await listMandates({
+                path,
+                ...(repoPath ? { repoPath } : {}),
+                ...(id ? { id } : {})
+              });
+            } catch (error) {
+              writeCommandError({
+                json: options.json,
+                code: "mandate_status_failed",
+                message: messageFromError(error)
+              });
+              return;
+            }
             const result = {
               schemaVersion: mandateStatusSchemaVersion,
               path,
@@ -1539,8 +1666,11 @@ export function createProgram(io: ProgramIo = {}): Command {
             };
 
             if (id && mandates.length === 0) {
-              writeErr(`error: mandate "${id}" was not found`);
-              process.exitCode = 1;
+              writeCommandError({
+                json: options.json,
+                code: "mandate_not_found",
+                message: `mandate "${id}" was not found`
+              });
               return;
             }
 
@@ -1804,6 +1934,12 @@ export function createProgram(io: ProgramIo = {}): Command {
       }
     );
 
+  configureParserErrorHandling(program, {
+    writeOut,
+    writeErr,
+    currentParseArgs: () => currentParseArgs,
+    writeCommandError
+  });
   return program;
 }
 
@@ -2999,6 +3135,154 @@ function optionsFromCwd(cwd: string | undefined): LoadConfigOptions &
 
 function messageFromError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function configureParserErrorHandling(
+  command: Command,
+  options: {
+    writeOut: (message: string) => void;
+    writeErr: (message: string) => void;
+    currentParseArgs: () => string[];
+    writeCommandError: (error: CommandErrorOptions) => void;
+  }
+): void {
+  command.exitOverride((error) => {
+    throw error;
+  });
+  command.configureOutput({
+    writeOut: (message) => options.writeOut(message.trimEnd()),
+    writeErr: (message) => options.writeErr(message.trimEnd()),
+    outputError: (message, write) => {
+      if (shouldWriteMandateParserErrorAsJson(options.currentParseArgs())) {
+        options.writeCommandError({
+          json: true,
+          code: parserErrorCode(message),
+          message: parserErrorMessage(message)
+        });
+        return;
+      }
+
+      write(message.trimEnd());
+    }
+  });
+
+  for (const child of command.commands) {
+    configureParserErrorHandling(child, options);
+  }
+}
+
+function userArgsFromParseInput(
+  argv: Parameters<Command["parseAsync"]>[0],
+  options: Parameters<Command["parseAsync"]>[1]
+): string[] {
+  const rawArgs = [...(argv ?? process.argv)];
+  if (options?.from === "user") {
+    return rawArgs;
+  }
+  if (options?.from === "electron") {
+    return rawArgs.slice(1);
+  }
+  return rawArgs.slice(2);
+}
+
+function shouldWriteMandateParserErrorAsJson(args: string[]): boolean {
+  if (!args.includes("--json")) {
+    return false;
+  }
+
+  const mandateIndex = args.indexOf("mandate");
+  if (mandateIndex < 0) {
+    return false;
+  }
+
+  const command = args[mandateIndex + 1];
+  return (
+    command !== undefined &&
+    ["create", "child", "status", "handoff", "report", "escalate"].includes(
+      command
+    )
+  );
+}
+
+function parserErrorMessage(message: string): string {
+  return message.replace(/^error:\s*/, "").trim();
+}
+
+function parserErrorCode(message: string): string {
+  const normalized = parserErrorMessage(message);
+  if (normalized.startsWith("required option")) {
+    return "missing_required_option";
+  }
+  if (normalized.startsWith("missing required argument")) {
+    return "missing_required_argument";
+  }
+  if (normalized.startsWith("unknown option")) {
+    return "unknown_option";
+  }
+
+  return "invalid_command";
+}
+
+function mandateCommandError(
+  error: unknown,
+  fallbackCode: string
+): { code: string; message: string } {
+  const message = messageFromError(error);
+  return {
+    code: isMandateNotFoundMessage(message) ? "mandate_not_found" : fallbackCode,
+    message
+  };
+}
+
+function isMandateNotFoundMessage(message: string): boolean {
+  return (
+    /^mandate "[^"]+" was not found(?:$|\sfor\s)/.test(message) ||
+    /^active parent mandate "[^"]+" was not found(?:$|\sfor\s)/.test(message)
+  );
+}
+
+function commandErrorEnvelope(
+  options: CommandErrorOptions
+): CommandErrorEnvelope {
+  return {
+    ok: false,
+    schemaVersion: errorSchemaVersion,
+    code: options.code,
+    message: options.message,
+    nextActions: options.nextActions ?? []
+  };
+}
+
+function loadedConfigCommandError(
+  loaded: ReturnType<typeof loadSwitchboardConfig>
+): { code: string; message: string; nextActions: string[] } | undefined {
+  if (loaded.namespaceCollisions.length > 0) {
+    return {
+      code: "namespace_collision",
+      message: loaded.namespaceCollisions
+        .map(
+          (collision) =>
+            `namespace "${collision.namespace}" is used by profiles: ${collision.profiles.join(", ")}`
+        )
+        .join("; "),
+      nextActions: ["Run switchboard doctor for config diagnostics."]
+    };
+  }
+
+  const blockingDiagnostics = loaded.diagnostics.filter(
+    (diagnostic) => diagnostic.level === "error"
+  );
+  if (blockingDiagnostics.length > 0) {
+    return {
+      code: "invalid_config",
+      message: blockingDiagnostics
+        .map((diagnostic) => diagnostic.message)
+        .join("; "),
+      nextActions: ["Run switchboard doctor for config diagnostics."]
+    };
+  }
+
+  return undefined;
 }
 
 function installTargetCwd(cwd: string | undefined): string {

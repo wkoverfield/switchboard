@@ -277,6 +277,8 @@ Switchboard the orchestrator:
   harness preflight and UI without launching an agent client
 - the tool surface payload is explicitly versioned as
   `switchboard.tool-surface.v1`
+- contracted mandate command failures under `--json` return a versioned
+  `switchboard.error.v1` envelope on stdout with a non-zero exit code
 - `docs/use-cases/harness-json-contracts.md` documents the current versioned
   JSON contracts and the unversioned surfaces that should stay provisional
 - `docs/use-cases/harness-scoped-mandates.md` documents the "request scoped
@@ -287,6 +289,8 @@ Switchboard the orchestrator:
 Recommended follow-up:
 
 - harden local escalation planning with real harness dogfood feedback
+- extend `switchboard.error.v1` to additional non-mandate JSON surfaces when
+  they become harness-facing contracts
 - harden the approval elicitation and gated-tool metadata client matrix with
   real Codex/Claude smoke notes
 - no provider presets

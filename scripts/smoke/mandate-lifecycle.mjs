@@ -159,9 +159,11 @@ try {
     "parent done",
     "--json"
   );
+  const blockedParentHandoffJson = JSON.parse(blockedParentHandoff.stdout);
   assert(
-    blockedParentHandoff.stderr.includes("readiness blockers remain") ||
-      blockedParentHandoff.stderr.includes("child mandates remain open"),
+    blockedParentHandoffJson.schemaVersion === "switchboard.error.v1" &&
+      blockedParentHandoffJson.code === "mandate_readiness_blocked" &&
+      blockedParentHandoffJson.message.includes("readiness blockers remain"),
     "expected parent handoff to require readiness blockers to be resolved"
   );
 
