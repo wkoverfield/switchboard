@@ -78,13 +78,18 @@ switchboard --cwd /path/to/repo mandate report fix-ci --json
 ```
 
 `mandate handoff` closes runtime authority by moving the mandate out of `open`.
+By default it refuses to close while local readiness blockers remain, such as
+open child mandates or pending approval requests; `--ignore-readiness` is the
+explicit override for softer local blockers like pending approvals. Core mandate
+rules still block closing a parent while child mandates remain open.
 `mandate report --json` is tagged with
 `schemaVersion: "switchboard.mandate-report.v1"` and includes the mandate tree,
 handoff counts, related approval requests, recent related audit entries, and a
 `readiness` object that names open child mandates or pending approval requests
 that should be handled before closing the selected mandate. It also includes
 `results` rollups for handoff summaries, next steps, and artifacts across the
-reported tree.
+reported tree. `mandate escalate --json` turns those blockers and blocked
+handoffs into a local escalation plan with suggested commands and copy text.
 
 ## Child Mandates
 

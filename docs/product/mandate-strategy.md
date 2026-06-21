@@ -268,6 +268,9 @@ Switchboard the orchestrator:
 - `switchboard mandate report <id> --json` exposes versioned parent/child
   handoff reports with readiness blockers, result rollups, related approval
   requests, and audit entries
+- `switchboard mandate escalate <id> --json` exposes a local escalation plan
+  with pending approvals, open child mandates, blocked/cancelled handoffs,
+  suggested commands, and copy text
 - `switchboard approvals --mandate <id> --include-children --json` exposes a
   versioned approval queue across a parent/child mandate tree
 - `switchboard tools --mandate <id> --json` exposes the scoped tool surface for
@@ -283,8 +286,7 @@ Switchboard the orchestrator:
 
 Recommended follow-up:
 
-- build modest approval escalation behavior on top of readiness and result
-  rollups
+- harden local escalation planning with real harness dogfood feedback
 - harden the approval elicitation and gated-tool metadata client matrix with
   real Codex/Claude smoke notes
 - no provider presets
