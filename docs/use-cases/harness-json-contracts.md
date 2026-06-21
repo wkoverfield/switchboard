@@ -75,10 +75,10 @@ keeps top-level `path`, `mandateId`, and `entries` for compatibility.
 
 `switchboard.error.v1` gives harnesses a parseable failure payload for
 contracted JSON commands. When a contracted mandate command, approval queue
-command, or audit-log command is run with `--json` and cannot complete,
-including parser failures such as a missing required option or unknown option,
-Switchboard writes this envelope to stdout and exits non-zero. Human mode
-remains unchanged: without `--json`, the same failure is printed as
+command, tool-surface command, or audit-log command is run with `--json` and
+cannot complete, including parser failures such as a missing required option or
+unknown option, Switchboard writes this envelope to stdout and exits non-zero.
+Human mode remains unchanged: without `--json`, the same failure is printed as
 `error: ...` on stderr. Error payloads include `ok: false`, a stable `code`, a
 human-readable `message`, and `nextActions` when Switchboard can suggest a
 local recovery command.
@@ -101,7 +101,7 @@ tool-surface, and audit-log payloads for harness integration today.
 - Check `schemaVersion` before relying on a versioned payload.
 - Ignore unknown fields.
 - Treat missing required fields as unsupported.
-- For contracted mandate commands, parse stdout as either the success payload or
+- For contracted JSON commands, parse stdout as either the success payload or
   `switchboard.error.v1` when the exit code is non-zero.
 - Use `--cwd <repo>` when polling or launching for a repo-scoped mandate.
 - Keep secrets out of repo config, mandate payloads, and MCP client config.

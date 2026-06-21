@@ -1179,6 +1179,207 @@ describe("switchboard CLI program", () => {
     ]);
   });
 
+  it("prints tool surface JSON errors to stdout", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  generic_http:",
+        "    provider: generic",
+        "    upstream:",
+        "      type: http",
+        "      url: http://localhost:3000/mcp"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(["--cwd", root, "tools", "--json"], {
+      from: "user"
+    });
+
+    expect(JSON.parse(output[0] ?? "{}")).toEqual({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "no_stdio_profiles",
+      message: "no stdio upstream profiles are configured",
+      nextActions: [
+        "Add at least one generic stdio profile to Switchboard config."
+      ]
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("prints tool surface config JSON errors to stdout", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  alpha-tools:",
+        "    provider: generic",
+        "    namespace: alpha_tools",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "  alpha_tools:",
+        "    provider: generic",
+        "    namespace: alpha_tools",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message)
+    });
+
+    await program.parseAsync(["--cwd", root, "tools", "--json"], {
+      from: "user"
+    });
+
+    expect(errors).toEqual([]);
+    expect(JSON.parse(output[0] ?? "{}")).toEqual({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "namespace_collision",
+      message:
+        'namespace "alpha_tools" is used by profiles: alpha-tools, alpha_tools',
+      nextActions: ["Run switchboard doctor for config diagnostics."]
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("prints tool surface human errors to stderr", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  generic_http:",
+        "    provider: generic",
+        "    upstream:",
+        "      type: http",
+        "      url: http://localhost:3000/mcp"
+      ].join("\n")
+    );
+
+    const errors: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message)
+    });
+
+    await program.parseAsync(["--cwd", root, "tools"], {
+      from: "user"
+    });
+
+    expect(errors).toEqual(["error: no stdio upstream profiles are configured"]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("prints missing mandate tool surface JSON errors to stdout", async () => {
+    const root = makeTempProject();
+    writeMandateFixtureConfig(root);
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath: join(root, "state", "mandates.json")
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "tools", "--mandate", "missing", "--json"],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toEqual({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "mandate_not_found",
+      message: `mandate "missing" was not found for ${root}`,
+      nextActions: []
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("prints tool surface list failures to stdout under JSON", async () => {
+    const root = makeTempProject();
+    writeMandateFixtureConfig(root);
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      listTools: async () => {
+        throw new Error("upstream unavailable");
+      }
+    });
+
+    await program.parseAsync(["--cwd", root, "tools", "--json"], {
+      from: "user"
+    });
+
+    expect(JSON.parse(output[0] ?? "{}")).toEqual({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "tool_surface_failed",
+      message: "upstream unavailable",
+      nextActions: []
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("prints parser errors for tool surface JSON commands to stdout", async () => {
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message)
+    });
+
+    await expect(
+      program.parseAsync(["tools", "--json", "--bogus"], {
+        from: "user"
+      })
+    ).rejects.toThrow();
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "unknown_option",
+      message: "unknown option '--bogus'"
+    });
+  });
+
+  it("prints missing-value parser errors for tool surface JSON commands to stdout", async () => {
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message)
+    });
+
+    await expect(
+      program.parseAsync(["tools", "--json", "--mandate"], {
+        from: "user"
+      })
+    ).rejects.toThrow();
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "invalid_command",
+      message: "option '--mandate <id>' argument missing"
+    });
+  });
+
   it("prints profile test JSON for a configured stdio upstream", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");

@@ -506,7 +506,7 @@ export function createProgram(io: ProgramIo = {}): Command {
       const globalOptions = program.opts<{ cwd?: string }>();
       const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
 
-      if (!validateLoadedConfigForCommand(loaded, writeErr)) {
+      if (!validateLoadedConfigForJsonCommand(loaded, options.json)) {
         return;
       }
       const mandate = options.mandate
@@ -514,7 +514,8 @@ export function createProgram(io: ProgramIo = {}): Command {
             id: options.mandate,
             cwd: globalOptions.cwd,
             mandateStorePath: io.mandateStorePath,
-            writeErr
+            writeErr,
+            ...(options.json ? { json: true, writeCommandError } : {})
           })
         : undefined;
       if (options.mandate && !mandate) {
@@ -529,8 +530,14 @@ export function createProgram(io: ProgramIo = {}): Command {
         configCwdBase(loaded, globalOptions.cwd)
       );
       if (profiles.length === 0) {
-        writeErr("error: no stdio upstream profiles are configured");
-        process.exitCode = 1;
+        writeCommandError({
+          json: options.json,
+          code: "no_stdio_profiles",
+          message: "no stdio upstream profiles are configured",
+          nextActions: [
+            "Add at least one generic stdio profile to Switchboard config."
+          ]
+        });
         return;
       }
 
@@ -573,8 +580,11 @@ export function createProgram(io: ProgramIo = {}): Command {
           writeOut(formatToolSurface(result));
         }
       } catch (error) {
-        writeErr(`error: ${messageFromError(error)}`);
-        process.exitCode = 1;
+        writeCommandError({
+          json: options.json,
+          code: "tool_surface_failed",
+          message: messageFromError(error)
+        });
       }
     });
 
@@ -3329,7 +3339,7 @@ function shouldWriteContractParserErrorAsJson(args: string[]): boolean {
   }
 
   const command = args[commandIndex];
-  if (command === "approvals" || command === "logs") {
+  if (command === "approvals" || command === "logs" || command === "tools") {
     return true;
   }
 
@@ -3459,6 +3469,8 @@ async function resolveActiveMandateForCommand(options: {
   cwd: string | undefined;
   mandateStorePath: string | undefined;
   writeErr: (message: string) => void;
+  json?: boolean;
+  writeCommandError?: (error: CommandErrorOptions) => void;
 }): Promise<MandateWithStatus | undefined> {
   const repoPath = installTargetCwd(options.cwd);
   try {
@@ -3476,6 +3488,19 @@ async function resolveActiveMandateForCommand(options: {
 
     return mandate;
   } catch (error) {
+    if (options.json && options.writeCommandError) {
+      const { code, message } = mandateCommandError(
+        error,
+        "active_mandate_failed"
+      );
+      options.writeCommandError({
+        json: true,
+        code,
+        message
+      });
+      return undefined;
+    }
+
     options.writeErr(`error: ${messageFromError(error)}`);
     return undefined;
   }
