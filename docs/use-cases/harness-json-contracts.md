@@ -15,6 +15,7 @@ preflight the available tool surface, and inspect state afterward.
 | Mandate escalation | `switchboard mandate escalate <id> --json` | `schemaVersion: "switchboard.mandate-escalation.v1"` | Stable enough for local escalation planning |
 | Approval requests | `switchboard approvals --mandate <id> --include-children --json` | `schemaVersion: "switchboard.approvals.v1"` | Stable enough for mandate-tree approval visibility |
 | Tool surface | `switchboard tools --mandate <id> --json` | `schemaVersion: "switchboard.tool-surface.v1"` | Stable enough for harness preflight |
+| Audit logs | `switchboard logs --mandate <id> --json` | `schemaVersion: "switchboard.audit-log.v1"` | Stable enough for post-run mandate audit inspection |
 | Mandate command errors | `switchboard mandate <create\|child\|status\|handoff\|report\|escalate> ... --json` | `schemaVersion: "switchboard.error.v1"` | Stable enough for harness failure handling |
 
 These contracts are additive within a version: consumers should ignore unknown
@@ -67,6 +68,11 @@ trusted `_meta.switchboard.approvalRequired` metadata for tools that require a
 Switchboard approval gate. Approval metadata does not grant access; allow/deny
 policy still controls discovery and execution.
 
+`switchboard.audit-log.v1` lets a harness inspect post-run audit entries. The
+payload includes the audit log path, mandate id filter, limit filter, matching
+and returned counts, and the returned audit entries. `switchboard logs --json`
+keeps top-level `path`, `mandateId`, and `entries` for compatibility.
+
 `switchboard.error.v1` gives harnesses a parseable failure payload for
 mandate-facing JSON commands. When one of the contracted mandate commands is
 run with `--json` and cannot complete, including parser failures such as a
@@ -74,7 +80,8 @@ missing required option or unknown option, Switchboard writes this envelope to
 stdout and exits non-zero. Human mode remains unchanged: without `--json`, the
 same failure is printed as `error: ...` on stderr. Error payloads include
 `ok: false`, a stable `code`, a human-readable `message`, and `nextActions`
-when Switchboard can suggest a local recovery command.
+when Switchboard can suggest a local recovery command. Versioned audit-log JSON
+argument failures also use this envelope.
 
 ## Not Yet Contracted
 
@@ -83,12 +90,11 @@ formal harness contracts:
 
 | Surface | Command | Current stance |
 | --- | --- | --- |
-| Audit logs | `switchboard logs --mandate <id> --json` | Useful locally; version before replay/handoff integrations rely on it |
 | Daemon diagnostics | `switchboard daemon <status\|start\|ping\|tools\|stop> --json` | Operational surfaces, not mandate authority contracts |
 
 Do not treat unversioned JSON as frozen. Prefer versioned mandate launch,
-mandate status, mandate report, mandate escalation, approval request, and
-tool-surface payloads for harness integration today.
+mandate status, mandate report, mandate escalation, approval request,
+tool-surface, and audit-log payloads for harness integration today.
 
 ## Compatibility Rules
 

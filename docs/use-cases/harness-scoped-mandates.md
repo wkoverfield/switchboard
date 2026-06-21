@@ -86,7 +86,9 @@ switchboard --cwd /path/to/repo logs --mandate fix-ci --json
 ```
 
 The mandate status JSON is tagged with
-`schemaVersion: "switchboard.mandate-status.v1"`.
+`schemaVersion: "switchboard.mandate-status.v1"`. The audit log JSON is tagged
+with `schemaVersion: "switchboard.audit-log.v1"` and includes the active
+filters plus matching/returned counts.
 
 The `--cwd` argument is part of the launch payload so the scoped MCP endpoint is
 repo-aware even when the harness process has a different working directory. Use

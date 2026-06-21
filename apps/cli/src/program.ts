@@ -72,6 +72,7 @@ const mandateReportSchemaVersion = "switchboard.mandate-report.v1";
 const mandateEscalationSchemaVersion = "switchboard.mandate-escalation.v1";
 const approvalRequestsSchemaVersion = "switchboard.approvals.v1";
 const toolSurfaceSchemaVersion = "switchboard.tool-surface.v1";
+const auditLogSchemaVersion = "switchboard.audit-log.v1";
 const errorSchemaVersion = "switchboard.error.v1";
 
 interface CommandErrorEnvelope {
@@ -264,6 +265,22 @@ interface ApprovalRequestsPayload {
   };
   mandates: MandateWithStatus[];
   requests: ApprovalRequestWithStatus[];
+}
+
+interface AuditLogPayload {
+  ok: true;
+  schemaVersion: typeof auditLogSchemaVersion;
+  path: string;
+  mandateId: string | null;
+  filters: {
+    mandateId: string | null;
+    limit: number;
+  };
+  counts: {
+    totalMatching: number;
+    returned: number;
+  };
+  entries: AuditLogEntry[];
 }
 
 export interface ProgramIo {
@@ -1806,24 +1823,54 @@ export function createProgram(io: ProgramIo = {}): Command {
     .action(async (options: { json?: boolean; limit: string; mandate?: string }) => {
       const limit = parsePositiveInteger(options.limit);
       if (limit === undefined) {
+        if (options.json) {
+          writeOut(
+            JSON.stringify(
+              commandErrorEnvelope({
+                json: true,
+                code: "invalid_limit",
+                message: "--limit must be a positive integer",
+                nextActions: ["Pass --limit with a positive integer value."]
+              }),
+              null,
+              2
+            )
+          );
+          process.exitCode = 1;
+          return;
+        }
+
         writeErr("error: --limit must be a positive integer");
         process.exitCode = 1;
         return;
       }
 
       const path = io.auditLogPath ?? resolveAuditLogPath();
-      const entries = await readAuditLogEntries({
+      const matchingEntries = await readAuditLogEntries({
         path,
-        limit,
         ...(options.mandate ? { mandateId: options.mandate } : {})
       });
+      const entries = matchingEntries.slice(
+        Math.max(matchingEntries.length - limit, 0)
+      );
       if (options.json) {
+        const payload: AuditLogPayload = {
+          ok: true,
+          schemaVersion: auditLogSchemaVersion,
+          path,
+          mandateId: options.mandate ?? null,
+          filters: {
+            mandateId: options.mandate ?? null,
+            limit
+          },
+          counts: {
+            totalMatching: matchingEntries.length,
+            returned: entries.length
+          },
+          entries
+        };
         writeOut(
-          JSON.stringify(
-            { path, mandateId: options.mandate ?? null, entries },
-            null,
-            2
-          )
+          JSON.stringify(payload, null, 2)
         );
         return;
       }
@@ -3216,7 +3263,7 @@ function configureParserErrorHandling(
     writeOut: (message) => options.writeOut(message.trimEnd()),
     writeErr: (message) => options.writeErr(message.trimEnd()),
     outputError: (message, write) => {
-      if (shouldWriteMandateParserErrorAsJson(options.currentParseArgs())) {
+      if (shouldWriteContractParserErrorAsJson(options.currentParseArgs())) {
         options.writeCommandError({
           json: true,
           code: parserErrorCode(message),
@@ -3248,23 +3295,52 @@ function userArgsFromParseInput(
   return rawArgs.slice(2);
 }
 
-function shouldWriteMandateParserErrorAsJson(args: string[]): boolean {
+function shouldWriteContractParserErrorAsJson(args: string[]): boolean {
   if (!args.includes("--json")) {
     return false;
   }
 
-  const mandateIndex = args.indexOf("mandate");
-  if (mandateIndex < 0) {
+  const commandIndex = topLevelCommandIndex(args);
+  if (commandIndex === undefined) {
     return false;
   }
 
-  const command = args[mandateIndex + 1];
+  const command = args[commandIndex];
+  if (command === "logs") {
+    return true;
+  }
+
+  if (command !== "mandate") {
+    return false;
+  }
+
+  const mandateCommand = args[commandIndex + 1];
   return (
-    command !== undefined &&
+    mandateCommand !== undefined &&
     ["create", "child", "status", "handoff", "report", "escalate"].includes(
-      command
+      mandateCommand
     )
   );
+}
+
+function topLevelCommandIndex(args: string[]): number | undefined {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--cwd") {
+      index += 1;
+      continue;
+    }
+    if (arg?.startsWith("--cwd=")) {
+      continue;
+    }
+    if (arg?.startsWith("-")) {
+      continue;
+    }
+
+    return index;
+  }
+
+  return undefined;
 }
 
 function parserErrorMessage(message: string): string {
