@@ -1,7 +1,8 @@
 import { Command } from "commander";
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   type AuditLogEntry,
   type AuditLogger,
@@ -95,6 +96,15 @@ interface MandateMcpLaunchPayload {
   cwd: string;
   command: "switchboard";
   args: string[];
+  commandCandidates: MandateMcpLaunchCommandCandidate[];
+  installHint: string;
+}
+
+interface MandateMcpLaunchCommandCandidate {
+  kind: "path" | "current-entrypoint" | "source-entrypoint";
+  command: string;
+  args: string[];
+  description: string;
 }
 
 interface MandateReportPayload {
@@ -2175,13 +2185,66 @@ function formatMandateCreated(path: string, mandate: MandateWithStatus): string 
 function createMandateMcpLaunchPayload(
   mandate: MandateWithStatus
 ): MandateMcpLaunchPayload {
+  const args = ["--cwd", mandate.repoPath, "mcp", "--mandate", mandate.id];
   return {
     schemaVersion: mandateMcpLaunchSchemaVersion,
     transport: "stdio",
     mandateId: mandate.id,
     cwd: mandate.repoPath,
     command: "switchboard",
-    args: ["--cwd", mandate.repoPath, "mcp", "--mandate", mandate.id]
+    args,
+    commandCandidates: createMandateMcpLaunchCommandCandidates(args),
+    installHint:
+      "Use command/args when the switchboard binary is on PATH. If it is not, use a commandCandidates entry such as current-entrypoint."
+  };
+}
+
+function createMandateMcpLaunchCommandCandidates(
+  args: string[]
+): MandateMcpLaunchCommandCandidate[] {
+  return [
+    {
+      kind: "path",
+      command: "switchboard",
+      args,
+      description:
+        "Use when the switchboard binary is installed and available on PATH."
+    },
+    currentCliEntrypointCandidate(args)
+  ];
+}
+
+function currentCliEntrypointCandidate(
+  args: string[]
+): MandateMcpLaunchCommandCandidate {
+  const modulePath = fileURLToPath(import.meta.url);
+  const moduleDir = dirname(modulePath);
+  if (moduleDir.endsWith(`${sep}src`)) {
+    const packageDir = dirname(moduleDir);
+    return {
+      kind: "source-entrypoint",
+      command: "pnpm",
+      args: [
+        "--dir",
+        packageDir,
+        "exec",
+        "tsx",
+        "--conditions",
+        "source",
+        "src/index.ts",
+        ...args
+      ],
+      description:
+        "Use when launching from a Switchboard source checkout before build; requires pnpm install."
+    };
+  }
+
+  return {
+    kind: "current-entrypoint",
+    command: process.execPath,
+    args: [resolve(moduleDir, "index.js"), ...args],
+    description:
+      "Use when launching from the current built Switchboard package and switchboard is not on PATH."
   };
 }
 

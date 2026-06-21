@@ -25,6 +25,8 @@ Harnesses can use the `mcpLaunch` payload from `switchboard mandate create
 inspect mandate state with `switchboard mandate status <id> --json`, inspect
 the scoped tool surface with `switchboard tools --mandate <id> --json`, then
 close work with `switchboard mandate handoff <id> --state completed --json`.
+If `switchboard` is not on `PATH`, use a `mcpLaunch.commandCandidates` entry
+such as `current-entrypoint` and keep the same repo/mandate args.
 Handoff refuses local readiness blockers by default. Core mandate rules still
 block closing a parent with open child mandates; `--ignore-readiness` only skips
 softer local blockers such as pending approvals when the harness or human

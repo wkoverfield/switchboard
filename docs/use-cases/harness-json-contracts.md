@@ -24,9 +24,13 @@ use a new `schemaVersion`.
 ## Current Payload Roles
 
 `switchboard.mcp-launch.v1` tells a harness how to start a scoped stdio MCP
-server. The payload includes the mandate id, repo cwd, command, and args. The
-args include `--cwd <repo> mcp --mandate <id>` so the launched MCP endpoint
-stays repo-aware even when the harness runs elsewhere.
+server. The payload includes the mandate id, repo cwd, command, args,
+`commandCandidates`, and an `installHint`. The args include
+`--cwd <repo> mcp --mandate <id>` so the launched MCP endpoint stays
+repo-aware even when the harness runs elsewhere. Harnesses can keep using
+top-level `command` and `args` when `switchboard` is installed on `PATH`, or
+choose a `commandCandidates` entry such as `current-entrypoint` for a built
+package or `source-entrypoint` for a source checkout.
 
 `switchboard.mandate-status.v1` lets a harness poll mandate state. The payload
 includes the mandate store path, optional repo filter, and matching mandates

@@ -1801,7 +1801,35 @@ describe("switchboard CLI program", () => {
         mandateId: "fix-ci",
         cwd: root,
         command: "switchboard",
-        args: ["--cwd", root, "mcp", "--mandate", "fix-ci"]
+        args: ["--cwd", root, "mcp", "--mandate", "fix-ci"],
+        commandCandidates: [
+          {
+            kind: "path",
+            command: "switchboard",
+            args: ["--cwd", root, "mcp", "--mandate", "fix-ci"],
+            description: expect.any(String)
+          },
+          {
+            kind: "source-entrypoint",
+            command: "pnpm",
+            args: [
+              "--dir",
+              expect.stringMatching(/apps[/\\]cli$/),
+              "exec",
+              "tsx",
+              "--conditions",
+              "source",
+              "src/index.ts",
+              "--cwd",
+              root,
+              "mcp",
+              "--mandate",
+              "fix-ci"
+            ],
+            description: expect.any(String)
+          }
+        ],
+        installHint: expect.stringContaining("switchboard binary is on PATH")
       }
     });
 
@@ -1930,7 +1958,32 @@ describe("switchboard CLI program", () => {
         schemaVersion: "switchboard.mcp-launch.v1",
         mandateId: "rerun-checks",
         cwd: root,
-        args: ["--cwd", root, "mcp", "--mandate", "rerun-checks"]
+        args: ["--cwd", root, "mcp", "--mandate", "rerun-checks"],
+        commandCandidates: [
+          expect.objectContaining({
+            kind: "path",
+            command: "switchboard",
+            args: ["--cwd", root, "mcp", "--mandate", "rerun-checks"]
+          }),
+          expect.objectContaining({
+            kind: "source-entrypoint",
+            command: "pnpm",
+            args: [
+              "--dir",
+              expect.stringMatching(/apps[/\\]cli$/),
+              "exec",
+              "tsx",
+              "--conditions",
+              "source",
+              "src/index.ts",
+              "--cwd",
+              root,
+              "mcp",
+              "--mandate",
+              "rerun-checks"
+            ]
+          })
+        ]
       }
     });
   });

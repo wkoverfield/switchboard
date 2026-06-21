@@ -179,6 +179,8 @@ Implemented in the current codebase:
 - daemon-start invalidation for leftover pending approval requests
 - approval gate reason metadata in mandates and approval requests
 - `switchboard mandate create --json` MCP launch payloads for harnesses
+- MCP launch payloads include additive command candidates for PATH and current
+  Node entrypoint launch modes
 - `switchboard mandate child --parent <id>`
 - child mandate parent/delegation metadata
 - child mandate subset validation for profiles, allowed tools, lease, and
@@ -1056,7 +1058,7 @@ Acceptance:
 - no remote service, notification channel, provider OAuth/secrets flow, or full
   orchestrator
 
-### Current Slice: JSON Error Envelope V0
+### Completed Slice: JSON Error Envelope V0
 
 Goal: make contracted mandate `--json` command failures parseable for external
 harnesses while preserving normal human stderr behavior.
@@ -1076,6 +1078,25 @@ Acceptance:
 - tests cover validation failures, missing mandate ids, and readiness-blocked
   handoffs
 - docs explain success/error parsing for harness consumers
+
+### Current Slice: MCP Launch Command Candidates V0
+
+Goal: make harness startup payloads usable both for installed Switchboard CLIs
+and source-checkout dogfooding where `switchboard` is not on `PATH`.
+
+Acceptance:
+
+- `switchboard mandate create --json` and `switchboard mandate child --json`
+  keep existing `mcpLaunch.command` and `mcpLaunch.args` for compatibility
+- `mcpLaunch` adds `commandCandidates` with a `path` candidate for
+  `switchboard`, plus either a built `current-entrypoint` candidate or source
+  checkout `source-entrypoint` candidate depending on how the CLI is running
+- `mcpLaunch` includes an install/use hint explaining when to use candidates
+- docs explain that harnesses can choose a candidate when `switchboard` is not
+  on `PATH`
+- the smoke suite verifies the emitted built entrypoint candidate can launch
+  the MCP command help
+- no changes to MCP routing, mandate enforcement, or provider integrations
 
 ## Rules For Future Agents
 

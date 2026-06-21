@@ -32,9 +32,38 @@ switchboard mandate create fix-ci \
   "mandateId": "fix-ci",
   "cwd": "/path/to/repo",
   "command": "switchboard",
-  "args": ["--cwd", "/path/to/repo", "mcp", "--mandate", "fix-ci"]
+  "args": ["--cwd", "/path/to/repo", "mcp", "--mandate", "fix-ci"],
+  "commandCandidates": [
+    {
+      "kind": "path",
+      "command": "switchboard",
+      "args": ["--cwd", "/path/to/repo", "mcp", "--mandate", "fix-ci"],
+      "description": "Use when the switchboard binary is installed and available on PATH."
+    },
+    {
+      "kind": "current-entrypoint",
+      "command": "/path/to/node",
+      "args": [
+        "/path/to/switchboard/apps/cli/dist/index.js",
+        "--cwd",
+        "/path/to/repo",
+        "mcp",
+        "--mandate",
+        "fix-ci"
+      ],
+      "description": "Use when launching from the current built Switchboard package and switchboard is not on PATH."
+    }
+  ],
+  "installHint": "Use command/args when the switchboard binary is on PATH..."
 }
 ```
+
+Use the top-level `command` and `args` for normal installed CLI usage. If the
+binary is not on `PATH`, pick a matching `commandCandidates` entry and keep the
+same repo/mandate args. Source checkouts can emit a `source-entrypoint`
+candidate that runs `pnpm --dir <switchboard-cli> exec tsx ...`; built packages
+emit a `current-entrypoint` candidate that runs Node against the built CLI
+entrypoint.
 
 3. Optionally inspect the scoped tool surface before launch:
 
