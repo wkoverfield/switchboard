@@ -10,6 +10,7 @@ Current commands:
 switchboard status
 switchboard doctor
 switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --json
+switchboard mandate child <task> --parent <id> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --json
 switchboard mandate status
 switchboard tools --mandate <id> --json
 switchboard approvals

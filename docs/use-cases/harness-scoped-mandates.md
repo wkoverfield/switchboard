@@ -63,9 +63,36 @@ The `--cwd` argument is part of the launch payload so the scoped MCP endpoint is
 repo-aware even when the harness process has a different working directory. Use
 the same repo cwd when polling status or reading logs.
 
-## Future Delegation Sketch
+## Child Mandates
 
-Parent/child mandates should eventually add fields like:
+A harness or lead agent can create a narrower child mandate from an active
+parent:
+
+```bash
+switchboard --cwd /path/to/repo mandate child rerun-checks \
+  --parent fix-ci \
+  --agent worker \
+  --profiles github_findu \
+  --branch fix/ci \
+  --lease 30m \
+  --allow-tool 'github_findu_checks_*' \
+  --json
+```
+
+Child mandates inherit parent denied tools and approval gates. The child cannot
+exceed the parent's repo, worktree, branch, profiles, allowed tool scope, or
+lease. The JSON response includes the same `mcpLaunch` payload shape as
+`mandate create --json`, so a harness can launch the worker through the child
+mandate immediately.
+
+V0 allowed-tool narrowing is intentionally conservative: exact matches, `*`,
+and parent suffix wildcards like `github_findu_*` can authorize narrower child
+patterns. Broader pattern implication can come later, but V0 should fail closed
+rather than guess.
+
+## Future Delegation Work
+
+Parent/child mandates currently persist:
 
 - `parentMandateId`
 - `delegatedBy`
@@ -76,6 +103,6 @@ Parent/child mandates should eventually add fields like:
 - inherited `deniedTools`
 - inherited or stricter approval gates
 
-Child mandates must not exceed parent repo, worktree, branch, profile, tool,
-lease, or approval scope. This document is only a schema sketch; the current
-runtime does not create or enforce child mandates yet.
+Future work should add richer approval escalation and handoff/reporting around
+the delegation chain. Switchboard still does not orchestrate which agents run or
+how they communicate.

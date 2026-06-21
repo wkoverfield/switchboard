@@ -42,6 +42,25 @@ export type MandateToolPolicyDecision =
 const mandateStoreLockTimeoutMs = 5_000;
 const mandateStoreStaleLockMs = 30_000;
 
+interface NormalizedCreateMandateOptions {
+  id: string;
+  task: string;
+  repoPath: string;
+  worktreePath: string;
+  branch: string;
+  agentRole: string;
+  profiles: string[];
+  lease: string;
+  leaseMs: number;
+  allowedTools: string[];
+  deniedTools: string[];
+  approvalGates: MandateApprovalGate[];
+  parentMandateId?: string | undefined;
+  delegatedBy?: string | undefined;
+  delegationPath?: string[] | undefined;
+  maxLeaseExpiresAt?: string | undefined;
+}
+
 export const mandateApprovalGateSchema = z.object({
   id: z.string().min(1),
   toolPattern: z.string().min(1),
@@ -54,6 +73,10 @@ export const mandateSchema = z.object({
   version: z.literal(1),
   id: z.string().min(1),
   task: z.string().min(1),
+  parentMandateId: z.string().min(1).optional(),
+  delegatedBy: z.string().min(1).optional(),
+  delegationPath: z.array(z.string().min(1)).optional(),
+  maxLeaseExpiresAt: z.string().min(1).optional(),
   repoPath: z.string().min(1),
   worktreePath: z.string().min(1),
   branch: z.string().min(1),
@@ -90,6 +113,23 @@ export interface CreateMandateOptions {
   agentRole: string;
   profiles: string[];
   lease: string;
+  allowedTools?: string[];
+  deniedTools?: string[];
+  approvalRequiredTools?: Array<string | CreateMandateApprovalGate>;
+  path?: string;
+  now?: () => Date;
+}
+
+export interface CreateChildMandateOptions {
+  parentId: string;
+  task: string;
+  repoPath: string;
+  worktreePath: string;
+  branch: string;
+  agentRole: string;
+  profiles: string[];
+  lease: string;
+  delegatedBy?: string | undefined;
   allowedTools?: string[];
   deniedTools?: string[];
   approvalRequiredTools?: Array<string | CreateMandateApprovalGate>;
@@ -229,67 +269,87 @@ export async function createMandate(
 ): Promise<MandateWithStatus> {
   const now = options.now ?? (() => new Date());
   const createdAt = now();
-  const id = normalizeMandateId(options.task);
-  if (!id) {
-    throw new Error("mandate task must produce a non-empty id");
-  }
-
-  const agentRole = options.agentRole.trim();
-  if (!agentRole) {
-    throw new Error("mandate agent role is required");
-  }
-
-  const branch = options.branch.trim();
-  if (!branch) {
-    throw new Error("mandate branch is required");
-  }
-
-  const profiles = uniqueTrimmed(options.profiles);
-  if (profiles.length === 0) {
-    throw new Error("mandate requires at least one profile");
-  }
-  const allowedTools = uniqueTrimmed(options.allowedTools ?? []);
-  const deniedTools = uniqueTrimmed(options.deniedTools ?? []);
-  const approvalGates = normalizeApprovalGates(
-    options.approvalRequiredTools ?? []
-  );
-
-  const leaseMs = parseMandateLease(options.lease);
-  const repoPath = resolve(options.repoPath);
-  const worktreePath = resolve(options.worktreePath);
+  const normalized = normalizeCreateMandateOptions(options, createdAt);
   const path = options.path ?? resolveMandateStorePath();
 
   return withMandateStoreLock(path, async () => {
     const store = await readMandateStore({ path });
-    const activeDuplicate = store.mandates.find(
+    assertNoActiveDuplicate(store, normalized, createdAt);
+    const mandate = buildMandate(normalized, createdAt);
+
+    store.mandates.push(mandate);
+    await writeMandateStore(store, { path });
+
+    return withRuntimeStatus(mandate, createdAt);
+  });
+}
+
+export async function createChildMandate(
+  options: CreateChildMandateOptions
+): Promise<MandateWithStatus> {
+  const now = options.now ?? (() => new Date());
+  const createdAt = now();
+  const child = normalizeCreateMandateOptions(options, createdAt);
+  const parentId = normalizeMandateId(options.parentId);
+  if (!parentId) {
+    throw new Error("parent mandate id is required");
+  }
+  const path = options.path ?? resolveMandateStorePath();
+
+  return withMandateStoreLock(path, async () => {
+    const store = await readMandateStore({ path });
+    const parent = store.mandates.find(
       (mandate) =>
-        mandate.id === id &&
-        mandate.repoPath === repoPath &&
+        mandate.id === parentId &&
+        mandate.repoPath === child.repoPath &&
         mandateRuntimeStatus(mandate, createdAt) === "active"
     );
-    if (activeDuplicate) {
+    if (!parent) {
       throw new Error(
-        `active mandate "${id}" already exists for ${repoPath}; choose a different task name or wait for it to expire`
+        `active parent mandate "${parentId}" was not found for ${child.repoPath}`
       );
     }
 
-    const mandate: Mandate = {
-      version: 1,
-      id,
-      task: options.task.trim(),
-      repoPath,
-      worktreePath,
-      branch,
-      agentRole,
-      profiles,
-      lease: options.lease.trim(),
-      createdAt: createdAt.toISOString(),
-      expiresAt: new Date(createdAt.getTime() + leaseMs).toISOString(),
-      allowedTools,
-      deniedTools,
-      approvalGates,
-      handoffState: "open"
-    };
+    const normalizedParent = withRuntimeStatus(parent, createdAt);
+    validateChildMandateScope(child, normalizedParent, createdAt);
+    assertNoActiveDuplicate(store, child, createdAt);
+
+    const inheritedDeniedTools = uniqueTrimmed([
+      ...normalizedParent.deniedTools,
+      ...(options.deniedTools ?? [])
+    ]);
+    const childApprovalGates = normalizeApprovalGates(
+      options.approvalRequiredTools ?? [],
+      normalizedParent.approvalGates.length
+    );
+    const inheritedApprovalPatterns = new Set(
+      normalizedParent.approvalGates.map((gate) => gate.toolPattern)
+    );
+    const approvalGates = [
+      ...normalizedParent.approvalGates,
+      ...childApprovalGates.filter(
+        (gate) => !inheritedApprovalPatterns.has(gate.toolPattern)
+      )
+    ];
+    const parentDelegationPath =
+      normalizedParent.delegationPath ?? [normalizedParent.id];
+    const mandate = buildMandate(
+      {
+        ...child,
+        allowedTools:
+          child.allowedTools.length > 0
+            ? child.allowedTools
+            : normalizedParent.allowedTools,
+        deniedTools: inheritedDeniedTools,
+        approvalGates,
+        parentMandateId: normalizedParent.id,
+        delegatedBy: options.delegatedBy?.trim() || normalizedParent.id,
+        delegationPath: [...parentDelegationPath, child.id],
+        maxLeaseExpiresAt:
+          normalizedParent.maxLeaseExpiresAt ?? normalizedParent.expiresAt
+      },
+      createdAt
+    );
 
     store.mandates.push(mandate);
     await writeMandateStore(store, { path });
@@ -458,6 +518,170 @@ function withRuntimeStatus(mandate: Mandate, now: Date): MandateWithStatus {
   };
 }
 
+function normalizeCreateMandateOptions(
+  options: CreateMandateOptions | CreateChildMandateOptions,
+  createdAt: Date
+): NormalizedCreateMandateOptions {
+  const id = normalizeMandateId(options.task);
+  if (!id) {
+    throw new Error("mandate task must produce a non-empty id");
+  }
+
+  const agentRole = options.agentRole.trim();
+  if (!agentRole) {
+    throw new Error("mandate agent role is required");
+  }
+
+  const branch = options.branch.trim();
+  if (!branch) {
+    throw new Error("mandate branch is required");
+  }
+
+  const profiles = uniqueTrimmed(options.profiles);
+  if (profiles.length === 0) {
+    throw new Error("mandate requires at least one profile");
+  }
+
+  const leaseMs = parseMandateLease(options.lease);
+  if (!Number.isFinite(createdAt.getTime())) {
+    throw new Error("mandate creation time is invalid");
+  }
+
+  return {
+    id,
+    task: options.task.trim(),
+    repoPath: resolve(options.repoPath),
+    worktreePath: resolve(options.worktreePath),
+    branch,
+    agentRole,
+    profiles,
+    lease: options.lease.trim(),
+    leaseMs,
+    allowedTools: uniqueTrimmed(options.allowedTools ?? []),
+    deniedTools: uniqueTrimmed(options.deniedTools ?? []),
+    approvalGates: normalizeApprovalGates(options.approvalRequiredTools ?? [])
+  };
+}
+
+function assertNoActiveDuplicate(
+  store: MandateStore,
+  mandate: Pick<NormalizedCreateMandateOptions, "id" | "repoPath">,
+  now: Date
+): void {
+  const activeDuplicate = store.mandates.find(
+    (existing) =>
+      existing.id === mandate.id &&
+      existing.repoPath === mandate.repoPath &&
+      mandateRuntimeStatus(existing, now) === "active"
+  );
+  if (activeDuplicate) {
+    throw new Error(
+      `active mandate "${mandate.id}" already exists for ${mandate.repoPath}; choose a different task name or wait for it to expire`
+    );
+  }
+}
+
+function buildMandate(
+  options: NormalizedCreateMandateOptions,
+  createdAt: Date
+): Mandate {
+  return {
+    version: 1,
+    id: options.id,
+    task: options.task,
+    ...(options.parentMandateId
+      ? { parentMandateId: options.parentMandateId }
+      : {}),
+    ...(options.delegatedBy ? { delegatedBy: options.delegatedBy } : {}),
+    ...(options.delegationPath ? { delegationPath: options.delegationPath } : {}),
+    ...(options.maxLeaseExpiresAt
+      ? { maxLeaseExpiresAt: options.maxLeaseExpiresAt }
+      : {}),
+    repoPath: options.repoPath,
+    worktreePath: options.worktreePath,
+    branch: options.branch,
+    agentRole: options.agentRole,
+    profiles: options.profiles,
+    lease: options.lease,
+    createdAt: createdAt.toISOString(),
+    expiresAt: new Date(createdAt.getTime() + options.leaseMs).toISOString(),
+    allowedTools: options.allowedTools,
+    deniedTools: options.deniedTools,
+    approvalGates: options.approvalGates,
+    handoffState: "open"
+  };
+}
+
+function validateChildMandateScope(
+  child: NormalizedCreateMandateOptions,
+  parent: MandateWithStatus,
+  createdAt: Date
+): void {
+  if (child.repoPath !== parent.repoPath) {
+    throw new Error("child mandate repo must match parent mandate repo");
+  }
+  if (child.worktreePath !== parent.worktreePath) {
+    throw new Error("child mandate worktree must match parent mandate worktree");
+  }
+  if (child.branch !== parent.branch) {
+    throw new Error("child mandate branch must match parent mandate branch");
+  }
+
+  const parentProfiles = new Set(parent.profiles);
+  const missingProfiles = child.profiles.filter(
+    (profile) => !parentProfiles.has(profile)
+  );
+  if (missingProfiles.length > 0) {
+    throw new Error(
+      `child mandate profiles exceed parent scope: ${missingProfiles.join(", ")}`
+    );
+  }
+
+  const maxLeaseExpiresAt = parent.maxLeaseExpiresAt ?? parent.expiresAt;
+  const childExpiresAt = new Date(createdAt.getTime() + child.leaseMs);
+  if (childExpiresAt.getTime() > Date.parse(maxLeaseExpiresAt)) {
+    throw new Error("child mandate lease cannot outlive parent mandate lease");
+  }
+
+  if (
+    child.allowedTools.length > 0 &&
+    !toolPatternsWithinParent(child.allowedTools, parent.allowedTools)
+  ) {
+    throw new Error("child mandate allowed tools exceed parent tool scope");
+  }
+}
+
+function toolPatternsWithinParent(
+  childPatterns: string[],
+  parentPatterns: string[]
+): boolean {
+  if (parentPatterns.length === 0) {
+    return true;
+  }
+
+  return childPatterns.every((childPattern) =>
+    parentPatterns.some((parentPattern) =>
+      childToolPatternWithinParent(childPattern, parentPattern)
+    )
+  );
+}
+
+function childToolPatternWithinParent(
+  childPattern: string,
+  parentPattern: string
+): boolean {
+  if (parentPattern === "*" || childPattern === parentPattern) {
+    return true;
+  }
+
+  if (parentPattern.endsWith("*")) {
+    const parentPrefix = parentPattern.slice(0, -1);
+    return childPattern.startsWith(parentPrefix);
+  }
+
+  return false;
+}
+
 function uniqueTrimmed(values: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -475,7 +699,8 @@ function uniqueTrimmed(values: string[]): string[] {
 }
 
 function normalizeApprovalGates(
-  gates: Array<string | CreateMandateApprovalGate>
+  gates: Array<string | CreateMandateApprovalGate>,
+  idOffset = 0
 ): MandateApprovalGate[] {
   const seen = new Set<string>();
   const result: MandateApprovalGate[] = [];
@@ -490,7 +715,7 @@ function normalizeApprovalGates(
     seen.add(toolPattern);
     const id =
       typeof gate === "string" || !gate.id?.trim()
-        ? `gate-${result.length + 1}`
+        ? `gate-${idOffset + result.length + 1}`
         : gate.id.trim();
     const reason =
       typeof gate === "string" ? undefined : gate.reason?.trim() || undefined;

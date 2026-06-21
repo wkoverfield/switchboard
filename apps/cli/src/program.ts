@@ -6,6 +6,7 @@ import {
   type AuditLogger,
   type ApprovalRequestWithStatus,
   checkLocalConfigIgnored,
+  createChildMandate,
   createMandate,
   decideApprovalRequest,
   createInitConfigPlan,
@@ -957,6 +958,187 @@ export function createProgram(io: ProgramIo = {}): Command {
         )
     )
     .addCommand(
+      new Command("child")
+        .description("Create a child mandate narrowed from an active parent.")
+        .argument("<task>", "child task name or summary")
+        .requiredOption("--parent <id>", "active parent mandate id")
+        .requiredOption("--agent <role>", "agent role for this child mandate")
+        .requiredOption(
+          "--profiles <profiles>",
+          "comma-separated Switchboard profiles to bind"
+        )
+        .requiredOption("--branch <branch>", "branch the child mandate is scoped to")
+        .requiredOption("--lease <duration>", "lease duration, like 30m, 2h, or 1d")
+        .option("--delegated-by <actor>", "actor creating the child mandate")
+        .option(
+          "--allow-tool <pattern>",
+          "allow a namespaced tool pattern (repeatable)",
+          collectOption,
+          [] as string[]
+        )
+        .option(
+          "--deny-tool <pattern>",
+          "deny a namespaced tool pattern (repeatable)",
+          collectOption,
+          [] as string[]
+        )
+        .option(
+          "--require-approval-tool <pattern>",
+          "require approval for a namespaced tool pattern (repeatable)",
+          collectOption,
+          [] as string[]
+        )
+        .option(
+          "--require-approval-reason <reason>",
+          "human reason for a required approval gate (repeatable, matches --require-approval-tool order)",
+          collectOption,
+          [] as string[]
+        )
+        .option(
+          "--require-approval-risk <risk>",
+          "risk class for a required approval gate: low, medium, high, or critical (repeatable, matches --require-approval-tool order)",
+          collectOption,
+          [] as string[]
+        )
+        .option(
+          "--require-approval-label <label>",
+          "structured label for approval gates (repeatable, applies to every approval gate)",
+          collectOption,
+          [] as string[]
+        )
+        .option("--json", "print machine-readable JSON")
+        .action(
+          async (
+            task: string,
+            options: {
+              parent: string;
+              agent: string;
+              profiles: string;
+              branch: string;
+              lease: string;
+              delegatedBy?: string;
+              allowTool: string[];
+              denyTool: string[];
+              requireApprovalTool: string[];
+              requireApprovalReason: string[];
+              requireApprovalRisk: string[];
+              requireApprovalLabel: string[];
+              json?: boolean;
+            }
+          ) => {
+            const globalOptions = program.opts<{ cwd?: string }>();
+            const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
+            if (!validateLoadedConfigForCommand(loaded, writeErr)) {
+              return;
+            }
+
+            const profiles = parseCommaSeparatedList(options.profiles);
+            const missingProfiles = profiles.filter(
+              (profile) => !loaded.config.profiles[profile]
+            );
+            if (missingProfiles.length > 0) {
+              writeErr(
+                `error: child mandate profiles were not found: ${missingProfiles.join(", ")}`
+              );
+              process.exitCode = 1;
+              return;
+            }
+
+            const repoPath = configCwdBase(loaded, globalOptions.cwd);
+            let gitBinding: { worktreePath: string; branch: string } | undefined;
+            try {
+              gitBinding = resolveGitWorktreeBinding(repoPath);
+            } catch (error) {
+              writeErr(`error: ${messageFromError(error)}`);
+              process.exitCode = 1;
+              return;
+            }
+            const branch = options.branch.trim();
+            if (gitBinding && gitBinding.branch !== branch) {
+              writeErr(
+                `error: child mandate branch "${branch}" does not match current git branch "${gitBinding.branch}" in ${gitBinding.worktreePath}`
+              );
+              process.exitCode = 1;
+              return;
+            }
+            if (
+              options.requireApprovalReason.length > 0 &&
+              options.requireApprovalReason.length !==
+                options.requireApprovalTool.length
+            ) {
+              writeErr(
+                "error: --require-approval-reason must be provided once for each --require-approval-tool"
+              );
+              process.exitCode = 1;
+              return;
+            }
+            if (
+              options.requireApprovalRisk.length > 0 &&
+              options.requireApprovalRisk.length !==
+                options.requireApprovalTool.length
+            ) {
+              writeErr(
+                "error: --require-approval-risk must be provided once for each --require-approval-tool"
+              );
+              process.exitCode = 1;
+              return;
+            }
+            const path = io.mandateStorePath ?? resolveMandateStorePath();
+
+            try {
+              const mandate = await createChildMandate({
+                path,
+                parentId: options.parent,
+                task,
+                repoPath,
+                worktreePath: gitBinding?.worktreePath ?? repoPath,
+                branch,
+                agentRole: options.agent,
+                profiles,
+                lease: options.lease,
+                ...(options.delegatedBy
+                  ? { delegatedBy: options.delegatedBy }
+                  : {}),
+                allowedTools: options.allowTool,
+                deniedTools: options.denyTool,
+                approvalRequiredTools: options.requireApprovalTool.map(
+                  (toolPattern, index) => ({
+                    toolPattern,
+                    ...(options.requireApprovalReason[index]
+                      ? { reason: options.requireApprovalReason[index] }
+                      : {}),
+                    ...(options.requireApprovalRisk[index]
+                      ? { risk: options.requireApprovalRisk[index] }
+                      : {}),
+                    ...(options.requireApprovalLabel.length > 0
+                      ? { labels: options.requireApprovalLabel }
+                      : {})
+                  })
+                )
+              });
+              if (options.json) {
+                writeOut(
+                  JSON.stringify(
+                    {
+                      path,
+                      mandate,
+                      mcpLaunch: createMandateMcpLaunchPayload(mandate)
+                    },
+                    null,
+                    2
+                  )
+                );
+              } else {
+                writeOut(formatMandateCreated(path, mandate));
+              }
+            } catch (error) {
+              writeErr(`error: ${messageFromError(error)}`);
+              process.exitCode = 1;
+            }
+          }
+        )
+    )
+    .addCommand(
       new Command("status")
         .description("Show local task-scoped mandates.")
         .argument("[id]", "mandate id to inspect")
@@ -1442,6 +1624,13 @@ function formatMandateCreated(path: string, mandate: MandateWithStatus): string 
   return [
     `Created mandate ${mandate.id}`,
     `Task: ${mandate.task}`,
+    ...(mandate.parentMandateId
+      ? [
+          `Parent: ${mandate.parentMandateId}`,
+          `Delegated by: ${mandate.delegatedBy ?? "unknown"}`,
+          `Delegation path: ${mandate.delegationPath?.join(" -> ") ?? mandate.id}`
+        ]
+      : []),
     `Agent: ${mandate.agentRole}`,
     `Repo: ${mandate.repoPath}`,
     `Worktree: ${mandate.worktreePath}`,
@@ -1494,6 +1683,13 @@ function formatMandateStatus(result: {
         mandate.runtimeStatus,
         mandate.agentRole,
         mandate.branch,
+        ...(mandate.parentMandateId
+          ? [
+              `parent:${mandate.parentMandateId}`,
+              `delegated-by:${mandate.delegatedBy ?? "unknown"}`,
+              `path:${mandate.delegationPath?.join(">") ?? mandate.id}`
+            ]
+          : []),
         `profiles:${mandate.profiles.join(",")}`,
         `allow:${mandate.allowedTools.length > 0 ? mandate.allowedTools.join(",") : "all"}`,
         `deny:${mandate.deniedTools.length > 0 ? mandate.deniedTools.join(",") : "none"}`,

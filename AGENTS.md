@@ -44,6 +44,19 @@ and aligned to the current roadmap in `docs/product/roadmap.md`.
 - Use draft PRs by default.
 - Keep feature branches short lived.
 
+## Autonomous Build Cycle
+
+- Prefer one usable product capability per PR, not one tiny preparatory idea per
+  PR, once the touched subsystem already has tests and architecture in place.
+- Keep the same quality loop: branch, implement, test, independent review,
+  address P0/P1/P2 findings, push, open draft PR, wait for CI, merge when green.
+- For risky foundations, small slices are still fine. For mature areas like
+  mandate CLI/core/docs, bundle schema, command, tests, docs, and smoke coverage
+  into one coherent vertical slice.
+- Avoid expanding scope sideways into providers, secrets, Supabase, Stripe,
+  PostHog, Sentry, or full orchestration unless the roadmap slice explicitly
+  calls for it.
+
 ## MCP / Switchboard Usage
 
 If MCP tools need multiple accounts, projects, orgs, environments, or

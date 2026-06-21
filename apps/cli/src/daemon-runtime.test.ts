@@ -279,7 +279,7 @@ describe("daemon runtime mandate context", () => {
           type: "call_tool",
           name: "github_findu_echo",
           mandateId: "fix-ci",
-          approvalWaitMs: 1_000,
+          approvalWaitMs: 2_000,
           arguments: { message: "hello" }
         }),
         { cwd: root }
@@ -393,7 +393,7 @@ describe("daemon runtime mandate context", () => {
           type: "call_tool",
           name: "github_findu_echo",
           mandateId: "fix-ci",
-          approvalWaitMs: 1_000,
+          approvalWaitMs: 2_000,
           arguments: { message: "hello" }
         }),
         { cwd: root }

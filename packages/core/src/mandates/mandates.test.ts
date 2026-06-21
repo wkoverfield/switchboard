@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  createChildMandate,
   createMandate,
   evaluateMandateToolPolicy,
   listMandates,
@@ -198,6 +199,132 @@ describe("mandates", () => {
       mandates: [expect.objectContaining({ id: "fix-ci" })]
     });
     expect((await stat(path)).mode & 0o777).toBe(0o600);
+  });
+
+  it("creates child mandates that cannot exceed parent authority", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+    const repoPath = join(root, "repo");
+
+    await createMandate({
+      path,
+      now: () => new Date("2026-06-19T16:00:00.000Z"),
+      task: "fix-ci",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "fix/ci",
+      agentRole: "lead",
+      profiles: ["github_findu", "vercel_preview"],
+      lease: "2h",
+      allowedTools: ["github_findu_*"],
+      deniedTools: ["*_deploy_prod"],
+      approvalRequiredTools: [
+        {
+          toolPattern: "github_findu_checks_rerun",
+          reason: "rerunning CI changes remote state"
+        }
+      ]
+    });
+
+    const child = await createChildMandate({
+      path,
+      now: () => new Date("2026-06-19T16:30:00.000Z"),
+      parentId: "fix-ci",
+      task: "rerun checks",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "fix/ci",
+      agentRole: "worker",
+      delegatedBy: "lead-agent",
+      profiles: ["github_findu"],
+      lease: "30m",
+      allowedTools: ["github_findu_checks_*"],
+      deniedTools: ["github_findu_checks_cancel"],
+      approvalRequiredTools: [
+        {
+          toolPattern: "github_findu_checks_cancel",
+          reason: "canceling CI changes remote state"
+        }
+      ]
+    });
+
+    expect(child).toMatchObject({
+      id: "rerun-checks",
+      parentMandateId: "fix-ci",
+      delegatedBy: "lead-agent",
+      delegationPath: ["fix-ci", "rerun-checks"],
+      maxLeaseExpiresAt: "2026-06-19T18:00:00.000Z",
+      profiles: ["github_findu"],
+      allowedTools: ["github_findu_checks_*"],
+      deniedTools: ["*_deploy_prod", "github_findu_checks_cancel"],
+      approvalGates: [
+        {
+          id: "gate-1",
+          toolPattern: "github_findu_checks_rerun"
+        },
+        {
+          id: "gate-2",
+          toolPattern: "github_findu_checks_cancel",
+          reason: "canceling CI changes remote state"
+        }
+      ],
+      expiresAt: "2026-06-19T17:00:00.000Z",
+      runtimeStatus: "active"
+    });
+  });
+
+  it("rejects child mandates that exceed parent scope", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+    const repoPath = join(root, "repo");
+    const baseChild = {
+      path,
+      now: () => new Date("2026-06-19T16:30:00.000Z"),
+      parentId: "fix-ci",
+      task: "worker",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "fix/ci",
+      agentRole: "worker",
+      profiles: ["github_findu"],
+      lease: "30m"
+    };
+
+    await createMandate({
+      path,
+      now: () => new Date("2026-06-19T16:00:00.000Z"),
+      task: "fix-ci",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "fix/ci",
+      agentRole: "lead",
+      profiles: ["github_findu"],
+      lease: "1h",
+      allowedTools: ["github_findu_*"]
+    });
+
+    await expect(
+      createChildMandate({
+        ...baseChild,
+        profiles: ["github_findu", "vercel_preview"]
+      })
+    ).rejects.toThrow(
+      "child mandate profiles exceed parent scope: vercel_preview"
+    );
+    await expect(
+      createChildMandate({
+        ...baseChild,
+        task: "worker 2",
+        allowedTools: ["vercel_preview_*"]
+      })
+    ).rejects.toThrow("child mandate allowed tools exceed parent tool scope");
+    await expect(
+      createChildMandate({
+        ...baseChild,
+        task: "worker 3",
+        lease: "2h"
+      })
+    ).rejects.toThrow("child mandate lease cannot outlive parent mandate lease");
   });
 
   it("rejects approval gate reasons with control characters", async () => {

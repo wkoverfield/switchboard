@@ -1844,6 +1844,209 @@ describe("switchboard CLI program", () => {
     );
   });
 
+  it("creates child mandates with inherited parent scope", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "lead",
+        "--profiles",
+        "github_findu,vercel_preview",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--allow-tool",
+        "github_findu_*",
+        "--deny-tool",
+        "*_deploy_prod",
+        "--require-approval-tool",
+        "github_findu_checks_rerun",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "child",
+        "rerun checks",
+        "--parent",
+        "fix-ci",
+        "--agent",
+        "worker",
+        "--delegated-by",
+        "lead-agent",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "30m",
+        "--allow-tool",
+        "github_findu_checks_*",
+        "--deny-tool",
+        "github_findu_checks_cancel",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[1] ?? "{}")).toMatchObject({
+      path: mandateStorePath,
+      mandate: {
+        id: "rerun-checks",
+        parentMandateId: "fix-ci",
+        delegatedBy: "lead-agent",
+        delegationPath: ["fix-ci", "rerun-checks"],
+        agentRole: "worker",
+        profiles: ["github_findu"],
+        allowedTools: ["github_findu_checks_*"],
+        deniedTools: ["*_deploy_prod", "github_findu_checks_cancel"],
+        approvalGates: [
+          {
+            id: "gate-1",
+            toolPattern: "github_findu_checks_rerun"
+          }
+        ],
+        runtimeStatus: "active"
+      },
+      mcpLaunch: {
+        schemaVersion: "switchboard.mcp-launch.v1",
+        mandateId: "rerun-checks",
+        cwd: root,
+        args: ["--cwd", root, "mcp", "--mandate", "rerun-checks"]
+      }
+    });
+  });
+
+  it("rejects child mandates that exceed parent profile scope", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const errors: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message),
+      mandateStorePath: join(root, "state", "mandates.json")
+    });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "lead",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "child",
+        "preview deploy",
+        "--parent",
+        "fix-ci",
+        "--agent",
+        "worker",
+        "--profiles",
+        "vercel_preview",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "30m"
+      ],
+      { from: "user" }
+    );
+
+    expect(errors).toEqual([
+      "error: child mandate profiles exceed parent scope: vercel_preview"
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("rejects child mandates that exceed parent allowed tool scope", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const errors: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message),
+      mandateStorePath: join(root, "state", "mandates.json")
+    });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "lead",
+        "--profiles",
+        "github_findu,vercel_preview",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--allow-tool",
+        "github_findu_*",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "child",
+        "preview deploy",
+        "--parent",
+        "fix-ci",
+        "--agent",
+        "worker",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "30m",
+        "--allow-tool",
+        "vercel_preview_*"
+      ],
+      { from: "user" }
+    );
+
+    expect(errors).toEqual([
+      "error: child mandate allowed tools exceed parent tool scope"
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
   it("rejects mismatched approval gate reason counts", async () => {
     const root = makeTempProject();
     writeMandateConfig(root);
