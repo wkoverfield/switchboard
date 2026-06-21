@@ -1210,7 +1210,7 @@ Acceptance:
 - no changes to runtime behavior, approval execution, daemon behavior,
   provider integrations, or client installers
 
-### Current Slice: Launched Serve Mandate Approval Metadata Smoke V0
+### Completed Slice: Launched Serve Mandate Approval Metadata Smoke V0
 
 Goal: prove that approval-required tool metadata survives a built CLI
 `switchboard serve --mandate <id>` stdio session, not only in-process MCP tests.
@@ -1224,6 +1224,26 @@ Acceptance:
   fixture tool
 - gated metadata includes non-secret reason, risk, and labels
 - ungated fixture tools keep routing metadata and omit approval metadata
+- no changes to runtime behavior, approval execution, daemon behavior,
+  provider integrations, or client installers
+
+### Current Slice: Mandate Human Next Commands UX V0
+
+Goal: make the manual mandate demo path self-guiding without changing JSON
+contracts or enforcement behavior.
+
+Acceptance:
+
+- human `switchboard mandate create` output includes a next-command block for
+  tool preflight, scoped MCP launch, approval inspection, audit logs, and handoff
+- human `switchboard tools --mandate <id>` output includes next commands for
+  scoped MCP launch, approval inspection, audit logs, and handoff
+- suggested commands include explicit `--cwd <repo>` context so they are
+  copyable from outside the repository
+- the primary tool preflight suggestion uses human output; harnesses can still
+  add `--json` when they need the versioned contract
+- JSON payloads and harness-facing contracts remain unchanged
+- tests cover human create and human tool-surface output
 - no changes to runtime behavior, approval execution, daemon behavior,
   provider integrations, or client installers
 

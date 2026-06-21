@@ -1179,6 +1179,60 @@ describe("switchboard CLI program", () => {
     ]);
   });
 
+  it("prints next commands for human mandate tool discovery", async () => {
+    const root = makeTempProject();
+    const mandateStorePath = join(root, "state", "mandates.json");
+    writeMandateFixtureConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--allow-tool",
+        "github_findu_*",
+        "--require-approval-tool",
+        "github_findu_echo",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(["--cwd", root, "tools", "--mandate", "fix-ci"], {
+      from: "user"
+    });
+
+    expect(output[1]).toContain("Switchboard tools");
+    expect(output[1]).toContain("Mandate: fix-ci (active)");
+    expect(output[1]).toContain("Next commands:");
+    expect(output[1]).toContain(
+      `switchboard --cwd '${root}' mcp --mandate fix-ci`
+    );
+    expect(output[1]).toContain(
+      `switchboard --cwd '${root}' approvals --mandate fix-ci --json`
+    );
+    expect(output[1]).toContain(
+      `switchboard --cwd '${root}' logs --mandate fix-ci --json`
+    );
+    expect(output[1]).toContain(
+      `switchboard --cwd '${root}' mandate handoff fix-ci --state completed --summary <summary>`
+    );
+  });
+
   it("prints tool surface JSON errors to stdout", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
@@ -2098,6 +2152,56 @@ describe("switchboard CLI program", () => {
     expect(output[2]).toContain("deny:*_deploy_prod");
     expect(output[2]).toContain(
       "approval:gate-1:github_findu_checks_rerun(risk:high labels:remote-state+ci reason:rerunning CI changes remote state)"
+    );
+  });
+
+  it("prints next commands after human mandate creation", async () => {
+    const root = makeTempProject();
+    const mandateStorePath = join(root, "state", "mandates.json");
+    writeMandateConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--allow-tool",
+        "github_findu_*"
+      ],
+      { from: "user" }
+    );
+
+    expect(output[0]).toContain("Created mandate fix-ci");
+    expect(output[0]).toContain("Next commands:");
+    expect(output[0]).toContain(
+      `switchboard --cwd '${root}' tools --mandate fix-ci`
+    );
+    expect(output[0]).toContain(
+      `switchboard --cwd '${root}' mcp --mandate fix-ci`
+    );
+    expect(output[0]).toContain(
+      `switchboard --cwd '${root}' approvals --mandate fix-ci --json`
+    );
+    expect(output[0]).toContain(
+      `switchboard --cwd '${root}' logs --mandate fix-ci --json`
+    );
+    expect(output[0]).toContain(
+      `switchboard --cwd '${root}' mandate handoff fix-ci --state completed --summary <summary>`
     );
   });
 
