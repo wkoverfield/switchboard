@@ -97,6 +97,28 @@ try {
       `--cwd ${project} mcp --mandate rerun-checks`,
     "expected child MCP launch payload"
   );
+  const currentEntrypointCandidate = child.mcpLaunch?.commandCandidates?.find(
+    (candidate) => candidate.kind === "current-entrypoint"
+  );
+  assert(
+    currentEntrypointCandidate,
+    "expected built current-entrypoint launch candidate"
+  );
+  const launchHelp = spawnSync(
+    currentEntrypointCandidate.command,
+    [...currentEntrypointCandidate.args, "--help"],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        XDG_STATE_HOME: stateRoot
+      }
+    }
+  );
+  assert(
+    launchHelp.status === 0 && launchHelp.stdout.includes("Serve MCP over stdio"),
+    "expected current-entrypoint launch candidate to run the MCP command"
+  );
 
   const childStatus = run("mandate", "status", "--json");
   assert(childStatus.mandates?.length === 2, "expected parent and child");

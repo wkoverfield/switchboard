@@ -259,6 +259,9 @@ Switchboard the orchestrator:
 - the launch payload includes a schema/version marker, mandate id, repo cwd,
   command, and args
 - launch args carry `--cwd <repo> mcp --mandate <id>`
+- launch payloads include additive `commandCandidates` so harnesses can use
+  the PATH binary in normal installs, the built Node entrypoint, or the source
+  checkout `tsx` entrypoint when dogfooding
 - `switchboard mandate status --json` exposes versioned mandate state with
   `switchboard.mandate-status.v1`
 - `switchboard mandate child --parent <id>` creates narrower child mandates
@@ -288,7 +291,7 @@ Switchboard the orchestrator:
 
 Recommended follow-up:
 
-- harden local escalation planning with real harness dogfood feedback
+- clarify inherited approval-gate override UX for child mandates
 - extend `switchboard.error.v1` to additional non-mandate JSON surfaces when
   they become harness-facing contracts
 - harden the approval elicitation and gated-tool metadata client matrix with
