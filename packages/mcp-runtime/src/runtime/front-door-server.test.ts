@@ -96,6 +96,70 @@ describe("Switchboard MCP front door", () => {
     }
   });
 
+  it("exposes mandate approval metadata through daemonless MCP tools/list", async () => {
+    const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {
+      mandateId: "fix-ci",
+      toolPolicy: {
+        allowedTools: ["alpha_tools_*"],
+        approvalGates: [
+          {
+            id: "gate-1",
+            toolPattern: "alpha_tools_echo",
+            reason: "rerunning CI changes remote state",
+            risk: "high",
+            labels: ["ci", "remote-state"]
+          }
+        ]
+      }
+    });
+    const client = new Client({ name: "front-door-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await Promise.all([
+        client.connect(clientTransport),
+        connectSwitchboardMcpServer(router, serverTransport)
+      ]);
+
+      const result = await client.listTools();
+      const gatedTool = result.tools.find(
+        (tool) => tool.name === "alpha_tools_echo"
+      );
+      const ungatedTool = result.tools.find(
+        (tool) => tool.name === "alpha_tools_whoami"
+      );
+
+      expect(gatedTool).toMatchObject({
+        name: "alpha_tools_echo",
+        _meta: {
+          switchboard: {
+            profileName: "alpha",
+            namespace: "alpha_tools",
+            upstreamName: "echo",
+            approvalRequired: {
+              gateId: "gate-1",
+              toolPattern: "alpha_tools_echo",
+              reason: "rerunning CI changes remote state",
+              risk: "high",
+              labels: ["ci", "remote-state"]
+            }
+          }
+        }
+      });
+      expect(ungatedTool?._meta?.switchboard).toMatchObject({
+        profileName: "alpha",
+        namespace: "alpha_tools",
+        upstreamName: "whoami"
+      });
+      expect(ungatedTool?._meta?.switchboard).not.toHaveProperty(
+        "approvalRequired"
+      );
+    } finally {
+      await client.close();
+      await router.close();
+    }
+  });
+
   it("closes upstream router connections when the front-door connection closes", async () => {
     const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")]);
     const closeSpy = vi.spyOn(router, "close");
