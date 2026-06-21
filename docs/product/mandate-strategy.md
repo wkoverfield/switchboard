@@ -313,10 +313,12 @@ Child mandates now persist:
 
 Child mandates must not exceed parent repo, worktree, branch, profile, tool,
 or lease scope. Approval gates are inherited and may be made stricter, but they
-do not grant access beyond the parent's allowed tool scope. Handoff reporting
-closes runtime authority and preserves the delegation chain for harnesses.
-Future work should improve approval escalation and result aggregation, not turn
-Switchboard into the agent orchestrator.
+do not grant access beyond the parent's allowed tool scope. A child cannot
+redefine an inherited approval gate pattern; duplicate patterns fail with a
+clear error so child-provided reason, risk, or labels are not silently ignored.
+Handoff reporting closes runtime authority and preserves the delegation chain
+for harnesses. Future work should improve approval escalation and result
+aggregation, not turn Switchboard into the agent orchestrator.
 
 ## Original First Mandate Slice
 

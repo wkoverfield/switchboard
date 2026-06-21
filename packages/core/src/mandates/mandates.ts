@@ -272,9 +272,7 @@ export function evaluateMandateToolPolicy(
     };
   }
 
-  const approvalGate = approvalGates.find((gate) =>
-    toolPatternToRegExp(gate.toolPattern).test(toolName)
-  );
+  const approvalGate = lastMatchingApprovalGate(approvalGates, toolName);
   if (approvalGate) {
     const approvedRequest = approvedApprovalRequests.find(
       (request) =>
@@ -360,11 +358,17 @@ export async function createChildMandate(
     const inheritedApprovalPatterns = new Set(
       normalizedParent.approvalGates.map((gate) => gate.toolPattern)
     );
+    const duplicateApprovalGate = childApprovalGates.find((gate) =>
+      inheritedApprovalPatterns.has(gate.toolPattern)
+    );
+    if (duplicateApprovalGate) {
+      throw new Error(
+        `child approval gate "${duplicateApprovalGate.toolPattern}" is already inherited from parent mandate "${normalizedParent.id}"; omit the duplicate gate or choose a narrower tool pattern`
+      );
+    }
     const approvalGates = [
       ...normalizedParent.approvalGates,
-      ...childApprovalGates.filter(
-        (gate) => !inheritedApprovalPatterns.has(gate.toolPattern)
-      )
+      ...childApprovalGates
     ];
     const parentDelegationPath =
       normalizedParent.delegationPath ?? [normalizedParent.id];
@@ -951,6 +955,20 @@ function normalizeApprovalGates(
   }
 
   return result;
+}
+
+function lastMatchingApprovalGate(
+  gates: MandateApprovalGate[],
+  toolName: string
+): MandateApprovalGate | undefined {
+  for (let index = gates.length - 1; index >= 0; index -= 1) {
+    const gate = gates[index];
+    if (gate && toolPatternToRegExp(gate.toolPattern).test(toolName)) {
+      return gate;
+    }
+  }
+
+  return undefined;
 }
 
 function normalizeApprovalRisk(
