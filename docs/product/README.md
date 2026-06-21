@@ -21,3 +21,6 @@ where they conflict, but mandates should not be mandatory for simple setup.
 
 For approval UX planning, read `approval-elicitation-research.md` before
 implementing client-specific behavior.
+
+For harness integration surfaces, read
+`../use-cases/harness-json-contracts.md`.

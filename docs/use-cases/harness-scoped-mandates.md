@@ -5,6 +5,9 @@ assign, which agents to launch, and how those agents communicate. Switchboard
 gives each launched agent a repo-aware MCP endpoint with the right profiles,
 tool policy, lease, approvals, and audit trail.
 
+For the versioned JSON surfaces used by this flow, see
+`docs/use-cases/harness-json-contracts.md`.
+
 ## Flow
 
 1. Create a mandate for the task:
