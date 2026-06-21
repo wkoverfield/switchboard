@@ -577,7 +577,7 @@ export function createProgram(io: ProgramIo = {}): Command {
         if (options.json) {
           writeOut(JSON.stringify(result, null, 2));
         } else {
-          writeOut(formatToolSurface(result));
+          writeOut(formatToolSurface(result, mandate?.repoPath));
         }
       } catch (error) {
         writeCommandError({
@@ -2182,7 +2182,7 @@ function formatToolSurface(result: {
   toolCount: number;
   approvalRequiredCount: number;
   tools: NamespacedTool[];
-}): string {
+}, repoPath?: string): string {
   const lines = [
     "Switchboard tools",
     `Mandate: ${
@@ -2203,6 +2203,18 @@ function formatToolSurface(result: {
         : "";
       lines.push(`  ${tool.name} (${tool.profileName})${approval}`);
     }
+  }
+
+  if (result.mandate && repoPath) {
+    const commandPrefix = `switchboard --cwd ${shellQuote(repoPath)}`;
+    lines.push(
+      "",
+      "Next commands:",
+      `  ${commandPrefix} mcp --mandate ${result.mandate.id}`,
+      `  ${commandPrefix} approvals --mandate ${result.mandate.id} --json`,
+      `  ${commandPrefix} logs --mandate ${result.mandate.id} --json`,
+      `  ${commandPrefix} mandate handoff ${result.mandate.id} --state completed --summary <summary>`
+    );
   }
 
   return lines.join("\n");
@@ -2236,7 +2248,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 function formatMandateCreated(path: string, mandate: MandateWithStatus): string {
+  const commandPrefix = `switchboard --cwd ${shellQuote(mandate.repoPath)}`;
   return [
     `Created mandate ${mandate.id}`,
     `Task: ${mandate.task}`,
@@ -2258,7 +2275,14 @@ function formatMandateCreated(path: string, mandate: MandateWithStatus): string 
     `Lease: ${mandate.lease}`,
     `Status: ${mandate.runtimeStatus}`,
     `Expires: ${mandate.expiresAt}`,
-    `Store: ${path}`
+    `Store: ${path}`,
+    "",
+    "Next commands:",
+    `  ${commandPrefix} tools --mandate ${mandate.id}`,
+    `  ${commandPrefix} mcp --mandate ${mandate.id}`,
+    `  ${commandPrefix} approvals --mandate ${mandate.id} --json`,
+    `  ${commandPrefix} logs --mandate ${mandate.id} --json`,
+    `  ${commandPrefix} mandate handoff ${mandate.id} --state completed --summary <summary>`
   ].join("\n");
 }
 
