@@ -1175,7 +1175,7 @@ Acceptance:
 - no changes to approval execution, approval request storage, MCP routing,
   providers, or daemon behavior
 
-### Current Slice: Tool Surface JSON Error Envelopes V0
+### Completed Slice: Tool Surface JSON Error Envelopes V0
 
 Goal: make the versioned tool-surface preflight contract parseable on failure
 for harnesses without changing tool discovery, MCP routing, or policy
@@ -1194,6 +1194,21 @@ Acceptance:
 - docs clarify that tool-surface failures are contracted error envelopes
 - no changes to tool discovery semantics, MCP routing, mandate enforcement,
   providers, or daemon behavior
+
+### Current Slice: Front-Door Approval Metadata Smoke V0
+
+Goal: prove that approval-required tool metadata survives the actual MCP
+front-door `tools/list` path for daemonless mandate-scoped servers.
+
+Acceptance:
+
+- MCP client/server front-door smoke lists a mandate approval-gated tool
+- listed gated tool includes `_meta.switchboard.approvalRequired`
+- listed gated tool includes non-secret gate reason, risk, and labels
+- listed ungated tools still include normal Switchboard routing metadata
+- listed ungated tools do not receive approval-required metadata
+- no changes to runtime behavior, approval execution, daemon behavior,
+  provider integrations, or client installers
 
 ## Rules For Future Agents
 
