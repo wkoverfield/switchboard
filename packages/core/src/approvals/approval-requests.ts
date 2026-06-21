@@ -16,6 +16,12 @@ export const approvalRequestSchema = z.object({
   version: z.literal(1),
   id: z.string().min(1),
   mandateId: z.string().min(1),
+  mandateUid: z.string().min(1).optional(),
+  parentMandateId: z.string().min(1).optional(),
+  parentMandateUid: z.string().min(1).optional(),
+  delegatedBy: z.string().min(1).optional(),
+  delegationPath: z.array(z.string().min(1)).optional(),
+  delegationUids: z.array(z.string().min(1)).optional(),
   repoPath: z.string().min(1),
   branch: z.string().min(1),
   toolName: z.string().min(1),
@@ -44,6 +50,12 @@ export type ApprovalRequestWithStatus = ApprovalRequest & {
 
 export interface CreateApprovalRequestOptions {
   mandateId: string;
+  mandateUid?: string;
+  parentMandateId?: string;
+  parentMandateUid?: string;
+  delegatedBy?: string;
+  delegationPath?: string[];
+  delegationUids?: string[];
   repoPath: string;
   branch: string;
   toolName: string;
@@ -61,6 +73,8 @@ export interface ListApprovalRequestsOptions {
   path?: string;
   repoPath?: string;
   mandateId?: string;
+  mandateUid?: string;
+  rootMandateUid?: string;
   status?: ApprovalRequestRuntimeStatus;
   now?: () => Date;
 }
@@ -83,6 +97,7 @@ export interface MarkApprovalRequestStaleOptions {
 export interface MarkPendingApprovalRequestsStaleOptions {
   repoPath?: string;
   mandateId?: string;
+  mandateUid?: string;
   reason?: string;
   path?: string;
   now?: () => Date;
@@ -90,6 +105,7 @@ export interface MarkPendingApprovalRequestsStaleOptions {
 
 export interface FindApprovedApprovalRequestOptions {
   mandateId: string;
+  mandateUid?: string;
   repoPath: string;
   toolName: string;
   approvalGateId: string;
@@ -145,7 +161,10 @@ export async function createApprovalRequest(
     const store = await readApprovalRequestStore({ path });
     const existing = store.requests.find(
       (request) =>
-        request.mandateId === options.mandateId &&
+        approvalRequestMatchesMandate(request, {
+          mandateId: options.mandateId,
+          ...(options.mandateUid ? { mandateUid: options.mandateUid } : {})
+        }) &&
         request.repoPath === repoPath &&
         request.toolName === options.toolName &&
         request.approvalGateId === options.approvalGateId &&
@@ -159,6 +178,12 @@ export async function createApprovalRequest(
       version: 1,
       id: nextApprovalRequestId(store),
       mandateId: options.mandateId,
+      ...(options.mandateUid ? { mandateUid: options.mandateUid } : {}),
+      ...optionalTextField("parentMandateId", options.parentMandateId),
+      ...optionalTextField("parentMandateUid", options.parentMandateUid),
+      ...optionalTextField("delegatedBy", options.delegatedBy),
+      ...optionalTextListField("delegationPath", options.delegationPath ?? []),
+      ...optionalTextListField("delegationUids", options.delegationUids ?? []),
       repoPath,
       branch: options.branch.trim(),
       toolName: options.toolName.trim(),
@@ -198,6 +223,15 @@ export async function listApprovalRequests(
     .filter((request) =>
       options.mandateId ? request.mandateId === options.mandateId : true
     )
+    .filter((request) =>
+      options.mandateUid ? request.mandateUid === options.mandateUid : true
+    )
+    .filter((request) =>
+      options.rootMandateUid
+        ? request.delegationUids?.[0] === options.rootMandateUid ||
+          request.mandateUid === options.rootMandateUid
+        : true
+    )
     .map((request) => withRuntimeStatus(request, now))
     .filter((request) =>
       options.status ? request.runtimeStatus === options.status : true
@@ -216,6 +250,7 @@ export async function findApprovedApprovalRequest(
   const request = store.requests.find(
     (item) =>
       item.mandateId === options.mandateId &&
+      (options.mandateUid ? item.mandateUid === options.mandateUid : true) &&
       item.repoPath === repoPath &&
       item.toolName === options.toolName &&
       item.approvalGateId === options.approvalGateId &&
@@ -326,9 +361,13 @@ export async function markPendingApprovalRequestsStale(
       const matchesMandate = options.mandateId
         ? request.mandateId === options.mandateId
         : true;
+      const matchesMandateUid = options.mandateUid
+        ? request.mandateUid === options.mandateUid
+        : true;
       if (
         !matchesRepo ||
         !matchesMandate ||
+        !matchesMandateUid ||
         approvalRequestRuntimeStatus(request, decidedAt) !== "pending"
       ) {
         return request;
@@ -351,6 +390,17 @@ export async function markPendingApprovalRequestsStale(
 
     return staleRequests;
   });
+}
+
+function approvalRequestMatchesMandate(
+  request: Pick<ApprovalRequest, "mandateId" | "mandateUid">,
+  mandate: { mandateId: string; mandateUid?: string }
+): boolean {
+  if (mandate.mandateUid) {
+    return request.mandateUid === mandate.mandateUid;
+  }
+
+  return request.mandateId === mandate.mandateId;
 }
 
 export async function readApprovalRequestStore(options: {
@@ -448,6 +498,44 @@ async function removeStaleLock(lockPath: string): Promise<void> {
 
 function nextApprovalRequestId(store: ApprovalRequestStore): string {
   return `approval-${store.requests.length + 1}`;
+}
+
+function optionalTextField(
+  key: "parentMandateId" | "parentMandateUid" | "delegatedBy",
+  value: string | undefined
+):
+  | Partial<
+      Pick<ApprovalRequest, "parentMandateId" | "parentMandateUid" | "delegatedBy">
+    >
+  | Record<string, never> {
+  const trimmed = value?.trim();
+  return trimmed ? { [key]: trimmed } : {};
+}
+
+function optionalTextListField(
+  key: "delegationPath" | "delegationUids",
+  values: string[]
+):
+  | Partial<Pick<ApprovalRequest, "delegationPath" | "delegationUids">>
+  | Record<string, never> {
+  const normalized = uniqueTrimmed(values);
+  return normalized.length > 0 ? { [key]: normalized } : {};
+}
+
+function uniqueTrimmed(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+
+  return result;
 }
 
 function normalizeApprovalGateRisk(

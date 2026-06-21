@@ -8,6 +8,7 @@ import type { NamespacedTool } from "../runtime/namespaced-tools.js";
 export interface DaemonApprovalRequired {
   approvalRequestId: string;
   mandateId: string;
+  mandateUid?: string;
   repoPath: string;
   branch: string;
   task: string;
@@ -388,6 +389,9 @@ function parseDaemonApprovalRequired(
     expiresAt: value.expiresAt
   };
 
+  if (isNonEmptyString(value.mandateUid)) {
+    approval.mandateUid = value.mandateUid;
+  }
   if (isNonEmptyString(value.approvalGateReason)) {
     approval.approvalGateReason = value.approvalGateReason;
   }

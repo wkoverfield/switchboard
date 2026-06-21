@@ -80,7 +80,7 @@ switchboard --cwd /path/to/repo mandate report fix-ci --json
 `mandate handoff` closes runtime authority by moving the mandate out of `open`.
 `mandate report --json` is tagged with
 `schemaVersion: "switchboard.mandate-report.v1"` and includes the mandate tree,
-handoff counts, and recent related audit entries.
+handoff counts, related approval requests, and recent related audit entries.
 
 ## Child Mandates
 

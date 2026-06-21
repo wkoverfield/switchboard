@@ -68,6 +68,7 @@ const version = "0.1.0";
 const mandateMcpLaunchSchemaVersion = "switchboard.mcp-launch.v1";
 const mandateStatusSchemaVersion = "switchboard.mandate-status.v1";
 const mandateReportSchemaVersion = "switchboard.mandate-report.v1";
+const approvalRequestsSchemaVersion = "switchboard.approvals.v1";
 const toolSurfaceSchemaVersion = "switchboard.tool-surface.v1";
 
 interface MandateMcpLaunchPayload {
@@ -99,10 +100,34 @@ interface MandateReportPayload {
     expired: number;
     closed: number;
     auditEntries: number;
+    approvalRequests: number;
   };
   childrenByParent: Record<string, string[]>;
   mandates: MandateWithStatus[];
+  approvalRequests: ApprovalRequestWithStatus[];
   auditEntries: AuditLogEntry[];
+}
+
+interface ApprovalRequestsPayload {
+  schemaVersion: typeof approvalRequestsSchemaVersion;
+  path: string;
+  mandateStorePath: string | null;
+  repoPath: string | null;
+  mandateId: string | null;
+  includeChildren: boolean;
+  rootMandateId: string | null;
+  rootMandateUid: string | null;
+  childrenByParent: Record<string, string[]>;
+  counts: {
+    requests: number;
+    pending: number;
+    approved: number;
+    denied: number;
+    stale: number;
+    expired: number;
+  };
+  mandates: MandateWithStatus[];
+  requests: ApprovalRequestWithStatus[];
 }
 
 export interface ProgramIo {
@@ -1278,11 +1303,14 @@ export function createProgram(io: ProgramIo = {}): Command {
               : installTargetCwd(globalOptions.cwd);
             const path = io.mandateStorePath ?? resolveMandateStorePath();
             const auditLogPath = io.auditLogPath ?? resolveAuditLogPath();
+            const approvalStorePath =
+              io.approvalStorePath ?? resolveApprovalRequestStorePath();
             try {
               const report = await createMandateReportPayload({
                 id,
                 path,
                 auditLogPath,
+                approvalStorePath,
                 logLimit,
                 ...(repoPath ? { repoPath } : {})
               });
@@ -1348,6 +1376,10 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--all", "show approval requests for all repos")
     .option("--mandate <id>", "filter approval requests by mandate id")
     .option(
+      "--include-children",
+      "with --mandate, include approval requests for child mandates"
+    )
+    .option(
       "--status <status>",
       "filter by runtime status: pending, approved, denied, stale, or expired"
     )
@@ -1356,6 +1388,7 @@ export function createProgram(io: ProgramIo = {}): Command {
         json?: boolean;
         all?: boolean;
         mandate?: string;
+        includeChildren?: boolean;
         status?: "pending" | "approved" | "denied" | "stale" | "expired";
       }) => {
         const globalOptions = program.opts<{ cwd?: string }>();
@@ -1372,23 +1405,36 @@ export function createProgram(io: ProgramIo = {}): Command {
           process.exitCode = 1;
           return;
         }
+        if (options.includeChildren && !options.mandate) {
+          writeErr("error: --include-children requires --mandate <id>");
+          process.exitCode = 1;
+          return;
+        }
+        if (options.includeChildren && options.all) {
+          writeErr("error: --include-children must be repo-scoped; remove --all");
+          process.exitCode = 1;
+          return;
+        }
         const path = io.approvalStorePath ?? resolveApprovalRequestStorePath();
-        const requests = await listApprovalRequests({
-          path,
-          ...(repoPath ? { repoPath } : {}),
-          ...(options.mandate ? { mandateId: options.mandate } : {}),
-          ...(options.status ? { status: options.status } : {})
-        });
-        const result = {
-          path,
-          repoPath: repoPath ?? null,
-          requests
-        };
+        const mandateStorePath = io.mandateStorePath ?? resolveMandateStorePath();
+        try {
+          const result = await createApprovalRequestsPayload({
+            path,
+            mandateStorePath,
+            ...(repoPath ? { repoPath } : {}),
+            ...(options.mandate ? { mandateId: options.mandate } : {}),
+            includeChildren: options.includeChildren ?? false,
+            ...(options.status ? { status: options.status } : {})
+          });
 
-        if (options.json) {
-          writeOut(JSON.stringify(result, null, 2));
-        } else {
-          writeOut(formatApprovalRequests(result));
+          if (options.json) {
+            writeOut(JSON.stringify(result, null, 2));
+          } else {
+            writeOut(formatApprovalRequests(result));
+          }
+        } catch (error) {
+          writeErr(`error: ${messageFromError(error)}`);
+          process.exitCode = 1;
         }
       }
     );
@@ -1837,6 +1883,7 @@ async function createMandateReportPayload(options: {
   id: string;
   path: string;
   auditLogPath: string;
+  approvalStorePath: string;
   logLimit: number;
   repoPath?: string;
 }): Promise<MandateReportPayload> {
@@ -1883,6 +1930,21 @@ async function createMandateReportPayload(options: {
   const limitedAuditEntries = auditEntries.slice(
     Math.max(auditEntries.length - options.logLimit, 0)
   );
+  const approvalRequests = (
+    await listApprovalRequests({
+      path: options.approvalStorePath,
+      ...(options.repoPath ? { repoPath: options.repoPath } : {}),
+      ...(rootMandateUid ? { rootMandateUid } : {})
+    })
+  ).filter((request) => {
+    if (!request.mandateId || !mandateIds.has(request.mandateId)) {
+      return false;
+    }
+    if (mandateUids.size > 0) {
+      return request.mandateUid ? mandateUids.has(request.mandateUid) : false;
+    }
+    return true;
+  });
 
   return {
     schemaVersion: mandateReportSchemaVersion,
@@ -1909,10 +1971,12 @@ async function createMandateReportPayload(options: {
         .length,
       closed: chain.filter((mandate) => mandate.runtimeStatus === "closed")
         .length,
-      auditEntries: limitedAuditEntries.length
+      auditEntries: limitedAuditEntries.length,
+      approvalRequests: approvalRequests.length
     },
     childrenByParent: childrenByParent(chain),
     mandates: chain,
+    approvalRequests,
     auditEntries: limitedAuditEntries
   };
 }
@@ -1995,6 +2059,92 @@ function childrenByParent(
   return result;
 }
 
+async function createApprovalRequestsPayload(options: {
+  path: string;
+  mandateStorePath: string;
+  repoPath?: string;
+  mandateId?: string;
+  includeChildren: boolean;
+  status?: ApprovalRequestWithStatus["runtimeStatus"];
+}): Promise<ApprovalRequestsPayload> {
+  const baseRequests = await listApprovalRequests({
+    path: options.path,
+    ...(options.repoPath ? { repoPath: options.repoPath } : {}),
+    ...(options.includeChildren || !options.mandateId
+      ? {}
+      : { mandateId: options.mandateId }),
+    ...(options.status ? { status: options.status } : {})
+  });
+
+  let mandates: MandateWithStatus[] = [];
+  let rootMandateId: string | null = null;
+  let rootMandateUid: string | null = null;
+  let requests = baseRequests;
+
+  if (options.includeChildren) {
+    const selectedMandateId = normalizeMandateId(options.mandateId ?? "");
+    if (!selectedMandateId) {
+      throw new Error("mandate id is required");
+    }
+    const allMandates = await listMandates({
+      path: options.mandateStorePath,
+      ...(options.repoPath ? { repoPath: options.repoPath } : {})
+    });
+    const selected = findLatestMandate(allMandates, selectedMandateId);
+    if (!selected) {
+      throw new Error(`mandate "${selectedMandateId}" was not found`);
+    }
+    rootMandateId = selected.delegationPath?.[0] ?? selected.id;
+    rootMandateUid = selected.delegationUids?.[0] ?? mandateUidForReport(selected);
+    mandates = mandateChainForRoot(allMandates, {
+      rootMandateId,
+      rootMandateUid
+    });
+    const mandateIds = new Set(mandates.map((mandate) => mandate.id));
+    const mandateUids = new Set(
+      mandates.flatMap((mandate) =>
+        mandate.mandateUid ? [mandate.mandateUid] : []
+      )
+    );
+    requests = baseRequests.filter((request) => {
+      if (!mandateIds.has(request.mandateId)) {
+        return false;
+      }
+      if (mandateUids.size > 0) {
+        return request.mandateUid ? mandateUids.has(request.mandateUid) : false;
+      }
+      return true;
+    });
+  }
+
+  return {
+    schemaVersion: approvalRequestsSchemaVersion,
+    path: options.path,
+    mandateStorePath: options.includeChildren ? options.mandateStorePath : null,
+    repoPath: options.repoPath ?? null,
+    mandateId: options.mandateId ?? null,
+    includeChildren: options.includeChildren,
+    rootMandateId,
+    rootMandateUid,
+    childrenByParent: options.includeChildren ? childrenByParent(mandates) : {},
+    counts: {
+      requests: requests.length,
+      pending: requests.filter((request) => request.runtimeStatus === "pending")
+        .length,
+      approved: requests.filter((request) => request.runtimeStatus === "approved")
+        .length,
+      denied: requests.filter((request) => request.runtimeStatus === "denied")
+        .length,
+      stale: requests.filter((request) => request.runtimeStatus === "stale")
+        .length,
+      expired: requests.filter((request) => request.runtimeStatus === "expired")
+        .length
+    },
+    mandates,
+    requests
+  };
+}
+
 function formatMandateStatus(result: {
   path: string;
   repoPath: string | null;
@@ -2067,6 +2217,7 @@ function formatMandateReport(report: MandateReportPayload): string {
     `Selected: ${report.selectedMandateId}`,
     `Mandates: ${report.counts.mandates} open:${report.counts.open} completed:${report.counts.completed} blocked:${report.counts.blocked} cancelled:${report.counts.cancelled}`,
     `Runtime: active:${report.counts.active} expired:${report.counts.expired} closed:${report.counts.closed}`,
+    `Approval requests: ${report.counts.approvalRequests}`,
     `Audit entries: ${report.counts.auditEntries}`
   ];
 
@@ -2144,6 +2295,11 @@ function formatApprovalRequests(result: {
         request.id,
         request.runtimeStatus,
         `mandate:${request.mandateId}`,
+        ...(request.parentMandateId ? [`parent:${request.parentMandateId}`] : []),
+        ...(request.delegatedBy ? [`delegated-by:${request.delegatedBy}`] : []),
+        ...(request.delegationPath
+          ? [`path:${request.delegationPath.join(">")}`]
+          : []),
         `branch:${request.branch}`,
         `tool:${request.toolName}`,
         `gate:${request.approvalGateId}:${request.approvalGatePattern}`,
@@ -2190,6 +2346,11 @@ function formatApprovalDecision(
     `Updated approval request ${request.id}`,
     `Status: ${request.runtimeStatus}`,
     `Mandate: ${request.mandateId}`,
+    ...(request.parentMandateId ? [`Parent: ${request.parentMandateId}`] : []),
+    ...(request.delegatedBy ? [`Delegated by: ${request.delegatedBy}`] : []),
+    ...(request.delegationPath
+      ? [`Delegation path: ${request.delegationPath.join(" -> ")}`]
+      : []),
     `Tool: ${request.toolName}`,
     `Gate: ${request.approvalGateId}:${request.approvalGatePattern}`,
     ...(request.approvalGateReason ? [`Reason: ${request.approvalGateReason}`] : []),
@@ -2335,6 +2496,7 @@ async function approvedApprovalRequestsForMandate(
     ...(path ? { path } : {}),
     repoPath: mandate.repoPath,
     mandateId: mandate.id,
+    ...(mandate.mandateUid ? { mandateUid: mandate.mandateUid } : {}),
     status: "approved"
   });
 
