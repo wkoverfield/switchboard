@@ -37,7 +37,9 @@ switchboard install claude
 
 Doctor also reports project client config state for Codex and Claude as
 `missing`, `installed`, `stale`, or `invalid`, plus other MCP server names
-already present in those project config files.
+already present in those project config files. Doctor allows fresh or temporary
+repos without `.switchboard.local.yaml`, but once you create local overrides it
+expects that file to be ignored by git.
 
 ## 3. Test One Profile
 

@@ -81,6 +81,7 @@ describe("switchboard CLI program", () => {
   it("fails doctor when .switchboard.local.yaml is not ignored", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), "node_modules/\n");
+    writeFileSync(join(root, ".switchboard.local.yaml"), "version: 1\n");
 
     const output: string[] = [];
     const program = createProgram({ writeOut: (message) => output.push(message) });
@@ -96,6 +97,33 @@ describe("switchboard CLI program", () => {
     expect(
       parsed.checks.find((check) => check.name === "local-config-gitignore")?.ok
     ).toBe(false);
+  });
+
+  it("passes doctor local-config hygiene for ephemeral repos without local config", async () => {
+    const root = makeTempProject();
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "doctor", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      checks: Array<{ name: string; ok: boolean; message: string }>;
+      nextSteps: string[];
+    };
+    expect(parsed.ok).toBe(true);
+    expect(
+      parsed.checks.find((check) => check.name === "local-config-gitignore")
+    ).toMatchObject({
+      ok: true,
+      message:
+        "No .switchboard.local.yaml found. Add it to .gitignore before storing local overrides."
+    });
+    expect(parsed.nextSteps).not.toContain(
+      'add ".switchboard.local.yaml" to .gitignore'
+    );
   });
 
   it("fails doctor on namespace collisions", async () => {
