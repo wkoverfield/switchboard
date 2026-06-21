@@ -211,8 +211,10 @@ describe("Switchboard MCP front door", () => {
   it("elicits approval in clients that support form elicitation", async () => {
     const root = await mkdtemp(join(tmpdir(), "switchboard-front-door-"));
     process.env.XDG_STATE_HOME = join(root, "state");
+    const mandateUid = "fix-ci:2026-06-21T08:00:00.000Z";
     await createApprovalRequest({
       mandateId: "fix-ci",
+      mandateUid,
       repoPath: root,
       branch: "fix/ci",
       toolName: "github_findu_echo",
@@ -231,6 +233,7 @@ describe("Switchboard MCP front door", () => {
       approvalRequired: {
         approvalRequestId: "approval-1",
         mandateId: "fix-ci",
+        mandateUid,
         repoPath: root,
         branch: "fix/ci",
         task: "fix-ci",
@@ -321,6 +324,7 @@ describe("Switchboard MCP front door", () => {
             action: "approval_elicitation",
             status: "ok",
             approvalDecision: "approved",
+            mandateUid,
             approvalRequestId: "approval-1"
           })
         ])

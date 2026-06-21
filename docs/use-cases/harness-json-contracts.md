@@ -35,8 +35,11 @@ fields.
 chain at handoff time. The payload includes the selected mandate id, root
 mandate id, immutable selected/root mandate UIDs, parent-to-child index,
 mandate runtime and handoff counts, related approval requests, and recent audit
-entries for mandates in the chain. The UID fields disambiguate repeated human
-slug ids such as multiple `fix-ci` mandates over time.
+entries for mandates in the chain. It also includes an additive `readiness`
+object that tells a harness whether the selected mandate can be handed off now,
+including open child mandates and pending approval requests that block handoff.
+The UID fields disambiguate repeated human slug ids such as multiple `fix-ci`
+mandates over time.
 
 `switchboard.approvals.v1` lets a harness inspect approval requests for a
 single mandate or, with `--include-children`, for the selected mandate's whole
