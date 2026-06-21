@@ -1079,7 +1079,7 @@ Acceptance:
   handoffs
 - docs explain success/error parsing for harness consumers
 
-### Current Slice: MCP Launch Command Candidates V0
+### Completed Slice: MCP Launch Command Candidates V0
 
 Goal: make harness startup payloads usable both for installed Switchboard CLIs
 and source-checkout dogfooding where `switchboard` is not on `PATH`.
@@ -1097,6 +1097,24 @@ Acceptance:
 - the smoke suite verifies the emitted built entrypoint candidate can launch
   the MCP command help
 - no changes to MCP routing, mandate enforcement, or provider integrations
+
+### Current Slice: Child Approval Gate Duplicate UX V0
+
+Goal: make inherited child approval-gate behavior explicit so lead agents do not
+think a child-provided reason, risk, or label overrides the parent's gate.
+
+Acceptance:
+
+- `createChildMandate` rejects child approval gates whose tool pattern is
+  already inherited from the parent
+- the error tells users to omit the duplicate inherited gate or choose a
+  narrower tool pattern
+- `switchboard mandate child --json` returns the error through
+  `switchboard.error.v1`
+- child mandates can still add non-duplicate stricter approval gates
+- docs explain the duplicate inherited-gate rule for harness authors
+- no changes to approval execution, approval requests, MCP routing, providers,
+  or daemon behavior
 
 ## Rules For Future Agents
 

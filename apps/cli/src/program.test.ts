@@ -1988,6 +1988,81 @@ describe("switchboard CLI program", () => {
     });
   });
 
+  it("rejects duplicate inherited child approval gates", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message),
+      mandateStorePath
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "lead",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--require-approval-tool",
+        "github_findu_checks_rerun",
+        "--require-approval-reason",
+        "parent approval reason",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    process.exitCode = undefined;
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "child",
+        "rerun checks",
+        "--parent",
+        "fix-ci",
+        "--agent",
+        "worker",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "30m",
+        "--require-approval-tool",
+        "github_findu_checks_rerun",
+        "--require-approval-reason",
+        "child override reason",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    expect(errors).toEqual([]);
+    expect(JSON.parse(output[1] ?? "{}")).toEqual({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "child_mandate_create_failed",
+      message:
+        'child approval gate "github_findu_checks_rerun" is already inherited from parent mandate "fix-ci"; omit the duplicate gate or choose a narrower tool pattern',
+      nextActions: []
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
   it("rejects child mandates that exceed parent profile scope", async () => {
     const root = makeTempProject();
     writeMandateConfig(root);

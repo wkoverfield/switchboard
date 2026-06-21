@@ -142,6 +142,11 @@ lease. The JSON response includes the same `mcpLaunch` payload shape as
 `mandate create --json`, so a harness can launch the worker through the child
 mandate immediately.
 
+Do not repeat an inherited approval gate pattern on the child. Parent gate
+details dominate for that pattern, so Switchboard rejects duplicates instead of
+silently dropping child-provided reason, risk, or labels. To make a child more
+specific, add a narrower approval gate pattern that is not already inherited.
+
 V0 allowed-tool narrowing is intentionally conservative: exact matches, `*`,
 and parent suffix wildcards like `github_findu_*` can authorize narrower child
 patterns. Broader pattern implication can come later, but V0 should fail closed

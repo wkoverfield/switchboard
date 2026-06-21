@@ -133,6 +133,35 @@ describe("mandates", () => {
         ]
       })
     ).toEqual({ allowed: true, approvalRequestId: "approval-1" });
+    expect(
+      evaluateMandateToolPolicy("github_findu_checks_rerun", {
+        allowedTools: ["github_findu_*"],
+        approvalGates: [
+          {
+            id: "gate-1",
+            toolPattern: "github_findu_*",
+            reason: "parent approval"
+          },
+          {
+            id: "gate-2",
+            toolPattern: "github_findu_checks_rerun",
+            reason: "child approval",
+            risk: "medium"
+          }
+        ]
+      })
+    ).toEqual({
+      allowed: false,
+      approvalRequired: true,
+      approvalGate: {
+        id: "gate-2",
+        toolPattern: "github_findu_checks_rerun",
+        reason: "child approval",
+        risk: "medium"
+      },
+      reason:
+        'tool "github_findu_checks_rerun" requires approval by mandate gate "gate-2"'
+    });
   });
 
   it("creates and lists persisted mandates with runtime status", async () => {
@@ -326,6 +355,55 @@ describe("mandates", () => {
         lease: "2h"
       })
     ).rejects.toThrow("child mandate lease cannot outlive parent mandate lease");
+  });
+
+  it("rejects child approval gates that duplicate inherited parent gates", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+    const repoPath = join(root, "repo");
+
+    await createMandate({
+      path,
+      now: () => new Date("2026-06-19T16:00:00.000Z"),
+      task: "fix-ci",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "fix/ci",
+      agentRole: "lead",
+      profiles: ["github_findu"],
+      lease: "1h",
+      approvalRequiredTools: [
+        {
+          toolPattern: "github_findu_checks_rerun",
+          reason: "parent approval reason",
+          risk: "high"
+        }
+      ]
+    });
+
+    await expect(
+      createChildMandate({
+        path,
+        now: () => new Date("2026-06-19T16:30:00.000Z"),
+        parentId: "fix-ci",
+        task: "rerun checks",
+        repoPath,
+        worktreePath: repoPath,
+        branch: "fix/ci",
+        agentRole: "worker",
+        profiles: ["github_findu"],
+        lease: "30m",
+        approvalRequiredTools: [
+          {
+            toolPattern: "github_findu_checks_rerun",
+            reason: "child override reason",
+            risk: "medium"
+          }
+        ]
+      })
+    ).rejects.toThrow(
+      'child approval gate "github_findu_checks_rerun" is already inherited from parent mandate "fix-ci"; omit the duplicate gate or choose a narrower tool pattern'
+    );
   });
 
   it("updates mandate handoff reports and closes runtime authority", async () => {
