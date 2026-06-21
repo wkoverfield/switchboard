@@ -624,6 +624,12 @@ async function callConfiguredTool(
           status: "error",
           toolName: name,
           mandateId: routerResult.mandate.id,
+          ...(routerResult.mandate.mandateUid
+            ? { mandateUid: routerResult.mandate.mandateUid }
+            : {}),
+          repoPath: routerResult.mandate.repoPath,
+          worktreePath: routerResult.mandate.worktreePath,
+          branch: routerResult.mandate.branch,
           ...(approvalRequestId ? { approvalRequestId } : {}),
           ...("approvalRequired" in policyDecision
             ? {
@@ -752,6 +758,12 @@ async function auditApprovalBlockedCall(options: {
     status: "error",
     toolName: options.toolName,
     mandateId: options.mandate.id,
+    ...(options.mandate.mandateUid
+      ? { mandateUid: options.mandate.mandateUid }
+      : {}),
+    repoPath: options.mandate.repoPath,
+    worktreePath: options.mandate.worktreePath,
+    branch: options.mandate.branch,
     approvalRequestId: options.approvalRequestId,
     approvalGateId: options.approvalGateId,
     approvalGatePattern: options.approvalGatePattern,
@@ -833,6 +845,12 @@ async function routerForConfiguredProfiles(
       ...(mandate
         ? {
             mandateId: mandate.id,
+            auditContext: {
+              ...(mandate.mandateUid ? { mandateUid: mandate.mandateUid } : {}),
+              repoPath: mandate.repoPath,
+              worktreePath: mandate.worktreePath,
+              branch: mandate.branch
+            },
             toolPolicy: {
               allowedTools: mandate.allowedTools,
               deniedTools: mandate.deniedTools,

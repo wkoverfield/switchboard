@@ -21,6 +21,12 @@ import {
 export interface GenericMcpRouterOptions {
   auditLogger?: AuditLogger;
   mandateId?: string;
+  auditContext?: {
+    mandateUid?: string;
+    repoPath?: string;
+    worktreePath?: string;
+    branch?: string;
+  };
   toolPolicy?: MandateToolPolicy;
 }
 
@@ -29,6 +35,7 @@ export class GenericMcpRouter {
   private routes = new Map<string, ToolRoute>();
   private readonly auditLogger: AuditLogger;
   private readonly mandateId: string | undefined;
+  private readonly auditContext: GenericMcpRouterOptions["auditContext"];
   private readonly toolPolicy: MandateToolPolicy;
 
   constructor(
@@ -37,6 +44,7 @@ export class GenericMcpRouter {
   ) {
     this.auditLogger = options.auditLogger ?? noopAuditLogger;
     this.mandateId = options.mandateId;
+    this.auditContext = options.auditContext;
     this.toolPolicy = options.toolPolicy ?? {};
 
     for (const profile of profiles) {
@@ -202,6 +210,16 @@ export class GenericMcpRouter {
   ): Parameters<AuditLogger["log"]>[0] {
     return {
       ...entry,
+      ...(this.auditContext?.mandateUid
+        ? { mandateUid: this.auditContext.mandateUid }
+        : {}),
+      ...(this.auditContext?.repoPath
+        ? { repoPath: this.auditContext.repoPath }
+        : {}),
+      ...(this.auditContext?.worktreePath
+        ? { worktreePath: this.auditContext.worktreePath }
+        : {}),
+      ...(this.auditContext?.branch ? { branch: this.auditContext.branch } : {}),
       ...(namespace ? { namespace } : {}),
       ...(this.mandateId ? { mandateId: this.mandateId } : {})
     };

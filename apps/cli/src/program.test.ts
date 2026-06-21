@@ -2047,6 +2047,371 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("reports mandate handoff across parent and child chains", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const auditLogPath = join(root, "state", "logs", "switchboard.jsonl");
+    mkdirSync(join(root, "state", "logs"), { recursive: true });
+    writeFileSync(
+      auditLogPath,
+      [
+        {
+          version: 1,
+          timestamp: "2026-06-19T16:20:00.000Z",
+          action: "tool_call",
+          status: "ok",
+          profileName: "github_findu",
+          toolName: "github_findu_checks_list",
+          mandateId: "fix-ci",
+          repoPath: root
+        },
+        {
+          version: 1,
+          timestamp: "2026-06-19T16:25:00.000Z",
+          action: "tool_call",
+          status: "ok",
+          profileName: "github_findu",
+          toolName: "github_findu_checks_rerun",
+          mandateId: "rerun-checks",
+          repoPath: root
+        },
+        {
+          version: 1,
+          timestamp: "2026-06-19T16:30:00.000Z",
+          action: "tool_call",
+          status: "ok",
+          profileName: "github_findu",
+          toolName: "github_findu_checks_list",
+          mandateId: "fix-ci",
+          repoPath: join(root, "other-repo")
+        }
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join("\n") + "\n"
+    );
+
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message),
+      mandateStorePath,
+      auditLogPath
+    });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "lead",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "child",
+        "rerun checks",
+        "--parent",
+        "fix-ci",
+        "--agent",
+        "worker",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "30m",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "handoff",
+        "fix-ci",
+        "--state",
+        "completed",
+        "--summary",
+        "parent done"
+      ],
+      { from: "user" }
+    );
+    expect(errors).toEqual([
+      'error: cannot hand off mandate "fix-ci" while child mandates remain open: rerun-checks'
+    ]);
+    process.exitCode = undefined;
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "handoff",
+        "rerun-checks",
+        "--state",
+        "completed",
+        "--summary",
+        "checks are green",
+        "--next-step",
+        "merge PR",
+        "--artifact",
+        "https://github.com/woverfield/switchboard/pull/214",
+        "--by",
+        "worker-agent",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "handoff",
+        "fix-ci",
+        "--state",
+        "completed",
+        "--summary",
+        "parent done",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "report", "rerun-checks", "--json"],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[2] ?? "{}")).toMatchObject({
+      path: mandateStorePath,
+      mandate: {
+        id: "rerun-checks",
+        handoffState: "completed",
+        handoffSummary: "checks are green",
+        handoffNextSteps: ["merge PR"],
+        handoffArtifacts: [
+          "https://github.com/woverfield/switchboard/pull/214"
+        ],
+        handoffBy: "worker-agent",
+        runtimeStatus: "closed"
+      }
+    });
+    expect(JSON.parse(output[4] ?? "{}")).toMatchObject({
+      schemaVersion: "switchboard.mandate-report.v1",
+      path: mandateStorePath,
+      auditLogPath,
+      repoPath: root,
+      selectedMandateId: "rerun-checks",
+      rootMandateId: "fix-ci",
+      counts: {
+        mandates: 2,
+        open: 0,
+        completed: 2,
+        blocked: 0,
+        cancelled: 0,
+        closed: 2,
+        auditEntries: 2
+      },
+      childrenByParent: {
+        "fix-ci": ["rerun-checks"]
+      },
+      mandates: [
+        {
+          id: "fix-ci",
+          handoffState: "completed",
+          runtimeStatus: "closed"
+        },
+        {
+          id: "rerun-checks",
+          parentMandateId: "fix-ci",
+          handoffState: "completed",
+          runtimeStatus: "closed"
+        }
+      ],
+      auditEntries: [
+        {
+          mandateId: "fix-ci",
+          toolName: "github_findu_checks_list"
+        },
+        {
+          mandateId: "rerun-checks",
+          toolName: "github_findu_checks_rerun"
+        }
+      ]
+    });
+  });
+
+  it("reports the latest same-id mandate chain without old chain or other repo audit leakage", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const auditLogPath = join(root, "state", "logs", "switchboard.jsonl");
+    mkdirSync(join(root, "state", "logs"), { recursive: true });
+    writeFileSync(
+      mandateStorePath,
+      JSON.stringify(
+        {
+          version: 1,
+          mandates: [
+            {
+              version: 1,
+              id: "fix-ci",
+              mandateUid: "fix-ci:2026-06-19T16:00:00.000Z",
+              task: "fix-ci",
+              repoPath: root,
+              worktreePath: root,
+              branch: "fix/ci",
+              agentRole: "lead",
+              profiles: ["github_findu"],
+              lease: "1h",
+              createdAt: "2026-06-19T16:00:00.000Z",
+              expiresAt: "2026-06-19T17:00:00.000Z",
+              allowedTools: [],
+              deniedTools: [],
+              approvalGates: [],
+              handoffState: "completed",
+              handoffAt: "2026-06-19T16:30:00.000Z"
+            },
+            {
+              version: 1,
+              id: "rerun-checks",
+              mandateUid: "rerun-checks:2026-06-19T16:10:00.000Z",
+              task: "rerun checks",
+              parentMandateId: "fix-ci",
+              parentMandateUid: "fix-ci:2026-06-19T16:00:00.000Z",
+              delegationPath: ["fix-ci", "rerun-checks"],
+              delegationUids: [
+                "fix-ci:2026-06-19T16:00:00.000Z",
+                "rerun-checks:2026-06-19T16:10:00.000Z"
+              ],
+              repoPath: root,
+              worktreePath: root,
+              branch: "fix/ci",
+              agentRole: "worker",
+              profiles: ["github_findu"],
+              lease: "30m",
+              createdAt: "2026-06-19T16:10:00.000Z",
+              expiresAt: "2026-06-19T16:40:00.000Z",
+              allowedTools: [],
+              deniedTools: [],
+              approvalGates: [],
+              handoffState: "completed",
+              handoffAt: "2026-06-19T16:35:00.000Z"
+            },
+            {
+              version: 1,
+              id: "fix-ci",
+              mandateUid: "fix-ci:2026-06-19T18:00:00.000Z",
+              task: "fix-ci",
+              repoPath: root,
+              worktreePath: root,
+              branch: "fix/ci",
+              agentRole: "lead",
+              profiles: ["github_findu"],
+              lease: "1h",
+              createdAt: "2026-06-19T18:00:00.000Z",
+              expiresAt: "2026-06-19T19:00:00.000Z",
+              allowedTools: [],
+              deniedTools: [],
+              approvalGates: [],
+              handoffState: "open"
+            }
+          ]
+        },
+        null,
+        2
+      ) + "\n"
+    );
+    writeFileSync(
+      auditLogPath,
+      [
+        {
+          version: 1,
+          timestamp: "2026-06-19T16:20:00.000Z",
+          action: "tool_call",
+          status: "ok",
+          mandateId: "rerun-checks",
+          mandateUid: "rerun-checks:2026-06-19T16:10:00.000Z",
+          repoPath: root,
+          toolName: "old_child_tool"
+        },
+        {
+          version: 1,
+          timestamp: "2026-06-19T18:05:00.000Z",
+          action: "tool_call",
+          status: "ok",
+          mandateId: "fix-ci",
+          mandateUid: "fix-ci:2026-06-19T18:00:00.000Z",
+          repoPath: root,
+          toolName: "new_parent_tool"
+        },
+        {
+          version: 1,
+          timestamp: "2026-06-19T18:10:00.000Z",
+          action: "tool_call",
+          status: "ok",
+          mandateId: "fix-ci",
+          mandateUid: "fix-ci:2026-06-19T18:00:00.000Z",
+          repoPath: join(root, "other-repo"),
+          toolName: "other_repo_tool"
+        }
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join("\n") + "\n"
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath,
+      auditLogPath
+    });
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "report", "fix-ci", "--json"],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      schemaVersion: "switchboard.mandate-report.v1",
+      selectedMandateUid: "fix-ci:2026-06-19T18:00:00.000Z",
+      rootMandateUid: "fix-ci:2026-06-19T18:00:00.000Z",
+      counts: {
+        mandates: 1,
+        auditEntries: 1
+      },
+      mandates: [
+        {
+          id: "fix-ci",
+          mandateUid: "fix-ci:2026-06-19T18:00:00.000Z"
+        }
+      ],
+      auditEntries: [
+        {
+          mandateId: "fix-ci",
+          mandateUid: "fix-ci:2026-06-19T18:00:00.000Z",
+          toolName: "new_parent_tool"
+        }
+      ]
+    });
+  });
+
   it("rejects mismatched approval gate reason counts", async () => {
     const root = makeTempProject();
     writeMandateConfig(root);

@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import {
+  type AuditLogEntry,
   type AuditLogger,
   type ApprovalRequestWithStatus,
   checkLocalConfigIgnored,
@@ -19,6 +20,7 @@ import {
   type MandateWithStatus,
   noopAuditLogger,
   namespacesForProfiles,
+  normalizeMandateId,
   readAuditLogEntries,
   renderSwitchboardClientConfig,
   resolveApprovalRequestStorePath,
@@ -32,6 +34,7 @@ import {
   resolveRepoConfigPaths,
   starterUpstreamArgPlaceholder,
   type SupportedClient,
+  updateMandateHandoff,
   validateInitConfigOptions,
   validateSwitchboardClientConfigOptions,
   type ProjectClientConfigInspection,
@@ -64,6 +67,7 @@ import {
 const version = "0.1.0";
 const mandateMcpLaunchSchemaVersion = "switchboard.mcp-launch.v1";
 const mandateStatusSchemaVersion = "switchboard.mandate-status.v1";
+const mandateReportSchemaVersion = "switchboard.mandate-report.v1";
 const toolSurfaceSchemaVersion = "switchboard.tool-surface.v1";
 
 interface MandateMcpLaunchPayload {
@@ -73,6 +77,32 @@ interface MandateMcpLaunchPayload {
   cwd: string;
   command: "switchboard";
   args: string[];
+}
+
+interface MandateReportPayload {
+  schemaVersion: typeof mandateReportSchemaVersion;
+  path: string;
+  auditLogPath: string;
+  repoPath: string | null;
+  selectedMandateId: string;
+  selectedMandateUid: string | null;
+  rootMandateId: string;
+  rootMandateUid: string | null;
+  generatedAt: string;
+  counts: {
+    mandates: number;
+    open: number;
+    completed: number;
+    blocked: number;
+    cancelled: number;
+    active: number;
+    expired: number;
+    closed: number;
+    auditEntries: number;
+  };
+  childrenByParent: Record<string, string[]>;
+  mandates: MandateWithStatus[];
+  auditEntries: AuditLogEntry[];
 }
 
 export interface ProgramIo {
@@ -87,6 +117,12 @@ export interface ProgramIo {
     options?: {
       auditLogger?: AuditLogger;
       mandateId?: string;
+      auditContext?: {
+        mandateUid?: string;
+        repoPath?: string;
+        worktreePath?: string;
+        branch?: string;
+      };
       toolPolicy?: MandateToolPolicy;
     }
   ) => Promise<void>;
@@ -95,6 +131,12 @@ export interface ProgramIo {
     options?: {
       auditLogger?: AuditLogger;
       mandateId?: string;
+      auditContext?: {
+        mandateUid?: string;
+        repoPath?: string;
+        worktreePath?: string;
+        branch?: string;
+      };
       toolPolicy?: MandateToolPolicy;
     }
   ) => Promise<NamespacedTool[]>;
@@ -285,6 +327,7 @@ export function createProgram(io: ProgramIo = {}): Command {
           ...(mandate
             ? {
                 mandateId: mandate.id,
+                auditContext: mandateAuditContext(mandate),
                 toolPolicy: {
                   allowedTools: mandate.allowedTools,
                   deniedTools: mandate.deniedTools,
@@ -674,6 +717,7 @@ export function createProgram(io: ProgramIo = {}): Command {
         ...(mandate
           ? {
               mandateId: mandate.id,
+              auditContext: mandateAuditContext(mandate),
               toolPolicy: {
                 allowedTools: mandate.allowedTools,
                 deniedTools: mandate.deniedTools,
@@ -1131,6 +1175,122 @@ export function createProgram(io: ProgramIo = {}): Command {
               } else {
                 writeOut(formatMandateCreated(path, mandate));
               }
+            } catch (error) {
+              writeErr(`error: ${messageFromError(error)}`);
+              process.exitCode = 1;
+            }
+          }
+        )
+    )
+    .addCommand(
+      new Command("handoff")
+        .description("Close a mandate with a local handoff report.")
+        .argument("<id>", "mandate id to hand off")
+        .requiredOption(
+          "--state <state>",
+          "handoff state: completed, blocked, or cancelled"
+        )
+        .option("--summary <text>", "short handoff summary")
+        .option(
+          "--next-step <text>",
+          "next step for the human or harness (repeatable)",
+          collectOption,
+          [] as string[]
+        )
+        .option(
+          "--artifact <value>",
+          "handoff artifact such as a PR, log, or deployment URL (repeatable)",
+          collectOption,
+          [] as string[]
+        )
+        .option("--by <actor>", "actor writing the handoff report")
+        .option("--json", "print machine-readable JSON")
+        .action(
+          async (
+            id: string,
+            options: {
+              state: string;
+              summary?: string;
+              nextStep: string[];
+              artifact: string[];
+              by?: string;
+              json?: boolean;
+            }
+          ) => {
+            const state = parseHandoffState(options.state);
+            if (!state) {
+              writeErr(
+                "error: --state must be completed, blocked, or cancelled"
+              );
+              process.exitCode = 1;
+              return;
+            }
+
+            const globalOptions = program.opts<{ cwd?: string }>();
+            const repoPath = installTargetCwd(globalOptions.cwd);
+            const path = io.mandateStorePath ?? resolveMandateStorePath();
+            try {
+              const mandate = await updateMandateHandoff({
+                path,
+                id,
+                repoPath,
+                state,
+                ...(options.summary ? { summary: options.summary } : {}),
+                nextSteps: options.nextStep,
+                artifacts: options.artifact,
+                ...(options.by ? { handoffBy: options.by } : {})
+              });
+              const result = { path, mandate };
+              writeOut(
+                options.json
+                  ? JSON.stringify(result, null, 2)
+                  : formatMandateHandoff(path, mandate)
+              );
+            } catch (error) {
+              writeErr(`error: ${messageFromError(error)}`);
+              process.exitCode = 1;
+            }
+          }
+        )
+    )
+    .addCommand(
+      new Command("report")
+        .description("Show a mandate tree handoff report.")
+        .argument("<id>", "root or child mandate id to report")
+        .option("--json", "print machine-readable JSON")
+        .option("--all", "search mandates for all repos")
+        .option("--log-limit <count>", "maximum related audit entries", "20")
+        .action(
+          async (
+            id: string,
+            options: { json?: boolean; all?: boolean; logLimit: string }
+          ) => {
+            const logLimit = parsePositiveInteger(options.logLimit);
+            if (logLimit === undefined) {
+              writeErr("error: --log-limit must be a positive integer");
+              process.exitCode = 1;
+              return;
+            }
+
+            const globalOptions = program.opts<{ cwd?: string }>();
+            const repoPath = options.all
+              ? undefined
+              : installTargetCwd(globalOptions.cwd);
+            const path = io.mandateStorePath ?? resolveMandateStorePath();
+            const auditLogPath = io.auditLogPath ?? resolveAuditLogPath();
+            try {
+              const report = await createMandateReportPayload({
+                id,
+                path,
+                auditLogPath,
+                logLimit,
+                ...(repoPath ? { repoPath } : {})
+              });
+              writeOut(
+                options.json
+                  ? JSON.stringify(report, null, 2)
+                  : formatMandateReport(report)
+              );
             } catch (error) {
               writeErr(`error: ${messageFromError(error)}`);
               process.exitCode = 1;
@@ -1659,6 +1819,182 @@ function createMandateMcpLaunchPayload(
   };
 }
 
+function mandateAuditContext(mandate: MandateWithStatus): {
+  mandateUid?: string;
+  repoPath: string;
+  worktreePath: string;
+  branch: string;
+} {
+  return {
+    ...(mandate.mandateUid ? { mandateUid: mandate.mandateUid } : {}),
+    repoPath: mandate.repoPath,
+    worktreePath: mandate.worktreePath,
+    branch: mandate.branch
+  };
+}
+
+async function createMandateReportPayload(options: {
+  id: string;
+  path: string;
+  auditLogPath: string;
+  logLimit: number;
+  repoPath?: string;
+}): Promise<MandateReportPayload> {
+  const selectedMandateId = normalizeMandateId(options.id);
+  if (!selectedMandateId) {
+    throw new Error("mandate id is required");
+  }
+  const mandates = await listMandates({
+    path: options.path,
+    ...(options.repoPath ? { repoPath: options.repoPath } : {})
+  });
+  const selected = findLatestMandate(mandates, selectedMandateId);
+  if (!selected) {
+    throw new Error(`mandate "${selectedMandateId}" was not found`);
+  }
+
+  const selectedMandateUid = mandateUidForReport(selected);
+  const rootMandateUid = selected.delegationUids?.[0] ?? selectedMandateUid;
+  const rootMandateId = selected.delegationPath?.[0] ?? selected.id;
+  const chain = mandateChainForRoot(mandates, {
+    rootMandateId,
+    rootMandateUid
+  });
+  const mandateIds = new Set(chain.map((mandate) => mandate.id));
+  const mandateUids = new Set(
+    chain.flatMap((mandate) =>
+      mandate.mandateUid ? [mandate.mandateUid] : []
+    )
+  );
+  const auditEntries = (
+    await readAuditLogEntries({ path: options.auditLogPath })
+  ).filter((entry) => {
+    if (options.repoPath && entry.repoPath !== options.repoPath) {
+      return false;
+    }
+    if (!entry.mandateId || !mandateIds.has(entry.mandateId)) {
+      return false;
+    }
+    if (entry.mandateUid && mandateUids.size > 0) {
+      return mandateUids.has(entry.mandateUid);
+    }
+    return true;
+  });
+  const limitedAuditEntries = auditEntries.slice(
+    Math.max(auditEntries.length - options.logLimit, 0)
+  );
+
+  return {
+    schemaVersion: mandateReportSchemaVersion,
+    path: options.path,
+    auditLogPath: options.auditLogPath,
+    repoPath: options.repoPath ?? null,
+    selectedMandateId,
+    selectedMandateUid,
+    rootMandateId,
+    rootMandateUid,
+    generatedAt: new Date().toISOString(),
+    counts: {
+      mandates: chain.length,
+      open: chain.filter((mandate) => mandate.handoffState === "open").length,
+      completed: chain.filter((mandate) => mandate.handoffState === "completed")
+        .length,
+      blocked: chain.filter((mandate) => mandate.handoffState === "blocked")
+        .length,
+      cancelled: chain.filter((mandate) => mandate.handoffState === "cancelled")
+        .length,
+      active: chain.filter((mandate) => mandate.runtimeStatus === "active")
+        .length,
+      expired: chain.filter((mandate) => mandate.runtimeStatus === "expired")
+        .length,
+      closed: chain.filter((mandate) => mandate.runtimeStatus === "closed")
+        .length,
+      auditEntries: limitedAuditEntries.length
+    },
+    childrenByParent: childrenByParent(chain),
+    mandates: chain,
+    auditEntries: limitedAuditEntries
+  };
+}
+
+function findLatestMandate(
+  mandates: MandateWithStatus[],
+  id: string
+): MandateWithStatus | undefined {
+  for (let index = mandates.length - 1; index >= 0; index -= 1) {
+    const mandate = mandates[index];
+    if (mandate?.id === id) {
+      return mandate;
+    }
+  }
+
+  return undefined;
+}
+
+function mandateChainForRoot(
+  mandates: MandateWithStatus[],
+  root: { rootMandateId: string; rootMandateUid: string | null }
+): MandateWithStatus[] {
+  const chainIds = new Set([root.rootMandateId]);
+  const chainUids = new Set(root.rootMandateUid ? [root.rootMandateUid] : []);
+  const chain: MandateWithStatus[] = [];
+
+  for (const mandate of mandates) {
+    const delegationPath = mandate.delegationPath ?? [];
+    const delegationUids = mandate.delegationUids ?? [];
+    const isInChain = root.rootMandateUid
+      ? mandate.mandateUid === root.rootMandateUid ||
+        mandate.parentMandateUid === root.rootMandateUid ||
+        delegationUids.includes(root.rootMandateUid) ||
+        (mandate.parentMandateUid
+          ? chainUids.has(mandate.parentMandateUid)
+          : false)
+      : mandate.id === root.rootMandateId ||
+        mandate.parentMandateId === root.rootMandateId ||
+        delegationPath.includes(root.rootMandateId) ||
+        (mandate.parentMandateId ? chainIds.has(mandate.parentMandateId) : false);
+    if (isInChain) {
+      chain.push(mandate);
+      chainIds.add(mandate.id);
+      if (mandate.mandateUid) {
+        chainUids.add(mandate.mandateUid);
+      }
+    }
+  }
+
+  return chain.sort((left, right) => {
+    const leftDepth = left.delegationPath?.length ?? 1;
+    const rightDepth = right.delegationPath?.length ?? 1;
+    if (leftDepth !== rightDepth) {
+      return leftDepth - rightDepth;
+    }
+
+    return left.createdAt.localeCompare(right.createdAt);
+  });
+}
+
+function mandateUidForReport(mandate: MandateWithStatus): string | null {
+  return mandate.mandateUid ?? null;
+}
+
+function childrenByParent(
+  mandates: MandateWithStatus[]
+): Record<string, string[]> {
+  const result: Record<string, string[]> = {};
+  for (const mandate of mandates) {
+    if (!mandate.parentMandateId) {
+      continue;
+    }
+
+    result[mandate.parentMandateId] = [
+      ...(result[mandate.parentMandateId] ?? []),
+      mandate.id
+    ];
+  }
+
+  return result;
+}
+
 function formatMandateStatus(result: {
   path: string;
   repoPath: string | null;
@@ -1694,9 +2030,68 @@ function formatMandateStatus(result: {
         `allow:${mandate.allowedTools.length > 0 ? mandate.allowedTools.join(",") : "all"}`,
         `deny:${mandate.deniedTools.length > 0 ? mandate.deniedTools.join(",") : "none"}`,
         `approval:${formatApprovalGates(mandate.approvalGates, ",")}`,
+        `handoff:${mandate.handoffState}`,
         `expires:${mandate.expiresAt}`
       ].join(" ")
     );
+  }
+
+  return lines.join("\n");
+}
+
+function formatMandateHandoff(path: string, mandate: MandateWithStatus): string {
+  return [
+    `Updated mandate ${mandate.id}`,
+    `State: ${mandate.handoffState}`,
+    `Runtime: ${mandate.runtimeStatus}`,
+    ...(mandate.handoffSummary ? [`Summary: ${mandate.handoffSummary}`] : []),
+    ...(mandate.handoffNextSteps && mandate.handoffNextSteps.length > 0
+      ? [`Next steps: ${mandate.handoffNextSteps.join("; ")}`]
+      : []),
+    ...(mandate.handoffArtifacts && mandate.handoffArtifacts.length > 0
+      ? [`Artifacts: ${mandate.handoffArtifacts.join(", ")}`]
+      : []),
+    ...(mandate.handoffBy ? [`By: ${mandate.handoffBy}`] : []),
+    ...(mandate.handoffAt ? [`At: ${mandate.handoffAt}`] : []),
+    `Store: ${path}`
+  ].join("\n");
+}
+
+function formatMandateReport(report: MandateReportPayload): string {
+  const lines = [
+    "Switchboard mandate report",
+    `Store: ${report.path}`,
+    `Audit log: ${report.auditLogPath}`,
+    `Repo: ${report.repoPath ?? "all"}`,
+    `Root: ${report.rootMandateId}`,
+    `Selected: ${report.selectedMandateId}`,
+    `Mandates: ${report.counts.mandates} open:${report.counts.open} completed:${report.counts.completed} blocked:${report.counts.blocked} cancelled:${report.counts.cancelled}`,
+    `Runtime: active:${report.counts.active} expired:${report.counts.expired} closed:${report.counts.closed}`,
+    `Audit entries: ${report.counts.auditEntries}`
+  ];
+
+  if (report.mandates.length > 0) {
+    lines.push("", "Mandate chain:");
+    for (const mandate of report.mandates) {
+      const parent = mandate.parentMandateId
+        ? ` parent:${mandate.parentMandateId}`
+        : "";
+      lines.push(
+        `  ${mandate.id} state:${mandate.handoffState} runtime:${mandate.runtimeStatus}${parent} role:${mandate.agentRole}`
+      );
+      if (mandate.handoffSummary) {
+        lines.push(`    ${mandate.handoffSummary}`);
+      }
+    }
+  }
+
+  if (report.auditEntries.length > 0) {
+    lines.push("", "Recent audit entries:");
+    for (const entry of report.auditEntries) {
+      lines.push(
+        `  ${entry.timestamp} ${entry.status} mandate:${entry.mandateId ?? "none"} ${entry.action}${entry.toolName ? ` ${entry.toolName}` : ""}`
+      );
+    }
   }
 
   return lines.join("\n");
@@ -2136,6 +2531,16 @@ function collectOption(value: string, previous: string[]): string[] {
   return [...previous, value];
 }
 
+function parseHandoffState(
+  value: string
+): "completed" | "blocked" | "cancelled" | undefined {
+  if (value === "completed" || value === "blocked" || value === "cancelled") {
+    return value;
+  }
+
+  return undefined;
+}
+
 function parseSupportedClient(value: string): SupportedClient | undefined {
   if (value === "codex" || value === "claude") {
     return value;
@@ -2161,6 +2566,12 @@ async function serveProfilesOverStdio(
   options: {
     auditLogger?: AuditLogger;
     mandateId?: string;
+    auditContext?: {
+      mandateUid?: string;
+      repoPath?: string;
+      worktreePath?: string;
+      branch?: string;
+    };
     toolPolicy?: MandateToolPolicy;
   } = {}
 ): Promise<void> {
@@ -2169,6 +2580,7 @@ async function serveProfilesOverStdio(
     {
       ...(options.auditLogger ? { auditLogger: options.auditLogger } : {}),
       ...(options.mandateId ? { mandateId: options.mandateId } : {}),
+      ...(options.auditContext ? { auditContext: options.auditContext } : {}),
       ...(options.toolPolicy ? { toolPolicy: options.toolPolicy } : {})
     }
   );
@@ -2180,6 +2592,12 @@ async function listToolsOverProfiles(
   options: {
     auditLogger?: AuditLogger;
     mandateId?: string;
+    auditContext?: {
+      mandateUid?: string;
+      repoPath?: string;
+      worktreePath?: string;
+      branch?: string;
+    };
     toolPolicy?: MandateToolPolicy;
   } = {}
 ): Promise<NamespacedTool[]> {
@@ -2188,6 +2606,7 @@ async function listToolsOverProfiles(
     {
       ...(options.auditLogger ? { auditLogger: options.auditLogger } : {}),
       ...(options.mandateId ? { mandateId: options.mandateId } : {}),
+      ...(options.auditContext ? { auditContext: options.auditContext } : {}),
       ...(options.toolPolicy ? { toolPolicy: options.toolPolicy } : {})
     }
   );

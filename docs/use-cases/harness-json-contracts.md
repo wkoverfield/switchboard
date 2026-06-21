@@ -11,6 +11,7 @@ preflight the available tool surface, and inspect state afterward.
 | MCP launch payload | `switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --json` | `mcpLaunch.schemaVersion: "switchboard.mcp-launch.v1"` | Stable enough for harness startup |
 | Child MCP launch payload | `switchboard mandate child <task> --parent <id> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --json` | `mcpLaunch.schemaVersion: "switchboard.mcp-launch.v1"` | Stable enough for delegated worker startup |
 | Mandate status | `switchboard mandate status [id] --json` | `schemaVersion: "switchboard.mandate-status.v1"` | Stable enough for harness polling |
+| Mandate report | `switchboard mandate report <id> --json` | `schemaVersion: "switchboard.mandate-report.v1"` | Stable enough for harness handoff inspection |
 | Tool surface | `switchboard tools --mandate <id> --json` | `schemaVersion: "switchboard.tool-surface.v1"` | Stable enough for harness preflight |
 
 These contracts are additive within a version: consumers should ignore unknown
@@ -28,6 +29,13 @@ stays repo-aware even when the harness runs elsewhere.
 includes the mandate store path, optional repo filter, and matching mandates
 with runtime status, lease, profile, branch, policy, approval gate, and handoff
 fields.
+
+`switchboard.mandate-report.v1` lets a harness inspect a parent/child mandate
+chain at handoff time. The payload includes the selected mandate id, root
+mandate id, immutable selected/root mandate UIDs, parent-to-child index,
+mandate runtime and handoff counts, and recent audit entries for mandates in
+the chain. The UID fields disambiguate repeated human slug ids such as
+multiple `fix-ci` mandates over time.
 
 `switchboard.tool-surface.v1` lets a harness inspect the scoped tool surface
 before launch. The payload includes profile/tool counts, namespaced tools, and
@@ -47,7 +55,8 @@ formal harness contracts:
 | Daemon diagnostics | `switchboard daemon <status\|start\|ping\|tools\|stop> --json` | Operational surfaces, not mandate authority contracts |
 
 Do not treat unversioned JSON as frozen. Prefer versioned mandate launch,
-mandate status, and tool-surface payloads for harness integration today.
+mandate status, mandate report, and tool-surface payloads for harness
+integration today.
 
 ## Compatibility Rules
 
