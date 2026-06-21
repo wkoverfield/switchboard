@@ -1810,6 +1810,7 @@ describe("switchboard CLI program", () => {
     });
 
     expect(JSON.parse(output[1] ?? "{}")).toMatchObject({
+      schemaVersion: "switchboard.mandate-status.v1",
       path: mandateStorePath,
       repoPath: root,
       mandates: [

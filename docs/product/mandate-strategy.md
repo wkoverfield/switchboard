@@ -257,6 +257,8 @@ Switchboard the orchestrator:
 - the launch payload includes a schema/version marker, mandate id, repo cwd,
   command, and args
 - launch args carry `--cwd <repo> mcp --mandate <id>`
+- `switchboard mandate status --json` exposes versioned mandate state with
+  `switchboard.mandate-status.v1`
 - `switchboard tools --mandate <id> --json` exposes the scoped tool surface for
   harness preflight and UI without launching an agent client
 - the tool surface payload is explicitly versioned as
