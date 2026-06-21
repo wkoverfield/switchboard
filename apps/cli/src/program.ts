@@ -103,6 +103,7 @@ interface MandateReportPayload {
     approvalRequests: number;
   };
   readiness: MandateReportReadiness;
+  results: MandateReportResults;
   childrenByParent: Record<string, string[]>;
   mandates: MandateWithStatus[];
   approvalRequests: ApprovalRequestWithStatus[];
@@ -127,6 +128,48 @@ interface MandateReportReadiness {
   }>;
   blockers: string[];
   nextActions: string[];
+}
+
+interface MandateReportResults {
+  counts: {
+    handoffs: number;
+    completed: number;
+    blocked: number;
+    cancelled: number;
+    open: number;
+    summaries: number;
+    nextSteps: number;
+    artifacts: number;
+  };
+  handoffs: Array<{
+    id: string;
+    mandateUid: string | null;
+    parentMandateId: string | null;
+    state: Exclude<MandateWithStatus["handoffState"], "open">;
+    agentRole: string;
+    branch: string;
+    summary: string | null;
+    nextSteps: string[];
+    artifacts: string[];
+    by: string | null;
+    at: string | null;
+  }>;
+  openMandates: Array<{
+    id: string;
+    mandateUid: string | null;
+    agentRole: string;
+    branch: string;
+  }>;
+  nextSteps: Array<{
+    mandateId: string;
+    mandateUid: string | null;
+    value: string;
+  }>;
+  artifacts: Array<{
+    mandateId: string;
+    mandateUid: string | null;
+    value: string;
+  }>;
 }
 
 interface ApprovalRequestsPayload {
@@ -1970,6 +2013,7 @@ async function createMandateReportPayload(options: {
     chain,
     approvalRequests
   });
+  const results = mandateReportResults(chain);
 
   return {
     schemaVersion: mandateReportSchemaVersion,
@@ -2000,6 +2044,7 @@ async function createMandateReportPayload(options: {
       approvalRequests: approvalRequests.length
     },
     readiness,
+    results,
     childrenByParent: childrenByParent(chain),
     mandates: chain,
     approvalRequests,
@@ -2084,6 +2129,69 @@ function mandateReportReadiness(options: {
     pendingApprovalRequests,
     blockers,
     nextActions
+  };
+}
+
+function mandateReportResults(chain: MandateWithStatus[]): MandateReportResults {
+  const handoffs = chain
+    .filter((mandate) => mandate.handoffState !== "open")
+    .map((mandate) => ({
+      id: mandate.id,
+      mandateUid: mandate.mandateUid ?? null,
+      parentMandateId: mandate.parentMandateId ?? null,
+      state: mandate.handoffState as Exclude<
+        MandateWithStatus["handoffState"],
+        "open"
+      >,
+      agentRole: mandate.agentRole,
+      branch: mandate.branch,
+      summary: mandate.handoffSummary ?? null,
+      nextSteps: mandate.handoffNextSteps ?? [],
+      artifacts: mandate.handoffArtifacts ?? [],
+      by: mandate.handoffBy ?? null,
+      at: mandate.handoffAt ?? null
+    }));
+  const openMandates = chain
+    .filter((mandate) => mandate.handoffState === "open")
+    .map((mandate) => ({
+      id: mandate.id,
+      mandateUid: mandate.mandateUid ?? null,
+      agentRole: mandate.agentRole,
+      branch: mandate.branch
+    }));
+  const nextSteps = handoffs.flatMap((handoff) =>
+    handoff.nextSteps.map((value) => ({
+      mandateId: handoff.id,
+      mandateUid: handoff.mandateUid,
+      value
+    }))
+  );
+  const artifacts = handoffs.flatMap((handoff) =>
+    handoff.artifacts.map((value) => ({
+      mandateId: handoff.id,
+      mandateUid: handoff.mandateUid,
+      value
+    }))
+  );
+
+  return {
+    counts: {
+      handoffs: handoffs.length,
+      completed: handoffs.filter((handoff) => handoff.state === "completed")
+        .length,
+      blocked: handoffs.filter((handoff) => handoff.state === "blocked")
+        .length,
+      cancelled: handoffs.filter((handoff) => handoff.state === "cancelled")
+        .length,
+      open: openMandates.length,
+      summaries: handoffs.filter((handoff) => handoff.summary).length,
+      nextSteps: nextSteps.length,
+      artifacts: artifacts.length
+    },
+    handoffs,
+    openMandates,
+    nextSteps,
+    artifacts
   };
 }
 
@@ -2365,6 +2473,7 @@ function formatMandateReport(report: MandateReportPayload): string {
     `Mandates: ${report.counts.mandates} open:${report.counts.open} completed:${report.counts.completed} blocked:${report.counts.blocked} cancelled:${report.counts.cancelled}`,
     `Runtime: active:${report.counts.active} expired:${report.counts.expired} closed:${report.counts.closed}`,
     `Ready to hand off selected: ${report.readiness.selectedCanHandoff ? "yes" : "no"}`,
+    `Results: handoffs:${report.results.counts.handoffs} summaries:${report.results.counts.summaries} nextSteps:${report.results.counts.nextSteps} artifacts:${report.results.counts.artifacts}`,
     `Approval requests: ${report.counts.approvalRequests}`,
     `Audit entries: ${report.counts.auditEntries}`
   ];
@@ -2373,6 +2482,24 @@ function formatMandateReport(report: MandateReportPayload): string {
     lines.push("", "Readiness blockers:");
     for (const blocker of report.readiness.blockers) {
       lines.push(`  ${blocker}`);
+    }
+  }
+
+  if (report.results.handoffs.length > 0) {
+    lines.push("", "Handoff results:");
+    for (const handoff of report.results.handoffs) {
+      const actor = handoff.by ? ` by:${handoff.by}` : "";
+      const timestamp = handoff.at ? ` at:${handoff.at}` : "";
+      lines.push(`  ${handoff.id} ${handoff.state}${actor}${timestamp}`);
+      if (handoff.summary) {
+        lines.push(`    Summary: ${handoff.summary}`);
+      }
+      if (handoff.nextSteps.length > 0) {
+        lines.push(`    Next: ${handoff.nextSteps.join("; ")}`);
+      }
+      if (handoff.artifacts.length > 0) {
+        lines.push(`    Artifacts: ${handoff.artifacts.join(", ")}`);
+      }
     }
   }
 

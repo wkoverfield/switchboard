@@ -24,12 +24,13 @@ Harnesses can use the `mcpLaunch` payload from `switchboard mandate create
 inspect mandate state with `switchboard mandate status <id> --json`, inspect
 the scoped tool surface with `switchboard tools --mandate <id> --json`, then
 close work with `switchboard mandate handoff <id> --state completed --json`.
-Use `switchboard mandate report <id> --json` for parent/child handoff state and
-related audit entries, and `switchboard approvals --mandate <id>
---include-children --json` for approval queues across a lead/worker mandate
-tree. Mandate status JSON is versioned as `switchboard.mandate-status.v1`,
-mandate report JSON is versioned as `switchboard.mandate-report.v1`, approval
-request JSON is versioned as `switchboard.approvals.v1`, and tool surface JSON
-is versioned as `switchboard.tool-surface.v1`.
+Use `switchboard mandate report <id> --json` for parent/child handoff state,
+readiness blockers, result rollups, and related audit entries. Use
+`switchboard approvals --mandate <id> --include-children --json` for approval
+queues across a lead/worker mandate tree. Mandate status JSON is versioned as
+`switchboard.mandate-status.v1`, mandate report JSON is versioned as
+`switchboard.mandate-report.v1`, approval request JSON is versioned as
+`switchboard.approvals.v1`, and tool surface JSON is versioned as
+`switchboard.tool-surface.v1`.
 
 Never suggest putting provider tokens into repo config or agent MCP config. Switchboard config should use secret references once the secrets milestone is implemented.
