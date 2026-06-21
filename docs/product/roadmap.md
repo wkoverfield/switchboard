@@ -192,6 +192,8 @@ Implemented in the current codebase:
 - versioned `switchboard.mandate-report.v1` parent/child report payloads
 - mandate reports include related audit entries and approval requests for the
   delegation chain
+- mandate reports include selected-mandate readiness blockers for open children
+  and pending approvals
 - versioned `switchboard.approvals.v1` approval request payloads
 - `switchboard approvals --mandate <id> --include-children --json`
 - approval request queues can be viewed across a parent/child mandate tree
@@ -961,7 +963,7 @@ Acceptance:
 - no remote service
 - no full agent orchestrator
 
-### Current Slice: Mandate Tree Approval Visibility V0
+### Completed Slice: Mandate Tree Approval Visibility V0
 
 Goal: give external harnesses and local users a versioned view of approval
 queues across a delegated mandate tree without building a remote approval
@@ -986,6 +988,24 @@ Acceptance:
 - no remote approval service
 - no secrets broker
 - no provider OAuth/secrets flows
+- no full agent orchestrator
+
+### Current Slice: Mandate Tree Readiness V0
+
+Goal: make mandate reports tell harnesses whether the selected mandate is ready
+to hand off before adding richer escalation or orchestration.
+
+Acceptance:
+
+- `switchboard mandate report <id> --json` includes an additive `readiness`
+  object
+- readiness reports whether the selected mandate can be handed off now
+- readiness lists open child mandates in the selected mandate subtree
+- readiness lists pending approval requests in the selected mandate subtree
+- human report output shows readiness blockers
+- no approval escalation broker
+- no provider OAuth/secrets flows
+- no remote service
 - no full agent orchestrator
 
 ## Rules For Future Agents

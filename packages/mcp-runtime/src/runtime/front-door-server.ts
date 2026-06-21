@@ -353,6 +353,9 @@ async function auditApprovalElicitation(options: {
     status: options.status,
     toolName: options.approval.toolName,
     mandateId: options.approval.mandateId,
+    ...(options.approval.mandateUid
+      ? { mandateUid: options.approval.mandateUid }
+      : {}),
     approvalRequestId: options.approval.approvalRequestId,
     approvalGateId: options.approval.approvalGateId,
     approvalGatePattern: options.approval.approvalGatePattern,

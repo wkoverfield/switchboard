@@ -102,10 +102,31 @@ interface MandateReportPayload {
     auditEntries: number;
     approvalRequests: number;
   };
+  readiness: MandateReportReadiness;
   childrenByParent: Record<string, string[]>;
   mandates: MandateWithStatus[];
   approvalRequests: ApprovalRequestWithStatus[];
   auditEntries: AuditLogEntry[];
+}
+
+interface MandateReportReadiness {
+  selectedCanHandoff: boolean;
+  selectedHandoffState: MandateWithStatus["handoffState"];
+  openChildMandates: Array<{
+    id: string;
+    mandateUid: string | null;
+    agentRole: string;
+    branch: string;
+  }>;
+  pendingApprovalRequests: Array<{
+    id: string;
+    mandateId: string;
+    mandateUid: string | null;
+    toolName: string;
+    approvalGateId: string;
+  }>;
+  blockers: string[];
+  nextActions: string[];
 }
 
 interface ApprovalRequestsPayload {
@@ -1933,8 +1954,7 @@ async function createMandateReportPayload(options: {
   const approvalRequests = (
     await listApprovalRequests({
       path: options.approvalStorePath,
-      ...(options.repoPath ? { repoPath: options.repoPath } : {}),
-      ...(rootMandateUid ? { rootMandateUid } : {})
+      ...(options.repoPath ? { repoPath: options.repoPath } : {})
     })
   ).filter((request) => {
     if (!request.mandateId || !mandateIds.has(request.mandateId)) {
@@ -1944,6 +1964,11 @@ async function createMandateReportPayload(options: {
       return request.mandateUid ? mandateUids.has(request.mandateUid) : false;
     }
     return true;
+  });
+  const readiness = mandateReportReadiness({
+    selected,
+    chain,
+    approvalRequests
   });
 
   return {
@@ -1974,11 +1999,118 @@ async function createMandateReportPayload(options: {
       auditEntries: limitedAuditEntries.length,
       approvalRequests: approvalRequests.length
     },
+    readiness,
     childrenByParent: childrenByParent(chain),
     mandates: chain,
     approvalRequests,
     auditEntries: limitedAuditEntries
   };
+}
+
+function mandateReportReadiness(options: {
+  selected: MandateWithStatus;
+  chain: MandateWithStatus[];
+  approvalRequests: ApprovalRequestWithStatus[];
+}): MandateReportReadiness {
+  const selectedSubtree = options.chain.filter((mandate) =>
+    mandateInSelectedSubtree(mandate, options.selected)
+  );
+  const selectedSubtreeIds = new Set(
+    selectedSubtree.map((mandate) => mandate.id)
+  );
+  const selectedSubtreeUids = new Set(
+    selectedSubtree.flatMap((mandate) =>
+      mandate.mandateUid ? [mandate.mandateUid] : []
+    )
+  );
+  const openChildMandates = selectedSubtree
+    .filter(
+      (mandate) =>
+        !sameMandateInstance(mandate, options.selected) &&
+        mandate.handoffState === "open"
+    )
+    .map((mandate) => ({
+      id: mandate.id,
+      mandateUid: mandate.mandateUid ?? null,
+      agentRole: mandate.agentRole,
+      branch: mandate.branch
+    }));
+  const pendingApprovalRequests = options.approvalRequests
+    .filter((request) => request.runtimeStatus === "pending")
+    .filter((request) => {
+      if (!selectedSubtreeIds.has(request.mandateId)) {
+        return false;
+      }
+      if (selectedSubtreeUids.size > 0) {
+        return request.mandateUid
+          ? selectedSubtreeUids.has(request.mandateUid)
+          : false;
+      }
+      return true;
+    })
+    .map((request) => ({
+      id: request.id,
+      mandateId: request.mandateId,
+      mandateUid: request.mandateUid ?? null,
+      toolName: request.toolName,
+      approvalGateId: request.approvalGateId
+    }));
+  const blockers = [
+    ...(options.selected.handoffState !== "open"
+      ? [`selected mandate is already ${options.selected.handoffState}`]
+      : []),
+    ...openChildMandates.map(
+      (mandate) => `child mandate "${mandate.id}" remains open`
+    ),
+    ...pendingApprovalRequests.map(
+      (request) => `approval request "${request.id}" is pending`
+    )
+  ];
+  const nextActions = [
+    ...openChildMandates.map(
+      (mandate) =>
+        `switchboard mandate handoff ${mandate.id} --state completed --summary <summary>`
+    ),
+    ...pendingApprovalRequests.map(
+      (request) =>
+        `switchboard approve ${request.id} or switchboard deny ${request.id}`
+    )
+  ];
+
+  return {
+    selectedCanHandoff: blockers.length === 0,
+    selectedHandoffState: options.selected.handoffState,
+    openChildMandates,
+    pendingApprovalRequests,
+    blockers,
+    nextActions
+  };
+}
+
+function mandateInSelectedSubtree(
+  mandate: MandateWithStatus,
+  selected: MandateWithStatus
+): boolean {
+  if (sameMandateInstance(mandate, selected)) {
+    return true;
+  }
+  const selectedUid = mandateUidForReport(selected);
+  if (selectedUid) {
+    return mandate.delegationUids?.includes(selectedUid) ?? false;
+  }
+  return mandate.delegationPath?.includes(selected.id) ?? false;
+}
+
+function sameMandateInstance(
+  left: MandateWithStatus,
+  right: MandateWithStatus
+): boolean {
+  const leftUid = mandateUidForReport(left);
+  const rightUid = mandateUidForReport(right);
+  if (leftUid && rightUid) {
+    return leftUid === rightUid;
+  }
+  return left.id === right.id && left.createdAt === right.createdAt;
 }
 
 function findLatestMandate(
@@ -2067,12 +2199,25 @@ async function createApprovalRequestsPayload(options: {
   includeChildren: boolean;
   status?: ApprovalRequestWithStatus["runtimeStatus"];
 }): Promise<ApprovalRequestsPayload> {
+  const selectedMandateId = options.mandateId
+    ? normalizeMandateId(options.mandateId)
+    : undefined;
+  let allMandates: MandateWithStatus[] = [];
+  let selectedMandate: MandateWithStatus | undefined;
+  if (selectedMandateId) {
+    allMandates = await listMandates({
+      path: options.mandateStorePath,
+      ...(options.repoPath ? { repoPath: options.repoPath } : {})
+    });
+    selectedMandate = findLatestMandate(allMandates, selectedMandateId);
+  }
+
   const baseRequests = await listApprovalRequests({
     path: options.path,
     ...(options.repoPath ? { repoPath: options.repoPath } : {}),
     ...(options.includeChildren || !options.mandateId
       ? {}
-      : { mandateId: options.mandateId }),
+      : { mandateId: selectedMandateId ?? options.mandateId }),
     ...(options.status ? { status: options.status } : {})
   });
 
@@ -2080,22 +2225,20 @@ async function createApprovalRequestsPayload(options: {
   let rootMandateId: string | null = null;
   let rootMandateUid: string | null = null;
   let requests = baseRequests;
+  const selectedMandateUid = selectedMandate
+    ? mandateUidForReport(selectedMandate)
+    : null;
 
   if (options.includeChildren) {
-    const selectedMandateId = normalizeMandateId(options.mandateId ?? "");
     if (!selectedMandateId) {
       throw new Error("mandate id is required");
     }
-    const allMandates = await listMandates({
-      path: options.mandateStorePath,
-      ...(options.repoPath ? { repoPath: options.repoPath } : {})
-    });
-    const selected = findLatestMandate(allMandates, selectedMandateId);
-    if (!selected) {
+    if (!selectedMandate) {
       throw new Error(`mandate "${selectedMandateId}" was not found`);
     }
-    rootMandateId = selected.delegationPath?.[0] ?? selected.id;
-    rootMandateUid = selected.delegationUids?.[0] ?? mandateUidForReport(selected);
+    rootMandateId = selectedMandate.delegationPath?.[0] ?? selectedMandate.id;
+    rootMandateUid =
+      selectedMandate.delegationUids?.[0] ?? selectedMandateUid;
     mandates = mandateChainForRoot(allMandates, {
       rootMandateId,
       rootMandateUid
@@ -2115,12 +2258,16 @@ async function createApprovalRequestsPayload(options: {
       }
       return true;
     });
+  } else if (selectedMandateUid) {
+    requests = baseRequests.filter(
+      (request) => request.mandateUid === selectedMandateUid
+    );
   }
 
   return {
     schemaVersion: approvalRequestsSchemaVersion,
     path: options.path,
-    mandateStorePath: options.includeChildren ? options.mandateStorePath : null,
+    mandateStorePath: options.mandateId ? options.mandateStorePath : null,
     repoPath: options.repoPath ?? null,
     mandateId: options.mandateId ?? null,
     includeChildren: options.includeChildren,
@@ -2217,9 +2364,17 @@ function formatMandateReport(report: MandateReportPayload): string {
     `Selected: ${report.selectedMandateId}`,
     `Mandates: ${report.counts.mandates} open:${report.counts.open} completed:${report.counts.completed} blocked:${report.counts.blocked} cancelled:${report.counts.cancelled}`,
     `Runtime: active:${report.counts.active} expired:${report.counts.expired} closed:${report.counts.closed}`,
+    `Ready to hand off selected: ${report.readiness.selectedCanHandoff ? "yes" : "no"}`,
     `Approval requests: ${report.counts.approvalRequests}`,
     `Audit entries: ${report.counts.auditEntries}`
   ];
+
+  if (report.readiness.blockers.length > 0) {
+    lines.push("", "Readiness blockers:");
+    for (const blocker of report.readiness.blockers) {
+      lines.push(`  ${blocker}`);
+    }
+  }
 
   if (report.mandates.length > 0) {
     lines.push("", "Mandate chain:");
