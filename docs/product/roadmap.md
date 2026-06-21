@@ -1135,7 +1135,7 @@ Acceptance:
 - no changes to config precedence, profile schemas, MCP routing, mandate
   enforcement, providers, or daemon behavior
 
-### Current Slice: Versioned Audit Log JSON V0
+### Completed Slice: Versioned Audit Log JSON V0
 
 Goal: make post-run mandate audit inspection a stable harness-facing JSON
 contract without changing audit writing or runtime enforcement.
@@ -1154,6 +1154,26 @@ Acceptance:
 - docs move audit logs from provisional to versioned harness contract
 - no changes to audit writing, MCP routing, mandate enforcement, providers, or
   daemon behavior
+
+### Current Slice: Approval Request JSON Error Envelopes V0
+
+Goal: make the versioned approval queue surface parseable on failure for
+harnesses without changing approval execution or request storage.
+
+Acceptance:
+
+- `switchboard approvals --json` validation failures emit
+  `switchboard.error.v1` on stdout and exit non-zero
+- invalid `--status` values include a stable `invalid_status` code
+- `--include-children --json` without `--mandate` includes a stable
+  `missing_mandate` code
+- `--include-children --all --json` includes a stable `invalid_scope` code
+- missing mandate ids in tree approval mode use `mandate_not_found`
+- parser failures for `approvals --json` emit `switchboard.error.v1`
+- non-JSON human stderr behavior is preserved
+- docs clarify that approval queue failures are contracted error envelopes
+- no changes to approval execution, approval request storage, MCP routing,
+  providers, or daemon behavior
 
 ## Rules For Future Agents
 

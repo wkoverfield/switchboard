@@ -1740,20 +1740,36 @@ export function createProgram(io: ProgramIo = {}): Command {
           options.status &&
           !["pending", "approved", "denied", "stale", "expired"].includes(options.status)
         ) {
-          writeErr(
-            "error: --status must be pending, approved, denied, stale, or expired"
-          );
-          process.exitCode = 1;
+          writeCommandError({
+            json: options.json,
+            code: "invalid_status",
+            message: "--status must be pending, approved, denied, stale, or expired",
+            nextActions: [
+              "Pass --status as pending, approved, denied, stale, or expired."
+            ]
+          });
           return;
         }
         if (options.includeChildren && !options.mandate) {
-          writeErr("error: --include-children requires --mandate <id>");
-          process.exitCode = 1;
+          writeCommandError({
+            json: options.json,
+            code: "missing_mandate",
+            message: "--include-children requires --mandate <id>",
+            nextActions: [
+              "Pass --mandate <id> with --include-children."
+            ]
+          });
           return;
         }
         if (options.includeChildren && options.all) {
-          writeErr("error: --include-children must be repo-scoped; remove --all");
-          process.exitCode = 1;
+          writeCommandError({
+            json: options.json,
+            code: "invalid_scope",
+            message: "--include-children must be repo-scoped; remove --all",
+            nextActions: [
+              "Remove --all when using --include-children."
+            ]
+          });
           return;
         }
         const path = io.approvalStorePath ?? resolveApprovalRequestStorePath();
@@ -1774,8 +1790,15 @@ export function createProgram(io: ProgramIo = {}): Command {
             writeOut(formatApprovalRequests(result));
           }
         } catch (error) {
-          writeErr(`error: ${messageFromError(error)}`);
-          process.exitCode = 1;
+          const { code, message } = mandateCommandError(
+            error,
+            "approval_requests_failed"
+          );
+          writeCommandError({
+            json: options.json,
+            code,
+            message
+          });
         }
       }
     );
@@ -3306,7 +3329,7 @@ function shouldWriteContractParserErrorAsJson(args: string[]): boolean {
   }
 
   const command = args[commandIndex];
-  if (command === "logs") {
+  if (command === "approvals" || command === "logs") {
     return true;
   }
 
