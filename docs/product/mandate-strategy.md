@@ -128,7 +128,7 @@ Layer 3 is controlled delegation:
 
 - a lead agent can create child mandates for worker agents
 - child mandates cannot exceed the parent's repo, profile, tool, lease, or
-  approval scope
+  approval-gate constraints
 - privileged actions escalate back to Wilson or the parent approver
 - audit logs preserve the delegation chain
 
@@ -259,6 +259,8 @@ Switchboard the orchestrator:
 - launch args carry `--cwd <repo> mcp --mandate <id>`
 - `switchboard mandate status --json` exposes versioned mandate state with
   `switchboard.mandate-status.v1`
+- `switchboard mandate child --parent <id>` creates narrower child mandates
+  from active parents
 - `switchboard tools --mandate <id> --json` exposes the scoped tool surface for
   harness preflight and UI without launching an agent client
 - the tool surface payload is explicitly versioned as
@@ -272,17 +274,17 @@ Switchboard the orchestrator:
 
 Recommended follow-up:
 
+- add mandate handoff/reporting across parent and child chains
+- decide whether `logs --json` or `approvals --json` need versioning for the
+  first real harness handoff flow
 - harden the approval elicitation and gated-tool metadata client matrix with
   real Codex/Claude smoke notes
-- keep enforcement claims modest and tied to actual runtime behavior
-- sketch parent/child mandate fields further if useful, but do not enforce
-  delegation trees until the basic active-mandate flow is solid
 - no provider presets
 - no secret broker
 - no remote service
 - no full agent orchestrator
 
-Future child mandates should eventually include fields such as:
+Child mandates now persist:
 
 - `parentMandateId`
 - `delegatedBy`
@@ -292,7 +294,10 @@ Future child mandates should eventually include fields such as:
 - inherited or stricter approval gates
 
 Child mandates must not exceed parent repo, worktree, branch, profile, tool,
-lease, or approval scope.
+or lease scope. Approval gates are inherited and may be made stricter, but they
+do not grant access beyond the parent's allowed tool scope. Future work should
+improve approval escalation and reporting, not turn Switchboard into the agent
+orchestrator.
 
 ## Original First Mandate Slice
 

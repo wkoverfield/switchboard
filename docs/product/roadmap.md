@@ -179,6 +179,10 @@ Implemented in the current codebase:
 - daemon-start invalidation for leftover pending approval requests
 - approval gate reason metadata in mandates and approval requests
 - `switchboard mandate create --json` MCP launch payloads for harnesses
+- `switchboard mandate child --parent <id>`
+- child mandate parent/delegation metadata
+- child mandate subset validation for profiles, allowed tools, lease, and
+  repo/worktree/branch binding
 - approval gate risk classes and structured labels
 
 Not started:
@@ -188,7 +192,7 @@ Not started:
 - secrets/keychain
 - provider presets
 - mandate-aware advanced onboarding
-- mandate tree / child mandate delegation
+- richer mandate tree approval escalation and handoff reporting
 - global/user-scope client installers
 - Supabase, Stripe, PostHog, or Sentry integrations
 
@@ -875,7 +879,7 @@ Acceptance:
 - no remote approval service
 - no child mandate delegation
 
-### Current Slice: Harness JSON Contracts
+### Completed Slice: Harness JSON Contracts
 
 Goal: make the first harness-facing mandate surfaces stable enough for external
 scripts to detect and branch on response versions before child mandate work
@@ -896,6 +900,29 @@ Acceptance:
 - no provider OAuth/secrets flows
 - no remote approval service
 - no child mandate delegation
+
+### Current Slice: Child Mandates V0
+
+Goal: turn the mandate direction into a local authority graph primitive without
+building a full orchestrator.
+
+Acceptance:
+
+- mandate schema persists `parentMandateId`, `delegatedBy`, `delegationPath`,
+  and `maxLeaseExpiresAt`
+- `switchboard mandate child <task> --parent <id> ... --json` creates a child
+  mandate from an active parent
+- child mandates inherit parent denied tools and approval gates
+- child profiles must be a subset of parent profiles
+- child allowed tools must be within parent allowed tool scope
+- child repo, worktree, and branch must match parent scope
+- child lease cannot outlive parent lease
+- child JSON output returns the existing versioned `mcpLaunch` payload
+- mandate status and human output expose parent/delegation context
+- no approval escalation broker
+- no provider OAuth/secrets flows
+- no remote service
+- no full agent orchestrator
 
 ## Rules For Future Agents
 
