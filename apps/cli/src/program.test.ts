@@ -2240,6 +2240,10 @@ describe("switchboard CLI program", () => {
       ["--cwd", root, "mandate", "report", "rerun-checks", "--json"],
       { from: "user" }
     );
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "report", "rerun-checks"],
+      { from: "user" }
+    );
 
     expect(JSON.parse(output[2] ?? "{}")).toMatchObject({
       path: mandateStorePath,
@@ -2271,6 +2275,49 @@ describe("switchboard CLI program", () => {
         closed: 2,
         auditEntries: 2,
         approvalRequests: 1
+      },
+      results: {
+        counts: {
+          handoffs: 2,
+          completed: 2,
+          blocked: 0,
+          cancelled: 0,
+          open: 0,
+          summaries: 2,
+          nextSteps: 1,
+          artifacts: 1
+        },
+        handoffs: [
+          {
+            id: "fix-ci",
+            state: "completed",
+            summary: "parent done",
+            nextSteps: [],
+            artifacts: []
+          },
+          {
+            id: "rerun-checks",
+            parentMandateId: "fix-ci",
+            state: "completed",
+            summary: "checks are green",
+            nextSteps: ["merge PR"],
+            artifacts: ["https://github.com/woverfield/switchboard/pull/214"],
+            by: "worker-agent"
+          }
+        ],
+        openMandates: [],
+        nextSteps: [
+          {
+            mandateId: "rerun-checks",
+            value: "merge PR"
+          }
+        ],
+        artifacts: [
+          {
+            mandateId: "rerun-checks",
+            value: "https://github.com/woverfield/switchboard/pull/214"
+          }
+        ]
       },
       childrenByParent: {
         "fix-ci": ["rerun-checks"]
@@ -2307,6 +2354,14 @@ describe("switchboard CLI program", () => {
         }
       ]
     });
+    expect(output[5]).toContain("Results: handoffs:2 summaries:2 nextSteps:1 artifacts:1");
+    expect(output[5]).toContain("Handoff results:");
+    expect(output[5]).toContain("rerun-checks completed by:worker-agent");
+    expect(output[5]).toContain("at:");
+    expect(output[5]).toContain("Next: merge PR");
+    expect(output[5]).toContain(
+      "Artifacts: https://github.com/woverfield/switchboard/pull/214"
+    );
   });
 
   it("reports the latest same-id mandate chain without old chain or other repo audit leakage", async () => {

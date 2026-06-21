@@ -194,6 +194,7 @@ Implemented in the current codebase:
   delegation chain
 - mandate reports include selected-mandate readiness blockers for open children
   and pending approvals
+- mandate reports include aggregated handoff results, next steps, and artifacts
 - versioned `switchboard.approvals.v1` approval request payloads
 - `switchboard approvals --mandate <id> --include-children --json`
 - approval request queues can be viewed across a parent/child mandate tree
@@ -990,7 +991,7 @@ Acceptance:
 - no provider OAuth/secrets flows
 - no full agent orchestrator
 
-### Current Slice: Mandate Tree Readiness V0
+### Completed Slice: Mandate Tree Readiness V0
 
 Goal: make mandate reports tell harnesses whether the selected mandate is ready
 to hand off before adding richer escalation or orchestration.
@@ -1003,6 +1004,26 @@ Acceptance:
 - readiness lists open child mandates in the selected mandate subtree
 - readiness lists pending approval requests in the selected mandate subtree
 - human report output shows readiness blockers
+- no approval escalation broker
+- no provider OAuth/secrets flows
+- no remote service
+- no full agent orchestrator
+
+### Current Slice: Mandate Tree Result Aggregation V0
+
+Goal: make mandate reports summarize delegated work outcomes for harnesses and
+humans before adding richer escalation or orchestration.
+
+Acceptance:
+
+- `switchboard mandate report <id> --json` includes an additive `results`
+  object
+- results count handoffs by state plus open mandates, summaries, next steps,
+  and artifacts
+- results list completed/blocked/cancelled mandate handoffs with actor,
+  timestamp, summary, next steps, and artifacts
+- results provide flattened next-step and artifact rollups keyed by mandate id
+- human report output shows result counts and handoff summaries
 - no approval escalation broker
 - no provider OAuth/secrets flows
 - no remote service

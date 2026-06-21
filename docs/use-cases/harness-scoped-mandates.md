@@ -82,7 +82,9 @@ switchboard --cwd /path/to/repo mandate report fix-ci --json
 `schemaVersion: "switchboard.mandate-report.v1"` and includes the mandate tree,
 handoff counts, related approval requests, recent related audit entries, and a
 `readiness` object that names open child mandates or pending approval requests
-that should be handled before closing the selected mandate.
+that should be handled before closing the selected mandate. It also includes
+`results` rollups for handoff summaries, next steps, and artifacts across the
+reported tree.
 
 ## Child Mandates
 

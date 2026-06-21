@@ -38,6 +38,8 @@ mandate runtime and handoff counts, related approval requests, and recent audit
 entries for mandates in the chain. It also includes an additive `readiness`
 object that tells a harness whether the selected mandate can be handed off now,
 including open child mandates and pending approval requests that block handoff.
+The additive `results` object summarizes completed/blocked/cancelled handoffs,
+open mandates, flattened next steps, and artifacts across the reported tree.
 The UID fields disambiguate repeated human slug ids such as multiple `fix-ci`
 mandates over time.
 
