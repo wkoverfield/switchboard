@@ -1098,7 +1098,7 @@ Acceptance:
   the MCP command help
 - no changes to MCP routing, mandate enforcement, or provider integrations
 
-### Current Slice: Child Approval Gate Duplicate UX V0
+### Completed Slice: Child Approval Gate Duplicate UX V0
 
 Goal: make inherited child approval-gate behavior explicit so lead agents do not
 think a child-provided reason, risk, or label overrides the parent's gate.
@@ -1115,6 +1115,25 @@ Acceptance:
 - docs explain the duplicate inherited-gate rule for harness authors
 - no changes to approval execution, approval requests, MCP routing, providers,
   or daemon behavior
+
+### Current Slice: Ephemeral Doctor Local Config Hygiene V0
+
+Goal: keep `switchboard doctor` useful in temporary harness repos and smoke
+test folders without weakening the safety check for real local overrides.
+
+Acceptance:
+
+- local-config hygiene passes when no `.switchboard.local.yaml` exists yet
+- local-config hygiene still fails when `.switchboard.local.yaml` exists and is
+  not ignored by git
+- `switchboard doctor --json` avoids gitignore next-step noise for ephemeral
+  repos with no local override file
+- human doctor output still explains that local overrides should be ignored
+  before storing local-only settings
+- tests cover no-local-config, no-gitignore, unignored-local-config, and CLI
+  doctor behavior
+- no changes to config precedence, profile schemas, MCP routing, mandate
+  enforcement, providers, or daemon behavior
 
 ## Rules For Future Agents
 
