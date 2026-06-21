@@ -2222,9 +2222,18 @@ describe("switchboard CLI program", () => {
       { from: "user" }
     );
     expect(errors).toEqual([
-      'error: cannot hand off mandate "fix-ci" while readiness blockers remain: child mandate "rerun-checks" remains open; approval request "approval-1" is pending. Use --ignore-readiness to close anyway.',
-      'error: cannot hand off mandate "rerun-checks" while readiness blockers remain: approval request "approval-1" is pending. Use --ignore-readiness to close anyway.'
+      'error: cannot hand off mandate "fix-ci" while readiness blockers remain: child mandate "rerun-checks" remains open; approval request "approval-1" is pending. Use --ignore-readiness to close anyway.'
     ]);
+    expect(JSON.parse(output[2] ?? "{}")).toEqual({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "mandate_readiness_blocked",
+      message:
+        'cannot hand off mandate "rerun-checks" while readiness blockers remain: approval request "approval-1" is pending. Use --ignore-readiness to close anyway.',
+      nextActions: [
+        "switchboard approve approval-1 or switchboard deny approval-1"
+      ]
+    });
     process.exitCode = undefined;
     await program.parseAsync(
       [
@@ -2273,7 +2282,7 @@ describe("switchboard CLI program", () => {
       { from: "user" }
     );
 
-    expect(JSON.parse(output[2] ?? "{}")).toMatchObject({
+    expect(JSON.parse(output[3] ?? "{}")).toMatchObject({
       path: mandateStorePath,
       mandate: {
         id: "rerun-checks",
@@ -2287,7 +2296,7 @@ describe("switchboard CLI program", () => {
         runtimeStatus: "closed"
       }
     });
-    expect(JSON.parse(output[4] ?? "{}")).toMatchObject({
+    expect(JSON.parse(output[5] ?? "{}")).toMatchObject({
       schemaVersion: "switchboard.mandate-report.v1",
       path: mandateStorePath,
       auditLogPath,
@@ -2382,12 +2391,12 @@ describe("switchboard CLI program", () => {
         }
       ]
     });
-    expect(output[5]).toContain("Results: handoffs:2 summaries:2 nextSteps:1 artifacts:1");
-    expect(output[5]).toContain("Handoff results:");
-    expect(output[5]).toContain("rerun-checks completed by:worker-agent");
-    expect(output[5]).toContain("at:");
-    expect(output[5]).toContain("Next: merge PR");
-    expect(output[5]).toContain(
+    expect(output[6]).toContain("Results: handoffs:2 summaries:2 nextSteps:1 artifacts:1");
+    expect(output[6]).toContain("Handoff results:");
+    expect(output[6]).toContain("rerun-checks completed by:worker-agent");
+    expect(output[6]).toContain("at:");
+    expect(output[6]).toContain("Next: merge PR");
+    expect(output[6]).toContain(
       "Artifacts: https://github.com/woverfield/switchboard/pull/214"
     );
   });
@@ -2930,6 +2939,207 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("prints JSON error envelopes for mandate command failures", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message),
+      mandateStorePath: join(root, "state", "mandates.json")
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--require-approval-reason",
+        "needs a human",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    expect(errors).toEqual([]);
+    expect(JSON.parse(output[0] ?? "{}")).toEqual({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "invalid_approval_gate_options",
+      message:
+        "--require-approval-reason must be provided once for each --require-approval-tool",
+      nextActions: []
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("prints JSON error envelopes for mandate parser failures", async () => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message)
+    });
+
+    await expect(
+      program.parseAsync(["mandate", "create", "fix-ci", "--json"], {
+        from: "user"
+      })
+    ).rejects.toMatchObject({ exitCode: 1 });
+    await expect(
+      program.parseAsync(["mandate", "status", "--bogus", "--json"], {
+        from: "user"
+      })
+    ).rejects.toMatchObject({ exitCode: 1 });
+    await expect(
+      program.parseAsync(["mandate", "report", "--json"], {
+        from: "user"
+      })
+    ).rejects.toMatchObject({ exitCode: 1 });
+
+    expect(errors).toEqual([]);
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "missing_required_option",
+      message: "required option '--agent <role>' not specified"
+    });
+    expect(JSON.parse(output[1] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "unknown_option",
+      message: "unknown option '--bogus'"
+    });
+    expect(JSON.parse(output[2] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "missing_required_argument",
+      message: "missing required argument 'id'"
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("prints JSON error envelopes for invalid mandate command config", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      ["version: 1", "profiles:", "  broken:", "    namespace: '!!!'"].join(
+        "\n"
+      )
+    );
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message),
+      mandateStorePath: join(root, "state", "mandates.json")
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    expect(errors).toEqual([]);
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "invalid_config",
+      nextActions: ["Run switchboard doctor for config diagnostics."]
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("uses a semantic JSON error code for missing mandate ids", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message),
+      mandateStorePath: join(root, "state", "mandates.json"),
+      approvalStorePath: join(root, "state", "approvals.json"),
+      auditLogPath: join(root, "state", "logs", "switchboard.jsonl")
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "report", "missing", "--json"],
+      { from: "user" }
+    );
+    process.exitCode = undefined;
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "escalate", "missing", "--json"],
+      { from: "user" }
+    );
+    process.exitCode = undefined;
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "handoff",
+        "missing",
+        "--state",
+        "completed",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    expect(errors).toEqual([]);
+    expect(output.map((message) => JSON.parse(message))).toEqual([
+      {
+        ok: false,
+        schemaVersion: "switchboard.error.v1",
+        code: "mandate_not_found",
+        message: 'mandate "missing" was not found',
+        nextActions: []
+      },
+      {
+        ok: false,
+        schemaVersion: "switchboard.error.v1",
+        code: "mandate_not_found",
+        message: 'mandate "missing" was not found',
+        nextActions: []
+      },
+      {
+        ok: false,
+        schemaVersion: "switchboard.error.v1",
+        code: "mandate_not_found",
+        message: 'mandate "missing" was not found',
+        nextActions: []
+      }
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
   it("fails mandate status for a missing id", async () => {
     const root = makeTempProject();
     const errors: string[] = [];
@@ -2943,6 +3153,60 @@ describe("switchboard CLI program", () => {
     });
 
     expect(errors).toEqual(['error: mandate "missing" was not found']);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("prints a JSON error envelope for a missing mandate id", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message),
+      mandateStorePath: join(root, "state", "mandates.json")
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "status", "missing", "--json"],
+      {
+        from: "user"
+      }
+    );
+
+    expect(errors).toEqual([]);
+    expect(JSON.parse(output[0] ?? "{}")).toEqual({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "mandate_not_found",
+      message: 'mandate "missing" was not found',
+      nextActions: []
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("prints a JSON error envelope when mandate status cannot read state", async () => {
+    const root = makeTempProject();
+    const mandateStorePath = join(root, "state", "mandates.json");
+    mkdirSync(join(root, "state"), { recursive: true });
+    writeFileSync(mandateStorePath, "{bad json");
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message),
+      mandateStorePath
+    });
+
+    await program.parseAsync(["--cwd", root, "mandate", "status", "--json"], {
+      from: "user"
+    });
+
+    expect(errors).toEqual([]);
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "mandate_status_failed"
+    });
     expect(process.exitCode).toBe(1);
   });
 
