@@ -1006,6 +1006,7 @@ describe("switchboard CLI program", () => {
     );
 
     const parsed = JSON.parse(output[1] ?? "{}") as {
+      schemaVersion: string;
       ok: boolean;
       mandate: { id: string };
       profileCount: number;
@@ -1028,6 +1029,7 @@ describe("switchboard CLI program", () => {
       }>;
     };
     expect(parsed).toMatchObject({
+      schemaVersion: "switchboard.tool-surface.v1",
       ok: true,
       mandate: { id: "fix-ci" },
       profileCount: 1,
@@ -1095,9 +1097,11 @@ describe("switchboard CLI program", () => {
     );
 
     const denyParsed = JSON.parse(output.at(-1) ?? "{}") as {
+      schemaVersion: string;
       toolCount: number;
       tools: Array<{ name: string }>;
     };
+    expect(denyParsed.schemaVersion).toBe("switchboard.tool-surface.v1");
     expect(denyParsed.toolCount).toBe(1);
     expect(denyParsed.tools.map((tool) => tool.name)).toEqual([
       "github_findu_whoami"
@@ -1134,10 +1138,12 @@ describe("switchboard CLI program", () => {
     );
 
     const approvalParsed = JSON.parse(output.at(-1) ?? "{}") as {
+      schemaVersion: string;
       approvalRequiredCount: number;
       toolCount: number;
       tools: Array<{ name: string }>;
     };
+    expect(approvalParsed.schemaVersion).toBe("switchboard.tool-surface.v1");
     expect(approvalParsed.toolCount).toBe(1);
     expect(approvalParsed.approvalRequiredCount).toBe(0);
     expect(approvalParsed.tools.map((tool) => tool.name)).toEqual([

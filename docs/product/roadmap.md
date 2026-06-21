@@ -841,7 +841,7 @@ Acceptance:
 - no secrets broker
 - no full orchestrator
 
-### Current Slice: MCP Form-Mode Approval Elicitation
+### Completed Slice: MCP Form-Mode Approval Elicitation
 
 Goal: let MCP clients that advertise form elicitation decide mandate approval
 requests in-client while keeping the local approval store and CLI fallback as
@@ -871,6 +871,24 @@ Acceptance:
 - upstream tool `_meta.switchboard` values are not trusted as Switchboard policy
   metadata
 - no URL-mode elicitation
+- no provider OAuth/secrets flows
+- no remote approval service
+- no child mandate delegation
+
+### Current Slice: Harness JSON Contracts
+
+Goal: make the first harness-facing mandate surfaces stable enough for external
+scripts to detect and branch on response versions before child mandate work
+arrives.
+
+Acceptance:
+
+- `switchboard mandate create --json` keeps returning a versioned `mcpLaunch`
+  payload for scoped MCP startup
+- `switchboard tools --mandate <id> --json` returns a top-level
+  `schemaVersion` for the tool-surface contract
+- docs name the current tool-surface schema version
+- no behavior change to mandate enforcement, approval waits, or MCP routing
 - no provider OAuth/secrets flows
 - no remote approval service
 - no child mandate delegation
