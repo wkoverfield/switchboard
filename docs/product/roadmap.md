@@ -1155,7 +1155,7 @@ Acceptance:
 - no changes to audit writing, MCP routing, mandate enforcement, providers, or
   daemon behavior
 
-### Current Slice: Approval Request JSON Error Envelopes V0
+### Completed Slice: Approval Request JSON Error Envelopes V0
 
 Goal: make the versioned approval queue surface parseable on failure for
 harnesses without changing approval execution or request storage.
@@ -1173,6 +1173,26 @@ Acceptance:
 - non-JSON human stderr behavior is preserved
 - docs clarify that approval queue failures are contracted error envelopes
 - no changes to approval execution, approval request storage, MCP routing,
+  providers, or daemon behavior
+
+### Current Slice: Tool Surface JSON Error Envelopes V0
+
+Goal: make the versioned tool-surface preflight contract parseable on failure
+for harnesses without changing tool discovery, MCP routing, or policy
+enforcement.
+
+Acceptance:
+
+- `switchboard tools --json` validation/config failures emit
+  `switchboard.error.v1` on stdout and exit non-zero
+- missing mandate ids under `tools --mandate <id> --json` use
+  `mandate_not_found`
+- no stdio upstream profiles under `tools --json` use `no_stdio_profiles`
+- tool discovery failures under `tools --json` use `tool_surface_failed`
+- parser failures for `tools --json` emit `switchboard.error.v1`
+- non-JSON human stderr behavior is preserved
+- docs clarify that tool-surface failures are contracted error envelopes
+- no changes to tool discovery semantics, MCP routing, mandate enforcement,
   providers, or daemon behavior
 
 ## Rules For Future Agents

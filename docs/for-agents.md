@@ -44,7 +44,7 @@ queues across a lead/worker mandate tree. Mandate status JSON is versioned as
 `switchboard.tool-surface.v1`, and audit log JSON is versioned as
 `switchboard.audit-log.v1`. Contracted JSON commands that fail with `--json`
 write a `switchboard.error.v1` envelope to stdout and exit non-zero, including
-mandate, approval queue, and audit-log contract failures; without `--json`, the
-same failures stay human-readable on stderr.
+mandate, approval queue, tool-surface, and audit-log contract failures; without
+`--json`, the same failures stay human-readable on stderr.
 
 Never suggest putting provider tokens into repo config or agent MCP config. Switchboard config should use secret references once the secrets milestone is implemented.
