@@ -263,6 +263,8 @@ Switchboard the orchestrator:
   harness preflight and UI without launching an agent client
 - the tool surface payload is explicitly versioned as
   `switchboard.tool-surface.v1`
+- `docs/use-cases/harness-json-contracts.md` documents the current versioned
+  JSON contracts and the unversioned surfaces that should stay provisional
 - `docs/use-cases/harness-scoped-mandates.md` documents the "request scoped
   authority, launch agent, inspect logs" flow
 

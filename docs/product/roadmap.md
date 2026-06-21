@@ -890,6 +890,8 @@ Acceptance:
 - `switchboard tools --mandate <id> --json` returns a top-level
   `schemaVersion` for the tool-surface contract
 - docs name the current mandate-status and tool-surface schema versions
+- docs include a harness JSON contract table that distinguishes versioned
+  contracts from provisional JSON outputs
 - no behavior change to mandate enforcement, approval waits, or MCP routing
 - no provider OAuth/secrets flows
 - no remote approval service
