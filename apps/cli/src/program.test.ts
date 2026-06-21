@@ -2196,7 +2196,7 @@ describe("switchboard CLI program", () => {
       { from: "user" }
     );
     expect(errors).toEqual([
-      'error: cannot hand off mandate "fix-ci" while child mandates remain open: rerun-checks'
+      'error: cannot hand off mandate "fix-ci" while readiness blockers remain: child mandate "rerun-checks" remains open; approval request "approval-1" is pending. Use --ignore-readiness to close anyway.'
     ]);
     process.exitCode = undefined;
 
@@ -2221,6 +2221,33 @@ describe("switchboard CLI program", () => {
       ],
       { from: "user" }
     );
+    expect(errors).toEqual([
+      'error: cannot hand off mandate "fix-ci" while readiness blockers remain: child mandate "rerun-checks" remains open; approval request "approval-1" is pending. Use --ignore-readiness to close anyway.',
+      'error: cannot hand off mandate "rerun-checks" while readiness blockers remain: approval request "approval-1" is pending. Use --ignore-readiness to close anyway.'
+    ]);
+    process.exitCode = undefined;
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "handoff",
+        "rerun-checks",
+        "--state",
+        "completed",
+        "--summary",
+        "checks are green",
+        "--next-step",
+        "merge PR",
+        "--artifact",
+        "https://github.com/woverfield/switchboard/pull/214",
+        "--by",
+        "worker-agent",
+        "--ignore-readiness",
+        "--json"
+      ],
+      { from: "user" }
+    );
     await program.parseAsync(
       [
         "--cwd",
@@ -2232,6 +2259,7 @@ describe("switchboard CLI program", () => {
         "completed",
         "--summary",
         "parent done",
+        "--ignore-readiness",
         "--json"
       ],
       { from: "user" }
@@ -2643,6 +2671,14 @@ describe("switchboard CLI program", () => {
       ["--cwd", root, "mandate", "report", "fix-ci", "--json"],
       { from: "user" }
     );
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "escalate", "fix-ci", "--json"],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "escalate", "fix-ci"],
+      { from: "user" }
+    );
 
     expect(JSON.parse(output[2] ?? "{}")).toMatchObject({
       readiness: {
@@ -2674,6 +2710,151 @@ describe("switchboard CLI program", () => {
           "switchboard approve approval-1 or switchboard deny approval-1"
         ]
       }
+    });
+    expect(JSON.parse(output[3] ?? "{}")).toMatchObject({
+      schemaVersion: "switchboard.mandate-escalation.v1",
+      reportSchemaVersion: "switchboard.mandate-report.v1",
+      status: "needs_attention",
+      counts: {
+        items: 2,
+        approvalRequests: 1,
+        openChildMandates: 1,
+        blockedHandoffs: 0,
+        cancelledHandoffs: 0
+      },
+      nextCommands: [
+        "switchboard approve approval-1",
+        "switchboard deny approval-1",
+        "switchboard mandate report rerun-checks --json",
+        "switchboard mandate handoff rerun-checks --state completed --summary <summary>"
+      ],
+      items: [
+        {
+          type: "approval_request",
+          priority: "decision",
+          mandateId: "rerun-checks",
+          mandateUid: child.mandateUid,
+          approvalRequestId: "approval-1",
+          toolName: "github_findu_checks_rerun",
+          approvalGateId: "gate-1"
+        },
+        {
+          type: "open_child_mandate",
+          priority: "handoff",
+          mandateId: "rerun-checks",
+          mandateUid: child.mandateUid
+        }
+      ]
+    });
+    expect(JSON.parse(output[3] ?? "{}").copyText).toContain(
+      "Switchboard escalation for mandate fix-ci"
+    );
+    expect(output[4]).toContain("Switchboard mandate escalation");
+    expect(output[4]).toContain("Status: needs_attention");
+    expect(output[4]).toContain("approval_request rerun-checks");
+    expect(output[4]).toContain("open_child_mandate rerun-checks");
+    expect(output[4]).toContain("switchboard approve approval-1");
+  });
+
+  it("escalates blocked mandate handoffs for review", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    mkdirSync(join(root, "state"), { recursive: true });
+    writeFileSync(
+      mandateStorePath,
+      JSON.stringify(
+        {
+          version: 1,
+          mandates: [
+            {
+              version: 1,
+              id: "fix-ci",
+              mandateUid: "fix-ci:2026-06-21T14:00:00.000Z",
+              task: "fix-ci",
+              repoPath: root,
+              worktreePath: root,
+              branch: "fix/ci",
+              agentRole: "lead",
+              profiles: ["github_findu"],
+              lease: "2h",
+              createdAt: "2026-06-21T14:00:00.000Z",
+              expiresAt: "2026-06-21T16:00:00.000Z",
+              allowedTools: [],
+              deniedTools: [],
+              approvalGates: [],
+              handoffState: "open"
+            },
+            {
+              version: 1,
+              id: "rerun-checks",
+              mandateUid: "rerun-checks:2026-06-21T14:10:00.000Z",
+              task: "rerun checks",
+              parentMandateId: "fix-ci",
+              parentMandateUid: "fix-ci:2026-06-21T14:00:00.000Z",
+              delegatedBy: "fix-ci",
+              delegationPath: ["fix-ci", "rerun-checks"],
+              delegationUids: [
+                "fix-ci:2026-06-21T14:00:00.000Z",
+                "rerun-checks:2026-06-21T14:10:00.000Z"
+              ],
+              repoPath: root,
+              worktreePath: root,
+              branch: "fix/ci",
+              agentRole: "worker",
+              profiles: ["github_findu"],
+              lease: "30m",
+              createdAt: "2026-06-21T14:10:00.000Z",
+              expiresAt: "2026-06-21T14:40:00.000Z",
+              allowedTools: [],
+              deniedTools: [],
+              approvalGates: [],
+              handoffState: "blocked",
+              handoffSummary: "GitHub checks API is returning 503",
+              handoffNextSteps: ["retry when checks API recovers"],
+              handoffArtifacts: ["https://github.com/woverfield/switchboard/actions"],
+              handoffBy: "worker-agent",
+              handoffAt: "2026-06-21T14:20:00.000Z"
+            }
+          ]
+        },
+        null,
+        2
+      ) + "\n"
+    );
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath,
+      approvalStorePath: join(root, "state", "approvals.json")
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "escalate", "fix-ci", "--json"],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      schemaVersion: "switchboard.mandate-escalation.v1",
+      status: "needs_attention",
+      counts: {
+        items: 1,
+        blockedHandoffs: 1,
+        cancelledHandoffs: 0
+      },
+      items: [
+        {
+          type: "blocked_handoff",
+          priority: "review",
+          mandateId: "rerun-checks",
+          mandateUid: "rerun-checks:2026-06-21T14:10:00.000Z",
+          state: "blocked",
+          summary: "GitHub checks API is returning 503",
+          nextSteps: ["retry when checks API recovers"],
+          artifacts: ["https://github.com/woverfield/switchboard/actions"],
+          commands: ["switchboard mandate report rerun-checks --json"]
+        }
+      ]
     });
   });
 

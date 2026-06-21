@@ -68,6 +68,7 @@ const version = "0.1.0";
 const mandateMcpLaunchSchemaVersion = "switchboard.mcp-launch.v1";
 const mandateStatusSchemaVersion = "switchboard.mandate-status.v1";
 const mandateReportSchemaVersion = "switchboard.mandate-report.v1";
+const mandateEscalationSchemaVersion = "switchboard.mandate-escalation.v1";
 const approvalRequestsSchemaVersion = "switchboard.approvals.v1";
 const toolSurfaceSchemaVersion = "switchboard.tool-surface.v1";
 
@@ -170,6 +171,51 @@ interface MandateReportResults {
     mandateUid: string | null;
     value: string;
   }>;
+}
+
+interface MandateEscalationPayload {
+  schemaVersion: typeof mandateEscalationSchemaVersion;
+  reportSchemaVersion: typeof mandateReportSchemaVersion;
+  path: string;
+  auditLogPath: string;
+  repoPath: string | null;
+  selectedMandateId: string;
+  selectedMandateUid: string | null;
+  rootMandateId: string;
+  rootMandateUid: string | null;
+  generatedAt: string;
+  status: "clear" | "needs_attention";
+  counts: {
+    items: number;
+    approvalRequests: number;
+    openChildMandates: number;
+    blockedHandoffs: number;
+    cancelledHandoffs: number;
+  };
+  nextCommands: string[];
+  copyText: string;
+  items: MandateEscalationItem[];
+}
+
+interface MandateEscalationItem {
+  type:
+    | "approval_request"
+    | "open_child_mandate"
+    | "blocked_handoff"
+    | "cancelled_handoff";
+  priority: "decision" | "handoff" | "review";
+  mandateId: string;
+  mandateUid: string | null;
+  title: string;
+  detail: string;
+  commands: string[];
+  approvalRequestId?: string;
+  toolName?: string;
+  approvalGateId?: string;
+  state?: Exclude<MandateWithStatus["handoffState"], "open">;
+  summary?: string | null;
+  nextSteps?: string[];
+  artifacts?: string[];
 }
 
 interface ApprovalRequestsPayload {
@@ -1293,6 +1339,10 @@ export function createProgram(io: ProgramIo = {}): Command {
           [] as string[]
         )
         .option("--by <actor>", "actor writing the handoff report")
+        .option(
+          "--ignore-readiness",
+          "close even when local readiness blockers remain"
+        )
         .option("--json", "print machine-readable JSON")
         .action(
           async (
@@ -1303,6 +1353,7 @@ export function createProgram(io: ProgramIo = {}): Command {
               nextStep: string[];
               artifact: string[];
               by?: string;
+              ignoreReadiness?: boolean;
               json?: boolean;
             }
           ) => {
@@ -1318,7 +1369,27 @@ export function createProgram(io: ProgramIo = {}): Command {
             const globalOptions = program.opts<{ cwd?: string }>();
             const repoPath = installTargetCwd(globalOptions.cwd);
             const path = io.mandateStorePath ?? resolveMandateStorePath();
+            const auditLogPath = io.auditLogPath ?? resolveAuditLogPath();
+            const approvalStorePath =
+              io.approvalStorePath ?? resolveApprovalRequestStorePath();
             try {
+              if (!options.ignoreReadiness) {
+                const report = await createMandateReportPayload({
+                  id,
+                  path,
+                  auditLogPath,
+                  approvalStorePath,
+                  logLimit: 1,
+                  repoPath
+                });
+                if (report.readiness.blockers.length > 0) {
+                  writeErr(
+                    `error: cannot hand off mandate "${normalizeMandateId(id)}" while readiness blockers remain: ${report.readiness.blockers.join("; ")}. Use --ignore-readiness to close anyway.`
+                  );
+                  process.exitCode = 1;
+                  return;
+                }
+              }
               const mandate = await updateMandateHandoff({
                 path,
                 id,
@@ -1334,6 +1405,55 @@ export function createProgram(io: ProgramIo = {}): Command {
                 options.json
                   ? JSON.stringify(result, null, 2)
                   : formatMandateHandoff(path, mandate)
+              );
+            } catch (error) {
+              writeErr(`error: ${messageFromError(error)}`);
+              process.exitCode = 1;
+            }
+          }
+        )
+    )
+    .addCommand(
+      new Command("escalate")
+        .description("Build a local escalation plan for a mandate tree.")
+        .argument("<id>", "root or child mandate id to escalate")
+        .option("--json", "print machine-readable JSON")
+        .option("--all", "search mandates for all repos")
+        .option("--log-limit <count>", "maximum related audit entries", "20")
+        .action(
+          async (
+            id: string,
+            options: { json?: boolean; all?: boolean; logLimit: string }
+          ) => {
+            const logLimit = parsePositiveInteger(options.logLimit);
+            if (logLimit === undefined) {
+              writeErr("error: --log-limit must be a positive integer");
+              process.exitCode = 1;
+              return;
+            }
+
+            const globalOptions = program.opts<{ cwd?: string }>();
+            const repoPath = options.all
+              ? undefined
+              : installTargetCwd(globalOptions.cwd);
+            const path = io.mandateStorePath ?? resolveMandateStorePath();
+            const auditLogPath = io.auditLogPath ?? resolveAuditLogPath();
+            const approvalStorePath =
+              io.approvalStorePath ?? resolveApprovalRequestStorePath();
+            try {
+              const report = await createMandateReportPayload({
+                id,
+                path,
+                auditLogPath,
+                approvalStorePath,
+                logLimit,
+                ...(repoPath ? { repoPath } : {})
+              });
+              const escalation = createMandateEscalationPayload(report);
+              writeOut(
+                options.json
+                  ? JSON.stringify(escalation, null, 2)
+                  : formatMandateEscalation(escalation)
               );
             } catch (error) {
               writeErr(`error: ${messageFromError(error)}`);
@@ -2195,6 +2315,125 @@ function mandateReportResults(chain: MandateWithStatus[]): MandateReportResults 
   };
 }
 
+function createMandateEscalationPayload(
+  report: MandateReportPayload
+): MandateEscalationPayload {
+  const approvalItems: MandateEscalationItem[] =
+    report.readiness.pendingApprovalRequests.map((request) => ({
+      type: "approval_request",
+      priority: "decision",
+      mandateId: request.mandateId,
+      mandateUid: request.mandateUid,
+      approvalRequestId: request.id,
+      toolName: request.toolName,
+      approvalGateId: request.approvalGateId,
+      title: `Approval request ${request.id} is pending`,
+      detail: `Tool ${request.toolName} is waiting on approval gate ${request.approvalGateId}.`,
+      commands: [
+        `switchboard approve ${request.id}`,
+        `switchboard deny ${request.id}`
+      ]
+    }));
+  const openChildItems: MandateEscalationItem[] =
+    report.readiness.openChildMandates.map((mandate) => ({
+      type: "open_child_mandate",
+      priority: "handoff",
+      mandateId: mandate.id,
+      mandateUid: mandate.mandateUid,
+      title: `Child mandate ${mandate.id} remains open`,
+      detail: `Worker role ${mandate.agentRole} on branch ${mandate.branch} must hand off before the selected mandate can close.`,
+      commands: [
+        `switchboard mandate report ${mandate.id} --json`,
+        `switchboard mandate handoff ${mandate.id} --state completed --summary <summary>`
+      ]
+    }));
+  const handoffItems: MandateEscalationItem[] = report.results.handoffs
+    .filter(
+      (handoff) =>
+        handoff.state === "blocked" || handoff.state === "cancelled"
+    )
+    .map((handoff) => ({
+      type:
+        handoff.state === "blocked"
+          ? "blocked_handoff"
+          : "cancelled_handoff",
+      priority: "review",
+      mandateId: handoff.id,
+      mandateUid: handoff.mandateUid,
+      state: handoff.state,
+      summary: handoff.summary,
+      nextSteps: handoff.nextSteps,
+      artifacts: handoff.artifacts,
+      title: `Mandate ${handoff.id} is ${handoff.state}`,
+      detail:
+        handoff.summary ??
+        `Mandate ${handoff.id} handed off with state ${handoff.state}.`,
+      commands: [`switchboard mandate report ${handoff.id} --json`]
+    }));
+  const items = [...approvalItems, ...openChildItems, ...handoffItems];
+  const nextCommands = uniqueStrings(items.flatMap((item) => item.commands));
+  const copyText = formatMandateEscalationCopyText(report, items);
+
+  return {
+    schemaVersion: mandateEscalationSchemaVersion,
+    reportSchemaVersion: mandateReportSchemaVersion,
+    path: report.path,
+    auditLogPath: report.auditLogPath,
+    repoPath: report.repoPath,
+    selectedMandateId: report.selectedMandateId,
+    selectedMandateUid: report.selectedMandateUid,
+    rootMandateId: report.rootMandateId,
+    rootMandateUid: report.rootMandateUid,
+    generatedAt: new Date().toISOString(),
+    status: items.length === 0 ? "clear" : "needs_attention",
+    counts: {
+      items: items.length,
+      approvalRequests: approvalItems.length,
+      openChildMandates: openChildItems.length,
+      blockedHandoffs: handoffItems.filter(
+        (item) => item.type === "blocked_handoff"
+      ).length,
+      cancelledHandoffs: handoffItems.filter(
+        (item) => item.type === "cancelled_handoff"
+      ).length
+    },
+    nextCommands,
+    copyText,
+    items
+  };
+}
+
+function formatMandateEscalationCopyText(
+  report: MandateReportPayload,
+  items: MandateEscalationItem[]
+): string {
+  if (items.length === 0) {
+    return `Switchboard mandate ${report.selectedMandateId} has no local escalation items.`;
+  }
+
+  return [
+    `Switchboard escalation for mandate ${report.selectedMandateId}: ${items.length} item(s) need attention.`,
+    ...items.map((item) => `- ${item.title}: ${item.detail}`),
+    "Suggested local commands:",
+    ...uniqueStrings(items.flatMap((item) => item.commands)).map(
+      (command) => `- ${command}`
+    )
+  ].join("\n");
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
+}
+
 function mandateInSelectedSubtree(
   mandate: MandateWithStatus,
   selected: MandateWithStatus
@@ -2524,6 +2763,44 @@ function formatMandateReport(report: MandateReportPayload): string {
       lines.push(
         `  ${entry.timestamp} ${entry.status} mandate:${entry.mandateId ?? "none"} ${entry.action}${entry.toolName ? ` ${entry.toolName}` : ""}`
       );
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function formatMandateEscalation(escalation: MandateEscalationPayload): string {
+  const lines = [
+    "Switchboard mandate escalation",
+    `Store: ${escalation.path}`,
+    `Repo: ${escalation.repoPath ?? "all"}`,
+    `Root: ${escalation.rootMandateId}`,
+    `Selected: ${escalation.selectedMandateId}`,
+    `Status: ${escalation.status}`,
+    `Items: ${escalation.counts.items} approvals:${escalation.counts.approvalRequests} openChildren:${escalation.counts.openChildMandates} blocked:${escalation.counts.blockedHandoffs} cancelled:${escalation.counts.cancelledHandoffs}`
+  ];
+
+  if (escalation.items.length === 0) {
+    lines.push("", "No local escalation items.");
+    return lines.join("\n");
+  }
+
+  lines.push("", "Escalation items:");
+  for (const item of escalation.items) {
+    lines.push(`  ${item.type} ${item.mandateId}: ${item.title}`);
+    lines.push(`    ${item.detail}`);
+    if (item.nextSteps && item.nextSteps.length > 0) {
+      lines.push(`    Next: ${item.nextSteps.join("; ")}`);
+    }
+    if (item.artifacts && item.artifacts.length > 0) {
+      lines.push(`    Artifacts: ${item.artifacts.join(", ")}`);
+    }
+  }
+
+  if (escalation.nextCommands.length > 0) {
+    lines.push("", "Suggested local commands:");
+    for (const command of escalation.nextCommands) {
+      lines.push(`  ${command}`);
     }
   }
 

@@ -160,8 +160,9 @@ try {
     "--json"
   );
   assert(
-    blockedParentHandoff.stderr.includes("child mandates remain open"),
-    "expected parent handoff to require closed children"
+    blockedParentHandoff.stderr.includes("readiness blockers remain") ||
+      blockedParentHandoff.stderr.includes("child mandates remain open"),
+    "expected parent handoff to require readiness blockers to be resolved"
   );
 
   const childHandoff = run(
@@ -178,6 +179,7 @@ try {
     "https://github.com/woverfield/switchboard/pull/214",
     "--by",
     "worker-agent",
+    "--ignore-readiness",
     "--json"
   );
   assert(

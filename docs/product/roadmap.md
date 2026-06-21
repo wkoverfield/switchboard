@@ -195,6 +195,8 @@ Implemented in the current codebase:
 - mandate reports include selected-mandate readiness blockers for open children
   and pending approvals
 - mandate reports include aggregated handoff results, next steps, and artifacts
+- `switchboard mandate escalate <id> --json`
+- versioned `switchboard.mandate-escalation.v1` local escalation plans
 - versioned `switchboard.approvals.v1` approval request payloads
 - `switchboard approvals --mandate <id> --include-children --json`
 - approval request queues can be viewed across a parent/child mandate tree
@@ -1009,7 +1011,7 @@ Acceptance:
 - no remote service
 - no full agent orchestrator
 
-### Current Slice: Mandate Tree Result Aggregation V0
+### Completed Slice: Mandate Tree Result Aggregation V0
 
 Goal: make mandate reports summarize delegated work outcomes for harnesses and
 humans before adding richer escalation or orchestration.
@@ -1028,6 +1030,29 @@ Acceptance:
 - no provider OAuth/secrets flows
 - no remote service
 - no full agent orchestrator
+
+### Current Slice: Local Escalation Plan V0
+
+Goal: give harnesses and humans a local, scriptable escalation plan for a
+mandate tree without building a broker or remote notification service.
+
+Acceptance:
+
+- `switchboard mandate escalate <id> --json` emits
+  `schemaVersion: "switchboard.mandate-escalation.v1"`
+- escalation items include pending approval requests with approve/deny commands
+- escalation items include open child mandates with report/handoff commands
+- escalation items include blocked/cancelled handoffs for human review
+- payload includes deduplicated `nextCommands` and copyable human escalation
+  text
+- human output shows escalation status, items, and suggested local commands
+- `switchboard mandate handoff` refuses local readiness blockers by default
+- `switchboard mandate handoff --ignore-readiness` is the explicit escape hatch
+  for softer local blockers such as pending approvals; core open-child blocking
+  still applies
+- no approval decisions are made automatically
+- no remote service, notification channel, provider OAuth/secrets flow, or full
+  orchestrator
 
 ## Rules For Future Agents
 

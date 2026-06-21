@@ -12,6 +12,7 @@ preflight the available tool surface, and inspect state afterward.
 | Child MCP launch payload | `switchboard mandate child <task> --parent <id> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --json` | `mcpLaunch.schemaVersion: "switchboard.mcp-launch.v1"` | Stable enough for delegated worker startup |
 | Mandate status | `switchboard mandate status [id] --json` | `schemaVersion: "switchboard.mandate-status.v1"` | Stable enough for harness polling |
 | Mandate report | `switchboard mandate report <id> --json` | `schemaVersion: "switchboard.mandate-report.v1"` | Stable enough for harness handoff inspection |
+| Mandate escalation | `switchboard mandate escalate <id> --json` | `schemaVersion: "switchboard.mandate-escalation.v1"` | Stable enough for local escalation planning |
 | Approval requests | `switchboard approvals --mandate <id> --include-children --json` | `schemaVersion: "switchboard.approvals.v1"` | Stable enough for mandate-tree approval visibility |
 | Tool surface | `switchboard tools --mandate <id> --json` | `schemaVersion: "switchboard.tool-surface.v1"` | Stable enough for harness preflight |
 
@@ -43,6 +44,11 @@ open mandates, flattened next steps, and artifacts across the reported tree.
 The UID fields disambiguate repeated human slug ids such as multiple `fix-ci`
 mandates over time.
 
+`switchboard.mandate-escalation.v1` lets a harness build a local escalation
+plan from the report data without calling a remote approval service. The payload
+includes pending approval decisions, open child mandates, blocked/cancelled
+handoffs, suggested local commands, and copy text suitable for a human handoff.
+
 `switchboard.approvals.v1` lets a harness inspect approval requests for a
 single mandate or, with `--include-children`, for the selected mandate's whole
 parent/child chain. The payload includes request counts by runtime status,
@@ -67,8 +73,8 @@ formal harness contracts:
 | Daemon diagnostics | `switchboard daemon <status\|start\|ping\|tools\|stop> --json` | Operational surfaces, not mandate authority contracts |
 
 Do not treat unversioned JSON as frozen. Prefer versioned mandate launch,
-mandate status, mandate report, approval request, and tool-surface payloads for
-harness integration today.
+mandate status, mandate report, mandate escalation, approval request, and
+tool-surface payloads for harness integration today.
 
 ## Compatibility Rules
 
