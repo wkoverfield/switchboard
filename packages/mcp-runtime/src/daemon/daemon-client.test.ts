@@ -112,6 +112,7 @@ describe("daemon client response validation", () => {
           approvalRequired: {
             approvalRequestId: "approval-1",
             mandateId: "fix-ci",
+            mandateUid: "fix-ci:2026-06-20T20:00:00.000Z",
             repoPath: "/repo",
             branch: "fix/ci",
             task: "fix-ci",
@@ -133,6 +134,7 @@ describe("daemon client response validation", () => {
       approvalRequired: {
         approvalRequestId: "approval-1",
         mandateId: "fix-ci",
+        mandateUid: "fix-ci:2026-06-20T20:00:00.000Z",
         repoPath: "/repo",
         branch: "fix/ci",
         task: "fix-ci",

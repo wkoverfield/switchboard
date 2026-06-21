@@ -143,9 +143,10 @@ Mandates should be powerful but optional. A developer should be able to get
 value from Switchboard as a repo-aware MCP setup tool before learning the
 mandate model.
 
-These layers describe product depth, not implementation order. The next build
-work should make active mandates easy for harnesses to consume before adding
-child mandate/delegation enforcement.
+These layers describe product depth, not implementation order. Active mandates,
+child mandates, and the first harness JSON contracts now exist locally; the next
+build work should deepen approval visibility and enforcement without turning
+Switchboard into the orchestrator.
 
 ## Harness Boundary
 
@@ -174,9 +175,10 @@ Important scriptable surfaces:
 - `switchboard mandate status --json`
 - `switchboard mcp --mandate <id>`
 - `switchboard tools --mandate <id> --json`
+- `switchboard approvals --mandate <id> --include-children --json`
 - `switchboard logs --mandate <id> --json`
-- future `switchboard mandate child --parent <id> --json`
-- future approval and lease commands with JSON output
+- `switchboard mandate child --parent <id> --json`
+- future lease and approval escalation commands with JSON output
 
 ## Example Mandates
 
@@ -264,7 +266,9 @@ Switchboard the orchestrator:
 - `switchboard mandate handoff <id>` closes mandate authority with a handoff
   summary
 - `switchboard mandate report <id> --json` exposes versioned parent/child
-  handoff reports with related audit entries
+  handoff reports with related approval requests and audit entries
+- `switchboard approvals --mandate <id> --include-children --json` exposes a
+  versioned approval queue across a parent/child mandate tree
 - `switchboard tools --mandate <id> --json` exposes the scoped tool surface for
   harness preflight and UI without launching an agent client
 - the tool surface payload is explicitly versioned as
@@ -278,8 +282,8 @@ Switchboard the orchestrator:
 
 Recommended follow-up:
 
-- decide whether `logs --json` or `approvals --json` need versioning for the
-  first real approval escalation flow
+- build the first modest approval escalation behavior on top of the versioned
+  tree approval queue
 - add richer result aggregation across mandate trees
 - harden the approval elicitation and gated-tool metadata client matrix with
   real Codex/Claude smoke notes

@@ -1,6 +1,6 @@
 # Switchboard Roadmap
 
-Last updated: 2026-06-20
+Last updated: 2026-06-21
 
 This is the working roadmap for Switchboard. The source planning documents live in
 `docs/product/source/` and are preserved source material from the original
@@ -190,16 +190,24 @@ Implemented in the current codebase:
 - parent handoff is blocked while child mandates remain open
 - `switchboard mandate report <id> --json`
 - versioned `switchboard.mandate-report.v1` parent/child report payloads
-- mandate reports include related audit entries for the delegation chain
+- mandate reports include related audit entries and approval requests for the
+  delegation chain
+- versioned `switchboard.approvals.v1` approval request payloads
+- `switchboard approvals --mandate <id> --include-children --json`
+- approval request queues can be viewed across a parent/child mandate tree
+- approval decisions are scoped to immutable mandate UIDs when available
+- approval requests carry parent/delegation metadata when created under a child
+  mandate
 
 Not started:
 
 - richer policy engine and operating modes
-- full approval broker and client-specific elicitation
+- full approval broker
 - secrets/keychain
 - provider presets
 - mandate-aware advanced onboarding
-- richer mandate tree approval escalation and result aggregation
+- richer mandate tree approval escalation and result aggregation beyond
+  visibility/reporting
 - global/user-scope client installers
 - Supabase, Stripe, PostHog, or Sentry integrations
 
@@ -908,7 +916,7 @@ Acceptance:
 - no remote approval service
 - no child mandate delegation
 
-### Current Slice: Child Mandates V0
+### Completed Slice: Child Mandates V0
 
 Goal: turn the mandate direction into a local authority graph primitive without
 building a full orchestrator.
@@ -931,7 +939,7 @@ Acceptance:
 - no remote service
 - no full agent orchestrator
 
-### Current Slice: Mandate Handoff / Reporting V0
+### Completed Slice: Mandate Handoff / Reporting V0
 
 Goal: give external harnesses a scriptable way to close delegated work, preserve
 handoff context, and inspect the resulting parent/child authority chain.
@@ -951,6 +959,33 @@ Acceptance:
 - no approval escalation broker
 - no provider OAuth/secrets flows
 - no remote service
+- no full agent orchestrator
+
+### Current Slice: Mandate Tree Approval Visibility V0
+
+Goal: give external harnesses and local users a versioned view of approval
+queues across a delegated mandate tree without building a remote approval
+broker.
+
+Acceptance:
+
+- approval request records can carry immutable mandate UIDs and optional
+  parent/delegation metadata
+- approved request reuse is scoped to the active mandate UID when available
+- daemon-created approval requests copy active mandate delegation context
+- `switchboard approvals --json` returns top-level
+  `schemaVersion: "switchboard.approvals.v1"`
+- `switchboard approvals --mandate <id> --include-children --json` includes
+  current parent/child mandate requests while avoiding stale reused human ids
+- approval queue payloads include request counts by runtime status
+- tree approval payloads include matching mandates and `childrenByParent`
+- mandate report payloads include related approval requests for the selected
+  delegation chain
+- repeated human mandate ids do not mix old and new approval queues
+- docs name the approval request JSON contract for harness consumers
+- no remote approval service
+- no secrets broker
+- no provider OAuth/secrets flows
 - no full agent orchestrator
 
 ## Rules For Future Agents

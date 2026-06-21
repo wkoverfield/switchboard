@@ -2052,6 +2052,7 @@ describe("switchboard CLI program", () => {
     writeMandateConfig(root);
     const mandateStorePath = join(root, "state", "mandates.json");
     const auditLogPath = join(root, "state", "logs", "switchboard.jsonl");
+    const approvalStorePath = join(root, "state", "approvals.json");
     mkdirSync(join(root, "state", "logs"), { recursive: true });
     writeFileSync(
       auditLogPath,
@@ -2097,7 +2098,8 @@ describe("switchboard CLI program", () => {
       writeOut: (message) => output.push(message),
       writeErr: (message) => errors.push(message),
       mandateStorePath,
-      auditLogPath
+      auditLogPath,
+      approvalStorePath
     });
     await program.parseAsync(
       [
@@ -2139,6 +2141,46 @@ describe("switchboard CLI program", () => {
       ],
       { from: "user" }
     );
+    const mandateStore = JSON.parse(readFileSync(mandateStorePath, "utf8")) as {
+      mandates: Array<{
+        id: string;
+        mandateUid?: string;
+        parentMandateId?: string;
+        parentMandateUid?: string;
+        delegatedBy?: string;
+        delegationPath?: string[];
+        delegationUids?: string[];
+      }>;
+    };
+    const childMandate = mandateStore.mandates.find(
+      (mandate) => mandate.id === "rerun-checks"
+    );
+    expect(childMandate).toBeDefined();
+    await createApprovalRequest({
+      path: approvalStorePath,
+      now: () => new Date("2026-06-19T16:22:00.000Z"),
+      mandateId: "rerun-checks",
+      ...(childMandate?.mandateUid ? { mandateUid: childMandate.mandateUid } : {}),
+      ...(childMandate?.parentMandateId
+        ? { parentMandateId: childMandate.parentMandateId }
+        : {}),
+      ...(childMandate?.parentMandateUid
+        ? { parentMandateUid: childMandate.parentMandateUid }
+        : {}),
+      ...(childMandate?.delegatedBy ? { delegatedBy: childMandate.delegatedBy } : {}),
+      ...(childMandate?.delegationPath
+        ? { delegationPath: childMandate.delegationPath }
+        : {}),
+      ...(childMandate?.delegationUids
+        ? { delegationUids: childMandate.delegationUids }
+        : {}),
+      repoPath: root,
+      branch: "fix/ci",
+      toolName: "github_findu_checks_rerun",
+      approvalGateId: "gate-1",
+      approvalGatePattern: "github_findu_checks_rerun",
+      expiresAt: "2026-06-19T16:40:00.000Z"
+    });
     await program.parseAsync(
       [
         "--cwd",
@@ -2227,7 +2269,8 @@ describe("switchboard CLI program", () => {
         blocked: 0,
         cancelled: 0,
         closed: 2,
-        auditEntries: 2
+        auditEntries: 2,
+        approvalRequests: 1
       },
       childrenByParent: {
         "fix-ci": ["rerun-checks"]
@@ -2243,6 +2286,14 @@ describe("switchboard CLI program", () => {
           parentMandateId: "fix-ci",
           handoffState: "completed",
           runtimeStatus: "closed"
+        }
+      ],
+      approvalRequests: [
+        {
+          mandateId: "rerun-checks",
+          parentMandateId: "fix-ci",
+          delegationPath: ["fix-ci", "rerun-checks"],
+          toolName: "github_findu_checks_rerun"
         }
       ],
       auditEntries: [
@@ -2263,6 +2314,7 @@ describe("switchboard CLI program", () => {
     writeMandateConfig(root);
     const mandateStorePath = join(root, "state", "mandates.json");
     const auditLogPath = join(root, "state", "logs", "switchboard.jsonl");
+    const approvalStorePath = join(root, "state", "approvals.json");
     mkdirSync(join(root, "state", "logs"), { recursive: true });
     writeFileSync(
       mandateStorePath,
@@ -2376,12 +2428,46 @@ describe("switchboard CLI program", () => {
         .map((entry) => JSON.stringify(entry))
         .join("\n") + "\n"
     );
+    await createApprovalRequest({
+      path: approvalStorePath,
+      now: () => new Date("2026-06-19T16:22:00.000Z"),
+      mandateId: "rerun-checks",
+      mandateUid: "rerun-checks:2026-06-19T16:10:00.000Z",
+      parentMandateId: "fix-ci",
+      parentMandateUid: "fix-ci:2026-06-19T16:00:00.000Z",
+      delegationPath: ["fix-ci", "rerun-checks"],
+      delegationUids: [
+        "fix-ci:2026-06-19T16:00:00.000Z",
+        "rerun-checks:2026-06-19T16:10:00.000Z"
+      ],
+      repoPath: root,
+      branch: "fix/ci",
+      toolName: "old_child_approval",
+      approvalGateId: "gate-1",
+      approvalGatePattern: "old_child_approval",
+      expiresAt: "2026-06-19T16:40:00.000Z"
+    });
+    await createApprovalRequest({
+      path: approvalStorePath,
+      now: () => new Date("2026-06-19T18:06:00.000Z"),
+      mandateId: "fix-ci",
+      mandateUid: "fix-ci:2026-06-19T18:00:00.000Z",
+      delegationPath: ["fix-ci"],
+      delegationUids: ["fix-ci:2026-06-19T18:00:00.000Z"],
+      repoPath: root,
+      branch: "fix/ci",
+      toolName: "new_parent_approval",
+      approvalGateId: "gate-1",
+      approvalGatePattern: "new_parent_approval",
+      expiresAt: "2026-06-19T18:40:00.000Z"
+    });
 
     const output: string[] = [];
     const program = createProgram({
       writeOut: (message) => output.push(message),
       mandateStorePath,
-      auditLogPath
+      auditLogPath,
+      approvalStorePath
     });
     await program.parseAsync(
       ["--cwd", root, "mandate", "report", "fix-ci", "--json"],
@@ -2394,12 +2480,20 @@ describe("switchboard CLI program", () => {
       rootMandateUid: "fix-ci:2026-06-19T18:00:00.000Z",
       counts: {
         mandates: 1,
-        auditEntries: 1
+        auditEntries: 1,
+        approvalRequests: 1
       },
       mandates: [
         {
           id: "fix-ci",
           mandateUid: "fix-ci:2026-06-19T18:00:00.000Z"
+        }
+      ],
+      approvalRequests: [
+        {
+          mandateId: "fix-ci",
+          mandateUid: "fix-ci:2026-06-19T18:00:00.000Z",
+          toolName: "new_parent_approval"
         }
       ],
       auditEntries: [
@@ -2686,8 +2780,16 @@ describe("switchboard CLI program", () => {
       from: "user"
     });
     expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      schemaVersion: "switchboard.approvals.v1",
       path: approvalStorePath,
       repoPath: root,
+      includeChildren: false,
+      counts: {
+        requests: 4,
+        pending: 2,
+        expired: 1,
+        stale: 1
+      },
       requests: [
         { id: "approval-1", runtimeStatus: "pending" },
         { id: "approval-2", runtimeStatus: "pending" },
@@ -2755,6 +2857,200 @@ describe("switchboard CLI program", () => {
     });
     expect(errors).toEqual([
       "error: --status must be pending, approved, denied, stale, or expired"
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("lists approval requests across a mandate tree", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const approvalStorePath = join(root, "state", "approvals.json");
+    const output: string[] = [];
+    const program = createProgram({
+      mandateStorePath,
+      approvalStorePath,
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "lead",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "child",
+        "rerun checks",
+        "--parent",
+        "fix-ci",
+        "--agent",
+        "worker",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "30m",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    const parent = JSON.parse(output[0] ?? "{}").mandate as {
+      id: string;
+      mandateUid: string;
+    };
+    const child = JSON.parse(output[1] ?? "{}").mandate as {
+      id: string;
+      mandateUid: string;
+      parentMandateId: string;
+      parentMandateUid: string;
+      delegationPath: string[];
+      delegationUids: string[];
+    };
+    const expiresAt = new Date(Date.now() + 3_600_000).toISOString();
+    await createApprovalRequest({
+      path: approvalStorePath,
+      mandateId: parent.id,
+      mandateUid: parent.mandateUid,
+      repoPath: root,
+      branch: "fix/ci",
+      toolName: "github_findu_deploy_preview",
+      approvalGateId: "gate-1",
+      approvalGatePattern: "github_findu_deploy_preview",
+      expiresAt
+    });
+    await createApprovalRequest({
+      path: approvalStorePath,
+      mandateId: child.id,
+      mandateUid: child.mandateUid,
+      parentMandateId: child.parentMandateId,
+      parentMandateUid: child.parentMandateUid,
+      delegationPath: child.delegationPath,
+      delegationUids: child.delegationUids,
+      repoPath: root,
+      branch: "fix/ci",
+      toolName: "github_findu_checks_rerun",
+      approvalGateId: "gate-1",
+      approvalGatePattern: "github_findu_checks_rerun",
+      approvalGateRisk: "medium",
+      expiresAt
+    });
+    await createApprovalRequest({
+      path: approvalStorePath,
+      mandateId: "fix-ci",
+      mandateUid: "fix-ci:old",
+      repoPath: root,
+      branch: "fix/ci",
+      toolName: "old_fix_ci_deploy",
+      approvalGateId: "gate-1",
+      approvalGatePattern: "old_fix_ci_deploy",
+      expiresAt
+    });
+    await createApprovalRequest({
+      path: approvalStorePath,
+      mandateId: "fix-ci",
+      repoPath: root,
+      branch: "fix/ci",
+      toolName: "legacy_no_uid_deploy",
+      approvalGateId: "gate-2",
+      approvalGatePattern: "legacy_no_uid_deploy",
+      expiresAt
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "approvals", "--mandate", "fix-ci", "--json"],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "approvals",
+        "--mandate",
+        "fix-ci",
+        "--include-children",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[2] ?? "{}")).toMatchObject({
+      schemaVersion: "switchboard.approvals.v1",
+      includeChildren: false,
+      counts: {
+        requests: 3
+      },
+      requests: [
+        { mandateUid: parent.mandateUid, toolName: "github_findu_deploy_preview" },
+        { mandateUid: "fix-ci:old", toolName: "old_fix_ci_deploy" },
+        { mandateId: "fix-ci", toolName: "legacy_no_uid_deploy" }
+      ]
+    });
+    expect(JSON.parse(output[3] ?? "{}")).toMatchObject({
+      schemaVersion: "switchboard.approvals.v1",
+      mandateStorePath,
+      includeChildren: true,
+      rootMandateId: "fix-ci",
+      rootMandateUid: parent.mandateUid,
+      childrenByParent: {
+        "fix-ci": ["rerun-checks"]
+      },
+      counts: {
+        requests: 2,
+        pending: 2
+      },
+      mandates: [
+        { id: "fix-ci", mandateUid: parent.mandateUid },
+        {
+          id: "rerun-checks",
+          mandateUid: child.mandateUid,
+          parentMandateUid: parent.mandateUid
+        }
+      ],
+      requests: [
+        { mandateUid: parent.mandateUid, toolName: "github_findu_deploy_preview" },
+        {
+          mandateUid: child.mandateUid,
+          parentMandateUid: parent.mandateUid,
+          delegationPath: ["fix-ci", "rerun-checks"],
+          toolName: "github_findu_checks_rerun"
+        }
+      ]
+    });
+  });
+
+  it("rejects child approval listings without a scoped parent mandate", async () => {
+    const root = makeTempProject();
+    const errors: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message)
+    });
+
+    await program.parseAsync(["--cwd", root, "approvals", "--include-children"], {
+      from: "user"
+    });
+
+    expect(errors).toEqual([
+      "error: --include-children requires --mandate <id>"
     ]);
     expect(process.exitCode).toBe(1);
   });

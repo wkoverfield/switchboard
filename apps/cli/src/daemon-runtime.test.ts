@@ -226,6 +226,7 @@ describe("daemon runtime mandate context", () => {
       approvalRequired: {
         approvalRequestId: "approval-1",
         mandateId: "fix-ci",
+        mandateUid: expect.stringMatching(/^fix-ci:/),
         repoPath: root,
         branch: "fix/ci",
         task: "fix-ci",
@@ -243,6 +244,7 @@ describe("daemon runtime mandate context", () => {
     ).resolves.toMatchObject([
       {
         id: "approval-1",
+        mandateUid: expect.stringMatching(/^fix-ci:/),
         runtimeStatus: "pending",
         toolName: "github_findu_echo",
         approvalGateId: "gate-1",

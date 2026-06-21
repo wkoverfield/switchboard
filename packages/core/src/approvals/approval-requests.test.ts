@@ -200,6 +200,124 @@ describe("approval requests", () => {
     ).rejects.toThrow('approval request "approval-2" is already denied');
   });
 
+  it("scopes approved request lookup by mandate uid when available", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-approvals-"));
+    const path = join(root, "approvals.json");
+    const repoPath = join(root, "repo");
+
+    await createApprovalRequest({
+      path,
+      now: () => new Date("2026-06-20T15:00:00.000Z"),
+      mandateId: "fix-ci",
+      mandateUid: "fix-ci:2026-06-20T15:00:00.000Z",
+      repoPath,
+      branch: "fix/ci",
+      toolName: "github_findu_deploy",
+      approvalGateId: "gate-1",
+      approvalGatePattern: "github_findu_deploy",
+      expiresAt: "2026-06-20T17:00:00.000Z"
+    });
+    await decideApprovalRequest({
+      path,
+      id: "approval-1",
+      status: "approved",
+      now: () => new Date("2026-06-20T15:05:00.000Z")
+    });
+
+    await expect(
+      findApprovedApprovalRequest({
+        path,
+        mandateId: "fix-ci",
+        mandateUid: "fix-ci:2026-06-20T16:00:00.000Z",
+        repoPath,
+        toolName: "github_findu_deploy",
+        approvalGateId: "gate-1",
+        now: () => new Date("2026-06-20T15:06:00.000Z")
+      })
+    ).resolves.toBeUndefined();
+    await expect(
+      createApprovalRequest({
+        path,
+        now: () => new Date("2026-06-20T16:00:00.000Z"),
+        mandateId: "fix-ci",
+        mandateUid: "fix-ci:2026-06-20T16:00:00.000Z",
+        repoPath,
+        branch: "fix/ci",
+        toolName: "github_findu_deploy",
+        approvalGateId: "gate-1",
+        approvalGatePattern: "github_findu_deploy",
+        expiresAt: "2026-06-20T17:00:00.000Z"
+      })
+    ).resolves.toMatchObject({
+      id: "approval-2",
+      mandateUid: "fix-ci:2026-06-20T16:00:00.000Z",
+      runtimeStatus: "pending"
+    });
+  });
+
+  it("stores approval request delegation context and filters by root mandate uid", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-approvals-"));
+    const path = join(root, "approvals.json");
+    const repoPath = join(root, "repo");
+
+    await createApprovalRequest({
+      path,
+      now: () => new Date("2026-06-20T15:00:00.000Z"),
+      mandateId: "rerun-checks",
+      mandateUid: "rerun-checks:2026-06-20T15:00:00.000Z",
+      parentMandateId: "fix-ci",
+      parentMandateUid: "fix-ci:2026-06-20T14:55:00.000Z",
+      delegatedBy: "lead-agent",
+      delegationPath: ["fix-ci", "rerun-checks"],
+      delegationUids: [
+        "fix-ci:2026-06-20T14:55:00.000Z",
+        "rerun-checks:2026-06-20T15:00:00.000Z"
+      ],
+      repoPath,
+      branch: "fix/ci",
+      toolName: "github_findu_deploy",
+      approvalGateId: "gate-1",
+      approvalGatePattern: "github_findu_deploy",
+      expiresAt: "2026-06-20T17:00:00.000Z"
+    });
+    await createApprovalRequest({
+      path,
+      now: () => new Date("2026-06-20T15:05:00.000Z"),
+      mandateId: "rerun-checks",
+      mandateUid: "rerun-checks:2026-06-20T15:05:00.000Z",
+      parentMandateId: "fix-ci",
+      parentMandateUid: "fix-ci:2026-06-20T15:04:00.000Z",
+      delegationPath: ["fix-ci", "rerun-checks"],
+      delegationUids: [
+        "fix-ci:2026-06-20T15:04:00.000Z",
+        "rerun-checks:2026-06-20T15:05:00.000Z"
+      ],
+      repoPath,
+      branch: "fix/ci",
+      toolName: "github_findu_deploy",
+      approvalGateId: "gate-1",
+      approvalGatePattern: "github_findu_deploy",
+      expiresAt: "2026-06-20T17:00:00.000Z"
+    });
+
+    expect(
+      await listApprovalRequests({
+        path,
+        rootMandateUid: "fix-ci:2026-06-20T14:55:00.000Z",
+        now: () => new Date("2026-06-20T15:09:00.000Z")
+      })
+    ).toEqual([
+      expect.objectContaining({
+        id: "approval-1",
+        mandateUid: "rerun-checks:2026-06-20T15:00:00.000Z",
+        parentMandateUid: "fix-ci:2026-06-20T14:55:00.000Z",
+        delegatedBy: "lead-agent",
+        delegationPath: ["fix-ci", "rerun-checks"],
+        runtimeStatus: "pending"
+      })
+    ]);
+  });
+
   it("expires pending and approved requests at their lease boundary", async () => {
     const root = await mkdtemp(join(tmpdir(), "switchboard-approvals-"));
     const path = join(root, "approvals.json");

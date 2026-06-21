@@ -498,6 +498,9 @@ async function callConfiguredTool(
         if ("approvalRequired" in policyDecision) {
           const approved = await findApprovedApprovalRequest({
             mandateId: routerResult.mandate.id,
+            ...(routerResult.mandate.mandateUid
+              ? { mandateUid: routerResult.mandate.mandateUid }
+              : {}),
             repoPath: routerResult.mandate.repoPath,
             toolName: name,
             approvalGateId: policyDecision.approvalGate.id
@@ -515,6 +518,24 @@ async function callConfiguredTool(
 
           const request = await createApprovalRequest({
             mandateId: routerResult.mandate.id,
+            ...(routerResult.mandate.mandateUid
+              ? { mandateUid: routerResult.mandate.mandateUid }
+              : {}),
+            ...(routerResult.mandate.parentMandateId
+              ? { parentMandateId: routerResult.mandate.parentMandateId }
+              : {}),
+            ...(routerResult.mandate.parentMandateUid
+              ? { parentMandateUid: routerResult.mandate.parentMandateUid }
+              : {}),
+            ...(routerResult.mandate.delegatedBy
+              ? { delegatedBy: routerResult.mandate.delegatedBy }
+              : {}),
+            ...(routerResult.mandate.delegationPath
+              ? { delegationPath: routerResult.mandate.delegationPath }
+              : {}),
+            ...(routerResult.mandate.delegationUids
+              ? { delegationUids: routerResult.mandate.delegationUids }
+              : {}),
             repoPath: routerResult.mandate.repoPath,
             branch: routerResult.mandate.branch,
             toolName: name,
@@ -687,6 +708,9 @@ function approvalRequiredPayload(options: {
   return {
     approvalRequestId: options.approvalRequestId,
     mandateId: options.mandate.id,
+    ...(options.mandate.mandateUid
+      ? { mandateUid: options.mandate.mandateUid }
+      : {}),
     repoPath: options.mandate.repoPath,
     branch: options.mandate.branch,
     task: options.mandate.task,
@@ -720,7 +744,10 @@ async function waitForApprovalDecision(options: {
     }
     const requests = await listApprovalRequests({
       repoPath: options.mandate.repoPath,
-      mandateId: options.mandate.id
+      mandateId: options.mandate.id,
+      ...(options.mandate.mandateUid
+        ? { mandateUid: options.mandate.mandateUid }
+        : {})
     });
     const request = requests.find((item) => item.id === options.requestId);
     if (
@@ -871,6 +898,7 @@ async function approvedApprovalRequestsForMandate(
   const requests = await listApprovalRequests({
     repoPath: mandate.repoPath,
     mandateId: mandate.id,
+    ...(mandate.mandateUid ? { mandateUid: mandate.mandateUid } : {}),
     status: "approved"
   });
 
