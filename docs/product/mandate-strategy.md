@@ -173,6 +173,7 @@ Important scriptable surfaces:
 - `switchboard mandate create --json`
 - `switchboard mandate status --json`
 - `switchboard mcp --mandate <id>`
+- `switchboard tools --mandate <id> --json`
 - `switchboard logs --mandate <id> --json`
 - future `switchboard mandate child --parent <id> --json`
 - future approval and lease commands with JSON output
@@ -256,6 +257,8 @@ Switchboard the orchestrator:
 - the launch payload includes a schema/version marker, mandate id, repo cwd,
   command, and args
 - launch args carry `--cwd <repo> mcp --mandate <id>`
+- `switchboard tools --mandate <id> --json` exposes the scoped tool surface for
+  harness preflight and UI without launching an agent client
 - `docs/use-cases/harness-scoped-mandates.md` documents the "request scoped
   authority, launch agent, inspect logs" flow
 

@@ -864,6 +864,8 @@ Acceptance:
   and `--approval-wait` behavior remains available
 - approval-required tools remain discoverable through `tools/list` with
   `_meta.switchboard.approvalRequired` metadata while execution stays gated
+- `switchboard tools --mandate <id> --json` exposes the scoped tool surface for
+  harness preflight without launching a worker agent
 - approval gates do not expand mandate allow lists; disallowed and denied tools
   remain hidden and blocked
 - upstream tool `_meta.switchboard` values are not trusted as Switchboard policy
