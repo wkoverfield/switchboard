@@ -27,6 +27,12 @@ pnpm --filter @switchboard-mcp/cli switchboard --cwd "$SWITCHBOARD_REPO" doctor
 pnpm --filter @switchboard-mcp/cli switchboard --cwd "$SWITCHBOARD_REPO" test switchboard_fixture
 ```
 
+To print a repo/profile-specific version of this walkthrough:
+
+```bash
+pnpm --filter @switchboard-mcp/cli switchboard --cwd "$SWITCHBOARD_REPO" demo mandate switchboard_fixture
+```
+
 ## Create A Demo Mandate
 
 Create a task-scoped mandate around the fixture profile:

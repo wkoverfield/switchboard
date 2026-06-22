@@ -1233,6 +1233,81 @@ describe("switchboard CLI program", () => {
     );
   });
 
+  it("prints a local mandate demo command sequence", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "demo-branch");
+    writeStdioConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message)
+    });
+    await program.parseAsync(
+      ["--cwd", root, "demo", "mandate", "--task", "demo-ci"],
+      { from: "user" }
+    );
+
+    expect(output[0]).toContain("Switchboard mandate demo");
+    expect(output[0]).toContain(`Repo: ${root}`);
+    expect(output[0]).toContain("Profile: local_echo");
+    expect(output[0]).toContain("Namespace: echo_tools");
+    expect(output[0]).toContain("Mandate id: demo-ci");
+    expect(output[0]).toContain(
+      `switchboard --cwd '${root}' mandate create 'demo-ci' --agent 'implementer' --profiles 'local_echo' --branch 'demo-branch' --lease '30m' --allow-tool 'echo_tools_*' --require-approval-tool 'echo_tools_echo'`
+    );
+    expect(output[0]).toContain(
+      `switchboard --cwd '${root}' tools --mandate demo-ci`
+    );
+    expect(output[0]).toContain(
+      `switchboard --cwd '${root}' mcp --mandate demo-ci`
+    );
+    expect(output[0]).toContain(
+      `switchboard --cwd '${root}' approvals --mandate demo-ci`
+    );
+    expect(output[0]).toContain(
+      "pnpm --filter @switchboard-mcp/cli switchboard"
+    );
+    expect(output[0]).toContain(
+      "Replace the installed CLI prefix in the commands above"
+    );
+    expect(output[0]).toContain("pnpm smoke:mandate-walkthrough");
+  });
+
+  it("fails mandate demo for missing stdio profile", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    const errors: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message)
+    });
+    await program.parseAsync(["--cwd", root, "demo", "mandate", "missing"], {
+      from: "user"
+    });
+
+    expect(errors).toEqual(['error: stdio profile "missing" was not found']);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("fails mandate demo for tasks with empty normalized ids", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    const errors: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message)
+    });
+    await program.parseAsync(
+      ["--cwd", root, "demo", "mandate", "--task", "!!!"],
+      { from: "user" }
+    );
+
+    expect(errors).toEqual([
+      "error: --task must contain at least one letter or number"
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
   it("prints tool surface JSON errors to stdout", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");

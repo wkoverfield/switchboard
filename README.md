@@ -25,6 +25,7 @@ switchboard --help
 switchboard init
 switchboard status
 switchboard doctor
+switchboard demo mandate [profile]
 switchboard test <profile>
 switchboard install <codex|claude>
 switchboard install <codex|claude> --write

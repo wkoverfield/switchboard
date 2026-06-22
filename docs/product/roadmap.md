@@ -1268,7 +1268,7 @@ Acceptance:
 - CI runs the walkthrough smoke with the rest of the smoke suite
 - no provider integrations, secrets broker, remote service, or orchestrator
 
-### Current Slice: Mandate Demo Runbook V0
+### Completed Slice: Mandate Demo Runbook V0
 
 Goal: turn the automated mandate walkthrough into a human-readable local
 dogfood/demo path without adding providers, secrets, or new runtime behavior.
@@ -1282,6 +1282,28 @@ Acceptance:
 - runbook points to `pnpm smoke:mandate-walkthrough` for the fully automated MCP
   approval path
 - README and harness docs link to the runbook
+- no provider integrations, secrets broker, remote service, or orchestrator
+- no keychain/secrets architecture decision in this slice
+
+### Current Slice: Mandate Demo Helper V0
+
+Goal: make the local mandate dogfood path discoverable from the CLI by printing
+profile-specific demo commands without creating mandates or changing runtime
+behavior.
+
+Acceptance:
+
+- `switchboard demo mandate [profile]` prints a local demo sequence for a stdio
+  profile
+- the command defaults to the first configured stdio profile when no profile is
+  supplied
+- output includes repo, profile, namespace, task, mandate id, installed CLI
+  commands, source-checkout prefix guidance, and the automated smoke command
+- default task names avoid immediate rerun collisions
+- generated commands cover mandate create, tool preflight, MCP launch,
+  approvals, logs, handoff, and report
+- missing or non-stdio profiles fail clearly
+- README and demo runbook mention the helper
 - no provider integrations, secrets broker, remote service, or orchestrator
 - no keychain/secrets architecture decision in this slice
 
