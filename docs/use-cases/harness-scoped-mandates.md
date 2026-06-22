@@ -8,6 +8,9 @@ tool policy, lease, approvals, and audit trail.
 For the versioned JSON surfaces used by this flow, see
 `docs/use-cases/harness-json-contracts.md`.
 
+For a local human dogfood/demo flow using the fixture MCP profile, see
+`docs/use-cases/mandate-demo-runbook.md`.
+
 ## Flow
 
 1. Create a mandate for the task:

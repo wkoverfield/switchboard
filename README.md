@@ -59,7 +59,8 @@ strategy lives at `docs/product/mandate-strategy.md`. Original planning-thread
 source docs are preserved in `docs/product/source/`.
 Harness-facing JSON contracts, including `switchboard.error.v1` failure
 envelopes for mandate `--json` commands, are summarized in
-`docs/use-cases/harness-json-contracts.md`.
+`docs/use-cases/harness-json-contracts.md`. For a local human dogfood path,
+use `docs/use-cases/mandate-demo-runbook.md`.
 
 ## Config Files
 
