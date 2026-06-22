@@ -588,6 +588,125 @@ export function createProgram(io: ProgramIo = {}): Command {
       }
     });
 
+  const demo = program
+    .command("demo")
+    .description("Print local Switchboard demo command sequences.");
+
+  demo
+    .command("mandate [profile]")
+    .description("Print a local task-scoped mandate demo for one stdio profile.")
+    .option("--task <task>", "demo task name")
+    .option("--agent <role>", "agent role for the demo mandate", "implementer")
+    .option("--branch <branch>", "branch to bind the demo mandate")
+    .option("--lease <duration>", "demo mandate lease duration", "30m")
+    .option(
+      "--approval-tool <tool>",
+      "namespaced tool to mark approval-required"
+    )
+    .option(
+      "--approval-reason <reason>",
+      "approval gate reason",
+      "demo call changes pretend remote state"
+    )
+    .option(
+      "--approval-risk <risk>",
+      "approval gate risk: low, medium, high, or critical",
+      "low"
+    )
+    .option(
+      "--approval-label <label>",
+      "approval gate label (repeatable)",
+      collectOption,
+      [] as string[]
+    )
+    .action(
+      (
+        profileName: string | undefined,
+        options: {
+          task?: string;
+          agent: string;
+          branch?: string;
+          lease: string;
+          approvalTool?: string;
+          approvalReason: string;
+          approvalRisk: string;
+          approvalLabel: string[];
+        }
+      ) => {
+        const globalOptions = program.opts<{ cwd?: string }>();
+        const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
+        if (!validateLoadedConfigForCommand(loaded, writeErr)) {
+          return;
+        }
+
+        const cwd = configCwdBase(loaded, globalOptions.cwd);
+        const stdioProfiles = stdioProfilesFromConfig(loaded.config.profiles, cwd);
+        if (stdioProfiles.length === 0) {
+          writeErr("error: no stdio upstream profiles are configured");
+          process.exitCode = 1;
+          return;
+        }
+
+        const selectedProfile = profileName
+          ? stdioProfiles.find((profile) => profile.profileName === profileName)
+          : stdioProfiles[0];
+        if (!selectedProfile) {
+          writeErr(`error: stdio profile "${profileName}" was not found`);
+          process.exitCode = 1;
+          return;
+        }
+
+        const task =
+          options.task?.trim() || `demo-ci-${Math.floor(Date.now() / 1000)}`;
+        if (!task) {
+          writeErr("error: --task must not be empty");
+          process.exitCode = 1;
+          return;
+        }
+        const mandateId = normalizeMandateId(task);
+        if (!mandateId) {
+          writeErr("error: --task must contain at least one letter or number");
+          process.exitCode = 1;
+          return;
+        }
+        const agent = options.agent.trim();
+        if (!agent) {
+          writeErr("error: --agent must not be empty");
+          process.exitCode = 1;
+          return;
+        }
+        const lease = options.lease.trim();
+        if (!lease) {
+          writeErr("error: --lease must not be empty");
+          process.exitCode = 1;
+          return;
+        }
+
+        const branch = options.branch?.trim() || currentGitBranch(cwd) || "main";
+        const approvalTool =
+          options.approvalTool?.trim() || `${selectedProfile.namespace}_echo`;
+        const approvalLabels =
+          options.approvalLabel.length > 0 ? options.approvalLabel : ["demo"];
+
+        writeOut(
+          formatDemoMandate({
+            cwd,
+            task,
+            mandateId,
+            agent,
+            branch,
+            lease,
+            profileName: selectedProfile.profileName,
+            namespace: selectedProfile.namespace,
+            approvalTool,
+            approvalReason: options.approvalReason,
+            approvalRisk: options.approvalRisk,
+            approvalLabels
+          })
+        );
+      }
+    );
+
   program
     .command("init")
     .description("Create or print a starter Switchboard repo config.")
@@ -2220,6 +2339,78 @@ function formatToolSurface(result: {
   return lines.join("\n");
 }
 
+function formatDemoMandate(options: {
+  cwd: string;
+  task: string;
+  mandateId: string;
+  agent: string;
+  branch: string;
+  lease: string;
+  profileName: string;
+  namespace: string;
+  approvalTool: string;
+  approvalReason: string;
+  approvalRisk: string;
+  approvalLabels: string[];
+}): string {
+  const commandPrefix = `switchboard --cwd ${shellQuote(options.cwd)}`;
+  const sourcePrefix = `pnpm --filter @switchboard-mcp/cli switchboard --cwd ${shellQuote(options.cwd)}`;
+  const approvalLabels = options.approvalLabels.flatMap((label) => [
+    "--require-approval-label",
+    shellQuote(label)
+  ]);
+  const createArgs = [
+    "mandate",
+    "create",
+    shellQuote(options.task),
+    "--agent",
+    shellQuote(options.agent),
+    "--profiles",
+    shellQuote(options.profileName),
+    "--branch",
+    shellQuote(options.branch),
+    "--lease",
+    shellQuote(options.lease),
+    "--allow-tool",
+    shellQuote(`${options.namespace}_*`),
+    "--require-approval-tool",
+    shellQuote(options.approvalTool),
+    "--require-approval-reason",
+    shellQuote(options.approvalReason),
+    "--require-approval-risk",
+    shellQuote(options.approvalRisk),
+    ...approvalLabels
+  ];
+
+  return [
+    "Switchboard mandate demo",
+    `Repo: ${options.cwd}`,
+    `Profile: ${options.profileName}`,
+    `Namespace: ${options.namespace}`,
+    `Task: ${options.task}`,
+    `Mandate id: ${options.mandateId}`,
+    "",
+    "Installed CLI commands:",
+    `  ${commandPrefix} ${createArgs.join(" ")}`,
+    `  ${commandPrefix} tools --mandate ${options.mandateId}`,
+    `  ${commandPrefix} tools --mandate ${options.mandateId} --json`,
+    `  ${commandPrefix} mcp --mandate ${options.mandateId}`,
+    `  ${commandPrefix} approvals --mandate ${options.mandateId}`,
+    `  ${commandPrefix} logs --mandate ${options.mandateId}`,
+    `  ${commandPrefix} mandate handoff ${options.mandateId} --state completed --summary ${shellQuote("Demo finished")} --by human-demo`,
+    `  ${commandPrefix} mandate report ${options.mandateId} --json`,
+    "",
+    "Source checkout prefix:",
+    `  ${sourcePrefix}`,
+    "Replace the installed CLI prefix in the commands above with this prefix when dogfooding from a source checkout.",
+    "",
+    "For the automated MCP approval path:",
+    "  pnpm smoke:mandate-walkthrough",
+    "",
+    "No provider accounts, secrets, keychains, or remote services are used."
+  ].join("\n");
+}
+
 function formatProfileTest(result: StdioProfileTestResult): string {
   const lines = [
     `Switchboard profile test: ${result.ok ? "OK" : "failed"}`,
@@ -2250,6 +2441,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function currentGitBranch(cwd: string): string | undefined {
+  try {
+    const branch = execFileSync("git", ["branch", "--show-current"], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
+    return branch || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function formatMandateCreated(path: string, mandate: MandateWithStatus): string {
