@@ -22,5 +22,9 @@ where they conflict, but mandates should not be mandatory for simple setup.
 For approval UX planning, read `approval-elicitation-research.md` before
 implementing client-specific behavior.
 
+For provider secrets, read `../security/secrets-keychain-architecture.md`
+before implementing any secret storage, provider preset, or generated provider
+configuration.
+
 For harness integration surfaces, read
 `../use-cases/harness-json-contracts.md`.
