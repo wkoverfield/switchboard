@@ -1247,7 +1247,7 @@ Acceptance:
 - no changes to runtime behavior, approval execution, daemon behavior,
   provider integrations, or client installers
 
-### Current Slice: Mandate Walkthrough Smoke V0
+### Completed Slice: Mandate Walkthrough Smoke V0
 
 Goal: exercise the first credible end-to-end mandate demo with the built CLI,
 daemon-backed scoped MCP, local approvals, audit inspection, and handoff.
@@ -1267,6 +1267,23 @@ Acceptance:
 - smoke closes the mandate with handoff and verifies the versioned report
 - CI runs the walkthrough smoke with the rest of the smoke suite
 - no provider integrations, secrets broker, remote service, or orchestrator
+
+### Current Slice: Mandate Demo Runbook V0
+
+Goal: turn the automated mandate walkthrough into a human-readable local
+dogfood/demo path without adding providers, secrets, or new runtime behavior.
+
+Acceptance:
+
+- docs include a local mandate demo runbook using the fixture stdio profile
+- runbook covers setup, mandate creation, scoped tool inspection, MCP launch,
+  approvals, logs, handoff, and report
+- runbook distinguishes human commands from harness JSON surfaces
+- runbook points to `pnpm smoke:mandate-walkthrough` for the fully automated MCP
+  approval path
+- README and harness docs link to the runbook
+- no provider integrations, secrets broker, remote service, or orchestrator
+- no keychain/secrets architecture decision in this slice
 
 ## Rules For Future Agents
 
