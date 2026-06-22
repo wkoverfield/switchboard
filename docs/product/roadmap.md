@@ -1227,7 +1227,7 @@ Acceptance:
 - no changes to runtime behavior, approval execution, daemon behavior,
   provider integrations, or client installers
 
-### Current Slice: Mandate Human Next Commands UX V0
+### Completed Slice: Mandate Human Next Commands UX V0
 
 Goal: make the manual mandate demo path self-guiding without changing JSON
 contracts or enforcement behavior.
@@ -1246,6 +1246,27 @@ Acceptance:
 - tests cover human create and human tool-surface output
 - no changes to runtime behavior, approval execution, daemon behavior,
   provider integrations, or client installers
+
+### Current Slice: Mandate Walkthrough Smoke V0
+
+Goal: exercise the first credible end-to-end mandate demo with the built CLI,
+daemon-backed scoped MCP, local approvals, audit inspection, and handoff.
+
+Acceptance:
+
+- smoke uses a temporary repo with a fixture stdio upstream profile
+- smoke proves human `mandate create` and `tools --mandate` outputs include
+  repo-aware next commands
+- smoke proves `tools --mandate --json` exposes the versioned scoped tool
+  surface and approval metadata
+- smoke launches `switchboard mcp --mandate <id>` through the built CLI
+- smoke creates a real local approval request from a gated MCP tool call
+- smoke approves the request through the CLI and retries the gated call
+- smoke verifies mandate-scoped audit logs include approval-required and
+  approved-call entries
+- smoke closes the mandate with handoff and verifies the versioned report
+- CI runs the walkthrough smoke with the rest of the smoke suite
+- no provider integrations, secrets broker, remote service, or orchestrator
 
 ## Rules For Future Agents
 

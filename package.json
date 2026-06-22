@@ -25,6 +25,7 @@
     "smoke:daemon-lifecycle": "node scripts/smoke/daemon-lifecycle.mjs",
     "smoke:daemon-list-tools": "node scripts/smoke/daemon-list-tools.mjs",
     "smoke:daemon-mcp-list-tools": "pnpm --filter @switchboard-mcp/mcp-runtime smoke:daemon-mcp-list-tools",
+    "smoke:mandate-walkthrough": "pnpm --filter @switchboard-mcp/mcp-runtime smoke:mandate-walkthrough",
     "smoke:mcp-serve-session": "pnpm --filter @switchboard-mcp/mcp-runtime smoke:serve-session"
   },
   "devDependencies": {

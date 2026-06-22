@@ -34,6 +34,7 @@ jobs:
       - run: pnpm smoke:profile-test
       - run: pnpm smoke:audit-profile-test
       - run: pnpm smoke:mandate-lifecycle
+      - run: pnpm smoke:mandate-walkthrough
       - run: pnpm smoke:install-codex
       - run: pnpm smoke:install-claude
       - run: pnpm smoke:install-write-codex
