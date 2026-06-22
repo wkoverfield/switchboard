@@ -1,6 +1,6 @@
 # Switchboard Roadmap
 
-Last updated: 2026-06-21
+Last updated: 2026-06-22
 
 This is the working roadmap for Switchboard. The source planning documents live in
 `docs/product/source/` and are preserved source material from the original
@@ -17,6 +17,7 @@ with this roadmap or `docs/product/mandate-strategy.md`.
 - `docs/product/source/switchboard-competitive-landscape.md`
 - `docs/product/mandate-strategy.md`
 - `docs/product/approval-elicitation-research.md`
+- `docs/security/secrets-keychain-architecture.md`
 
 ## Product North Star
 
@@ -391,7 +392,7 @@ Next acceptable slice:
 
 ### Milestone 7: Secrets
 
-Status: not started.
+Status: architecture decision accepted; implementation not started.
 
 Original intent:
 
@@ -404,6 +405,18 @@ design.
 
 Secrets should be granted to agents through a mandate lease where possible, not
 through permanent inherited profile access.
+
+Current decision:
+
+- raw provider secrets stay out of repo config, agent client config, mandates,
+  harness JSON payloads, and audit logs
+- config uses printable `secretRef` ids
+- local OS-backed secret storage is the preferred backend
+- mandates grant temporary access to profiles/tools, not raw secrets
+- provider presets remain blocked until secret refs, doctor checks, runtime
+  injection, and audit redaction are implemented
+
+See `docs/security/secrets-keychain-architecture.md`.
 
 ### Milestone 8: Client Installers
 
@@ -477,10 +490,14 @@ Gate before starting:
 - mandate foundation: shipped
 - mandate runtime context: shipped
 - mandate allow/deny tool policy: shipped
-- secrets plan
-- provider-specific doctor checks
-- clear read/write/default mode policy
-- audit story
+- implemented `secretRef` support in config/profile loading
+- at least one local OS-backed secret backend
+- doctor checks for missing referenced secrets without printing values
+- runtime secret injection covered by tests
+- generated client configs still contain no raw provider secrets
+- mandate-scoped runtime behavior works with secret-backed profiles
+- clear provider-specific read/write/default mode policy
+- audit redaction coverage for secret-backed profile use
 
 New constraint: a provider preset must serve a mandate use case, such as a
 bounded GitHub/Vercel CI-fix demo, rather than broad connector coverage.
@@ -1285,7 +1302,7 @@ Acceptance:
 - no provider integrations, secrets broker, remote service, or orchestrator
 - no keychain/secrets architecture decision in this slice
 
-### Current Slice: Mandate Demo Helper V0
+### Completed Slice: Mandate Demo Helper V0
 
 Goal: make the local mandate dogfood path discoverable from the CLI by printing
 profile-specific demo commands without creating mandates or changing runtime
@@ -1306,6 +1323,27 @@ Acceptance:
 - README and demo runbook mention the helper
 - no provider integrations, secrets broker, remote service, or orchestrator
 - no keychain/secrets architecture decision in this slice
+
+### Current Slice: Secrets and Keychain Architecture V0
+
+Goal: make the credential boundary explicit before provider presets or secret
+runtime work starts.
+
+Acceptance:
+
+- document the local-first secrets/keychain architecture
+- keep raw provider secrets out of repo config, agent client config, mandates,
+  harness JSON payloads, and audit logs
+- define `secretRef` as the config/profile binding primitive
+- explain how active mandates grant profile/tool access without containing raw
+  secrets
+- define the provider preset gate before Supabase/Stripe/GitHub/Vercel-style
+  presets can start
+- list implementation questions for the future secrets CLI/backend PR
+- update roadmap and trust docs
+- no provider integrations
+- no secret backend implementation
+- no remote service or cloud broker
 
 ## Rules For Future Agents
 

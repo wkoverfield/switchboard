@@ -58,6 +58,9 @@ switchboard serve --mandate <id>
 The current working roadmap lives at `docs/product/roadmap.md`. The mandate
 strategy lives at `docs/product/mandate-strategy.md`. Original planning-thread
 source docs are preserved in `docs/product/source/`.
+The accepted local secrets/keychain direction lives at
+`docs/security/secrets-keychain-architecture.md`; provider presets remain gated
+behind that work.
 Harness-facing JSON contracts, including `switchboard.error.v1` failure
 envelopes for mandate `--json` commands, are summarized in
 `docs/use-cases/harness-json-contracts.md`. For a local human dogfood path,
