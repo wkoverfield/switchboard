@@ -1365,6 +1365,8 @@ Acceptance:
 - keep generated Codex/Claude config value-free
 - add tests for validation, missing-secret doctor behavior, secret runtime
   injection, generated-config safety, and no secret values in command output
+- add CI smoke coverage for a secretRef-backed fixture profile that proves
+  runtime env injection without printing secret values
 - no provider presets
 - no provider OAuth
 - no cloud secret broker

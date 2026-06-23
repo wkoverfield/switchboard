@@ -17,6 +17,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "smoke:daemon-mcp-list-tools": "node scripts/smoke-daemon-mcp-list-tools.mjs",
     "smoke:mandate-walkthrough": "node scripts/smoke-mandate-walkthrough.mjs",
+    "smoke:secret-ref-profile": "node scripts/smoke-secret-ref-profile.mjs",
     "smoke:serve-session": "node scripts/smoke-serve-session.mjs"
   },
   "dependencies": {
