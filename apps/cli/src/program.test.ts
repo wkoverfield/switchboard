@@ -197,6 +197,191 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("checks configured provider preset tools against recommended policy", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_findu:",
+        "    provider: github",
+        "    namespace: GitHub FindU",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      listTools: async () => [
+        namespacedTool("github_findu_checks_list"),
+        namespacedTool("github_findu_checks_rerun"),
+        namespacedTool("github_findu_secret_update"),
+        namespacedTool("github_findu_deploy_prod")
+      ]
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "presets",
+        "check",
+        "github-ci",
+        "--profile",
+        "github_findu",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      schemaVersion: string;
+      namespace: string;
+      policyCovered: boolean;
+      requiresMandatePolicy: boolean;
+      counts: {
+        allowed: number;
+        allowedSensitive: number;
+        approvalRequired: number;
+        denied: number;
+      };
+      tools: Array<{ toolName: string; classification: string }>;
+      nextActions: string[];
+    };
+    expect(parsed.schemaVersion).toBe("switchboard.provider-preset-check.v1");
+    expect(parsed.ok).toBe(false);
+    expect(parsed.policyCovered).toBe(false);
+    expect(parsed.requiresMandatePolicy).toBe(true);
+    expect(parsed.namespace).toBe("github_findu");
+    expect(parsed.counts).toMatchObject({
+      allowed: 1,
+      allowedSensitive: 1,
+      approvalRequired: 1,
+      denied: 1
+    });
+    expect(parsed.tools).toMatchObject([
+      { toolName: "github_findu_checks_list", classification: "allowed" },
+      {
+        toolName: "github_findu_checks_rerun",
+        classification: "approval_required"
+      },
+      {
+        toolName: "github_findu_secret_update",
+        classification: "allowed_sensitive"
+      },
+      { toolName: "github_findu_deploy_prod", classification: "denied" }
+    ]);
+    expect(parsed.nextActions).toContain(
+      "Review allowed sensitive-looking tools and add deny or approval patterns before using this preset for unattended work."
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("reports OK provider preset checks when observed tools are covered", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_ci:",
+        "    provider: github",
+        "    namespace: github_ci",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      listTools: async () => [
+        namespacedTool("github_ci_checks_list"),
+        namespacedTool("github_ci_repo_read")
+      ]
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "presets",
+        "check",
+        "github-ci",
+        "--profile",
+        "github_ci",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      policyCovered: boolean;
+      requiresMandatePolicy: boolean;
+      counts: { allowed: number; allowedSensitive: number };
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.policyCovered).toBe(true);
+    expect(parsed.requiresMandatePolicy).toBe(false);
+    expect(parsed.counts).toMatchObject({
+      allowed: 2,
+      allowedSensitive: 0
+    });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("rejects provider preset checks against the wrong provider profile", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  vercel_preview:",
+        "    provider: vercel",
+        "    namespace: vercel_preview",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "presets",
+        "check",
+        "github-ci",
+        "--profile",
+        "vercel_preview",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      code: string;
+      message: string;
+    };
+    expect(parsed.code).toBe("provider_preset_profile_mismatch");
+    expect(parsed.message).toContain('expects provider "github"');
+    expect(process.exitCode).toBe(1);
+  });
+
   it("returns a failing doctor result for invalid config", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
@@ -5304,6 +5489,25 @@ function writeMandateConfig(root: string): void {
       "    provider: generic"
     ].join("\n")
   );
+}
+
+function namespacedTool(name: string): {
+  name: string;
+  profileName: string;
+  namespace: string;
+  upstreamName: string;
+  inputSchema: { type: "object" };
+} {
+  const namespace = name.startsWith("github_findu_")
+    ? "github_findu"
+    : "github_ci";
+  return {
+    name,
+    profileName: namespace,
+    namespace,
+    upstreamName: name.slice(namespace.length + 1),
+    inputSchema: { type: "object" }
+  };
 }
 
 function writeMandateFixtureConfig(root: string): void {

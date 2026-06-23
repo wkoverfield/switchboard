@@ -1,12 +1,24 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath, URL } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const cliPath = resolve(repoRoot, "apps", "cli", "dist", "index.js");
+const fixtureServerPath = resolve(
+  repoRoot,
+  "packages",
+  "mcp-runtime",
+  "fixtures",
+  "echo-server.mjs"
+);
+const tmpRoot = join(
+  tmpdir(),
+  `switchboard-provider-presets-smoke-${Date.now()}-${Math.random().toString(16).slice(2)}`
+);
 
 if (!existsSync(cliPath)) {
   throw new Error(
@@ -61,17 +73,45 @@ assert(
 );
 assertNoRawSecret(JSON.stringify(vercel), "vercel preset");
 
-function run(args) {
-  const result = spawnSync(process.execPath, [cliPath, ...args], {
-    cwd: repoRoot,
-    encoding: "utf8"
-  });
-  if (result.status !== 0) {
-    throw new Error(
-      `switchboard ${args.join(" ")} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`
-    );
-  }
-  return JSON.parse(result.stdout);
+try {
+  mkdirSync(tmpRoot, { recursive: true });
+  writeFileSync(join(tmpRoot, ".gitignore"), ".switchboard.local.yaml\n");
+  writeFileSync(
+    join(tmpRoot, ".switchboard.yaml"),
+    [
+      "version: 1",
+      "profiles:",
+      "  github_ci:",
+      "    provider: github",
+      "    namespace: github_ci",
+      "    upstream:",
+      "      type: stdio",
+      `      command: ${JSON.stringify(process.execPath)}`,
+      "      args:",
+      `        - ${JSON.stringify(fixtureServerPath)}`,
+      "        - github-ci"
+    ].join("\n")
+  );
+
+  const check = run([
+    "--cwd",
+    tmpRoot,
+    "presets",
+    "check",
+    "github-ci",
+    "--profile",
+    "github_ci",
+    "--json"
+  ]);
+  assert(
+    check.schemaVersion === "switchboard.provider-preset-check.v1",
+    "check schema"
+  );
+  assert(check.ok === true, "fixture preset check ok");
+  assert(check.counts?.allowed === 2, "fixture allowed tools");
+  assertNoRawSecret(JSON.stringify(check), "provider check");
+} finally {
+  rmSync(tmpRoot, { recursive: true, force: true });
 }
 
 function assertNoRawSecret(value, label) {
@@ -86,4 +126,17 @@ function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+function run(args) {
+  const result = spawnSync(process.execPath, [cliPath, ...args], {
+    cwd: repoRoot,
+    encoding: "utf8"
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `switchboard ${args.join(" ")} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`
+    );
+  }
+  return JSON.parse(result.stdout);
 }

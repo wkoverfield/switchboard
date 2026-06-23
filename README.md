@@ -51,6 +51,7 @@ switchboard secrets remove <ref>
 switchboard secrets doctor
 switchboard presets list
 switchboard presets show <github-ci|vercel-preview>
+switchboard presets check <github-ci|vercel-preview> --profile <profile>
 switchboard logs
 switchboard logs --mandate <id>
 switchboard daemon <status|start|ping|tools|stop>
