@@ -32,14 +32,18 @@ import {
   safeAuditLog,
   collectSecretRefUsages,
   createKeychainSecretStore,
+  getProviderSafetyTemplate,
   type PathResolutionOptions,
   findMissingSecretRefs,
   forgetSecretRef,
+  listProviderSafetyTemplates,
   listSecretRefs,
   rememberSecretRef,
+  renderProviderSafetyTemplate,
   resolveSecretIndexPath,
   resolveGlobalConfigPath,
   resolveRepoConfigPaths,
+  type RenderedProviderSafetyTemplate,
   starterUpstreamArgPlaceholder,
   type MissingSecretRef,
   type SupportedClient,
@@ -85,6 +89,7 @@ const approvalRequestsSchemaVersion = "switchboard.approvals.v1";
 const toolSurfaceSchemaVersion = "switchboard.tool-surface.v1";
 const auditLogSchemaVersion = "switchboard.audit-log.v1";
 const secretsSchemaVersion = "switchboard.secrets.v1";
+const providerPresetSchemaVersion = "switchboard.provider-preset.v1";
 const errorSchemaVersion = "switchboard.error.v1";
 
 interface CommandErrorEnvelope {
@@ -703,6 +708,120 @@ export function createProgram(io: ProgramIo = {}): Command {
         process.exitCode = 1;
       }
     });
+
+  const presets = program
+    .command("presets")
+    .description("Inspect provider safety templates without installing providers.");
+
+  presets
+    .command("list")
+    .description("List built-in provider safety templates.")
+    .option("--json", "print machine-readable JSON")
+    .action((options: { json?: boolean }) => {
+      const templates = listProviderSafetyTemplates();
+      const result = {
+        ok: true,
+        schemaVersion: providerPresetSchemaVersion,
+        count: templates.length,
+        templates: templates.map((template) => ({
+          id: template.id,
+          provider: template.provider,
+          label: template.label,
+          description: template.description,
+          defaultProfileName: template.defaultProfileName,
+          defaultNamespace: template.defaultNamespace,
+          defaultSecretRef: template.defaultSecretRef,
+          mode: template.mode,
+          readOnly: template.readOnly
+        }))
+      };
+
+      writeOut(
+        options.json
+          ? JSON.stringify(result, null, 2)
+          : formatProviderPresetList(result)
+      );
+    });
+
+  presets
+    .command("show <id>")
+    .description("Show a provider safety template as value-free config YAML.")
+    .option("--profile-name <name>", "profile name to render")
+    .option("--namespace <name>", "namespace to render")
+    .option("--secret-ref <ref>", "secretRef to render")
+    .option("--command <command>", "upstream MCP server command to render")
+    .option(
+      "--arg <arg>",
+      "upstream MCP server arg to render (repeatable)",
+      collectOption,
+      [] as string[]
+    )
+    .option("--json", "print machine-readable JSON")
+    .action(
+      (
+        id: string,
+        options: {
+          profileName?: string;
+          namespace?: string;
+          secretRef?: string;
+          command?: string;
+          arg: string[];
+          json?: boolean;
+        }
+      ) => {
+        if (!getProviderSafetyTemplate(id)) {
+          writeCommandError({
+            json: options.json,
+            code: "unknown_provider_preset",
+            message: `unknown provider safety template "${id}"`,
+            nextActions: [
+              "Run switchboard presets list to see available templates."
+            ]
+          });
+          return;
+        }
+
+        try {
+          const rendered = renderProviderSafetyTemplate(id, {
+            ...(options.profileName ? { profileName: options.profileName } : {}),
+            ...(options.namespace ? { namespace: options.namespace } : {}),
+            ...(options.secretRef ? { secretRef: options.secretRef } : {}),
+            ...(options.command ? { command: options.command } : {}),
+            ...(options.arg.length > 0 ? { args: options.arg } : {})
+          });
+          const result = {
+            ok: true,
+            schemaVersion: providerPresetSchemaVersion,
+            id: rendered.template.id,
+            provider: rendered.template.provider,
+            label: rendered.template.label,
+            profileName: rendered.profileName,
+            namespace: rendered.namespace,
+            secretRef: rendered.secretRef,
+            command: rendered.command,
+            args: rendered.args,
+            configYaml: rendered.configYaml,
+            secretCommands: rendered.secretCommands,
+            mandateCommand: rendered.mandateCommand,
+            notes: rendered.notes
+          };
+          writeOut(
+            options.json
+              ? JSON.stringify(result, null, 2)
+              : formatProviderPresetShow(rendered)
+          );
+        } catch (error) {
+          writeCommandError({
+            json: options.json,
+            code: "provider_preset_render_failed",
+            message: messageFromError(error),
+            nextActions: [
+              "Check profile name, namespace, secretRef, and command values."
+            ]
+          });
+        }
+      }
+    );
 
   program
     .command("tools")
@@ -2515,6 +2634,69 @@ function secretCheckSummary(missingSecrets: MissingSecretRef[]): string {
   }
 
   return `${missingSecrets.length} configured secretRef(s) are missing or unavailable.`;
+}
+
+function formatProviderPresetList(result: {
+  count: number;
+  templates: Array<{
+    id: string;
+    provider: string;
+    label: string;
+    description: string;
+    defaultProfileName: string;
+    defaultNamespace: string;
+    defaultSecretRef: string;
+    mode: string;
+    readOnly: boolean;
+  }>;
+}): string {
+  const lines = [
+    "Switchboard provider safety templates",
+    `Templates: ${result.count}`
+  ];
+
+  for (const template of result.templates) {
+    lines.push(
+      "",
+      `${template.id} (${template.label})`,
+      `  Provider: ${template.provider}`,
+      `  Default profile: ${template.defaultProfileName}`,
+      `  Default namespace: ${template.defaultNamespace}`,
+      `  Default secretRef: ${template.defaultSecretRef}`,
+      `  Mode: ${template.mode}${template.readOnly ? " read-only" : ""}`,
+      `  ${template.description}`,
+      `  Show: switchboard presets show ${template.id}`
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function formatProviderPresetShow(
+  rendered: RenderedProviderSafetyTemplate
+): string {
+  return [
+    `Switchboard provider safety template: ${rendered.template.label}`,
+    `Provider: ${rendered.template.provider}`,
+    `Profile: ${rendered.profileName}`,
+    `Namespace: ${rendered.namespace}`,
+    `secretRef: ${rendered.secretRef}`,
+    ...(rendered.args.length > 0 ? [`Args: ${rendered.args.join(" ")}`] : []),
+    "",
+    "Config YAML:",
+    rendered.configYaml.trimEnd(),
+    "",
+    "Secret setup:",
+    ...rendered.secretCommands.map((command) => `  ${command}`),
+    "",
+    "Recommended mandate:",
+    `  ${rendered.mandateCommand}`,
+    "",
+    "Notes:",
+    ...rendered.notes.map((note) => `  ${note}`),
+    "",
+    "This template does not install, authenticate, or vendor a provider MCP server."
+  ].join("\n");
 }
 
 function formatSecretsList(result: {

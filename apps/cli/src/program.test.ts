@@ -58,6 +58,145 @@ describe("switchboard CLI program", () => {
     expect(parsed.namespaces[0]?.namespace).toBe("supabase_findu_dev");
   });
 
+  it("lists provider safety templates as JSON", async () => {
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await program.parseAsync(["presets", "list", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      schemaVersion: string;
+      templates: Array<{ id: string; defaultSecretRef: string }>;
+    };
+    expect(parsed.schemaVersion).toBe("switchboard.provider-preset.v1");
+    expect(parsed.templates.map((template) => template.id)).toEqual([
+      "github-ci",
+      "vercel-preview"
+    ]);
+    expect(parsed.templates[0]?.defaultSecretRef).toBe("github/example/dev/token");
+    expect(output.join("\n")).not.toContain("ghp_");
+  });
+
+  it("shows provider safety templates with value-free config and mandate policy", async () => {
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await program.parseAsync(
+      [
+        "presets",
+        "show",
+        "github-ci",
+        "--profile-name",
+        "github_findu",
+        "--namespace",
+        "GitHub FindU",
+        "--secret-ref",
+        "github/findu/dev/token",
+        "--command",
+        "npx",
+        "--arg",
+        "-y",
+        "--arg",
+        "@modelcontextprotocol/server-github",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      schemaVersion: string;
+      profileName: string;
+      namespace: string;
+      args: string[];
+      configYaml: string;
+      secretCommands: string[];
+      mandateCommand: string;
+    };
+    expect(parsed.schemaVersion).toBe("switchboard.provider-preset.v1");
+    expect(parsed.profileName).toBe("github_findu");
+    expect(parsed.namespace).toBe("github_findu");
+    expect(parsed.args).toEqual(["-y", "@modelcontextprotocol/server-github"]);
+    expect(parsed.configYaml).toContain("secretRef: github/findu/dev/token");
+    expect(parsed.configYaml).toContain("command: npx");
+    expect(parsed.configYaml).toContain("- -y");
+    expect(parsed.configYaml).not.toContain("ghp_");
+    expect(parsed.secretCommands).toEqual([
+      "switchboard secrets set github/findu/dev/token --value-stdin"
+    ]);
+    expect(parsed.mandateCommand).toContain("--allow-tool 'github_findu_*'");
+    expect(parsed.mandateCommand).toContain(
+      "--deny-tool github_findu_deploy_prod"
+    );
+    expect(parsed.mandateCommand).toContain("--require-approval-risk medium");
+  });
+
+  it("prints human provider preset output without claiming installation", async () => {
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await program.parseAsync(["presets", "show", "vercel-preview"], {
+      from: "user"
+    });
+
+    expect(output.join("\n")).toContain(
+      "Switchboard provider safety template: Vercel Preview"
+    );
+    expect(output.join("\n")).toContain("Config YAML:");
+    expect(output.join("\n")).toContain(
+      "This template does not install, authenticate, or vendor a provider MCP server."
+    );
+  });
+
+  it("returns JSON errors for invalid provider preset render options", async () => {
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await program.parseAsync(
+      [
+        "presets",
+        "show",
+        "github-ci",
+        "--secret-ref",
+        "Bad Secret",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      schemaVersion: string;
+      code: string;
+      message: string;
+    };
+    expect(parsed.schemaVersion).toBe("switchboard.error.v1");
+    expect(parsed.code).toBe("provider_preset_render_failed");
+    expect(parsed.message).toContain("secretRef");
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("returns JSON errors for unknown provider presets", async () => {
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await program.parseAsync(["presets", "show", "missing", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      schemaVersion: string;
+      code: string;
+      nextActions: string[];
+    };
+    expect(parsed.schemaVersion).toBe("switchboard.error.v1");
+    expect(parsed.code).toBe("unknown_provider_preset");
+    expect(parsed.nextActions).toContain(
+      "Run switchboard presets list to see available templates."
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
   it("returns a failing doctor result for invalid config", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
