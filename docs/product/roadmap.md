@@ -208,12 +208,20 @@ Implemented in the current codebase:
 - approval decisions are scoped to immutable mandate UIDs when available
 - approval requests carry parent/delegation metadata when created under a child
   mandate
+- local `secretRef` values backed by the OS keychain adapter
+- `switchboard secrets set/list/remove/doctor`
+- runtime secret injection for configured stdio upstream env
+- missing `secretRef` readiness in doctor, runtime errors, mandate reports, and
+  mandate escalations
+- secret-backed profile smoke coverage
+- secret-backed mandate smoke coverage proving scoped `serve --mandate`,
+  mandate-linked audit entries, and no raw secret values in CLI output, MCP
+  responses, audit logs, or mandate reports
 
 Not started:
 
 - richer policy engine and operating modes
 - full approval broker
-- secrets/keychain
 - provider presets
 - mandate-aware advanced onboarding
 - richer mandate tree approval escalation and result aggregation beyond
