@@ -14,7 +14,10 @@ provider-specific enforcement, secrets implementation, and stronger daemon
 socket security are later milestones.
 
 The accepted secrets direction is local OS-backed secret storage referenced by
-printable `secretRef` ids from config/profiles. Active mandates should grant
-temporary access to profiles and tools, not raw secret values. Provider presets
-are blocked until secret refs, local storage, doctor checks, runtime injection,
-and audit redaction exist. See `secrets-keychain-architecture.md`.
+printable `secretRef` ids from config/profiles. `switchboard secrets` stores
+values through the local keychain adapter and maintains a value-free ref index
+for listing. Active mandates should grant temporary access to profiles and
+tools, not raw secret values. Provider presets are blocked until the secret
+foundation has held up through local dogfood with doctor checks, runtime
+injection, generated-config safety, and audit redaction. See
+`secrets-keychain-architecture.md`.

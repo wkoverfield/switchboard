@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { validateSecretRef } from "../secrets/secret-refs.js";
 
 export const environmentSchema = z.enum([
   "local",
@@ -24,13 +25,27 @@ export const enforcementLevelSchema = z.enum([
   "advisory"
 ]);
 
+export const secretRefEnvValueSchema = z.object({
+  secretRef: z.string().min(1).refine((value) => validateSecretRef(value).ok, {
+    message:
+      "secretRef must use lowercase letters, numbers, '.', '_', '-', and '/'"
+  })
+});
+
+export const upstreamEnvValueSchema = z.union([
+  z.string(),
+  secretRefEnvValueSchema
+]);
+
+export const upstreamEnvSchema = z.record(z.string(), upstreamEnvValueSchema);
+
 export const stdioUpstreamSchema = z
   .object({
     type: z.literal("stdio"),
     command: z.string().min(1, "stdio upstream command is required"),
     args: z.array(z.string()).optional(),
     cwd: z.string().min(1).optional(),
-    env: z.record(z.string(), z.string()).optional()
+    env: upstreamEnvSchema.optional()
   })
   .passthrough();
 
@@ -40,7 +55,7 @@ export const upstreamSchema = z
     command: z.string().optional(),
     args: z.array(z.string()).optional(),
     cwd: z.string().min(1).optional(),
-    env: z.record(z.string(), z.string()).optional(),
+    env: upstreamEnvSchema.optional(),
     url: z.string().url().optional()
   })
   .passthrough()
@@ -128,6 +143,7 @@ export type ProfileConfig = z.infer<typeof profileSchema>;
 export type ProfileConfigInput = z.input<typeof profileSchema>;
 export type UpstreamConfig = z.infer<typeof upstreamSchema>;
 export type StdioUpstreamConfig = z.infer<typeof stdioUpstreamSchema>;
+export type UpstreamEnvValue = z.infer<typeof upstreamEnvValueSchema>;
 export type WorkspaceConfig = z.infer<typeof workspaceSchema>;
 export type PolicyConfig = z.infer<typeof policySchema>;
 

@@ -6,6 +6,7 @@ import {
   createApprovalRequest,
   createJsonlAuditLogger,
   createDaemonState,
+  createKeychainSecretStore,
   findApprovedApprovalRequest,
   getDaemonStatus,
   evaluateMandateToolPolicy,
@@ -21,12 +22,13 @@ import {
   type DaemonPaths,
   type DaemonStatus,
   type ApprovalRequestWithStatus,
-  type MandateWithStatus
+  type MandateWithStatus,
+  type SecretStore
 } from "@switchboard-mcp/core";
 import {
   GenericMcpRouter,
   pingDaemon,
-  profileConfigToStdioUpstream,
+  profileConfigToStdioUpstreamWithSecrets,
   type DaemonApprovalRequired,
   type NamespacedTool,
   type StdioUpstreamProfile
@@ -52,6 +54,7 @@ export interface StopDaemonResult {
 const daemonProtocolVersion = "0.1.0";
 const maxApprovalWaitMs = 600_000;
 const approvalWaitPollIntervalMs = 250;
+const secretStore = createKeychainSecretStore();
 
 export async function daemonStatus(
   options: DaemonCommandOptions = {}
@@ -348,7 +351,7 @@ export async function handleDaemonRequest(
           error: "Daemon request mandateId must be a non-empty string."
         };
       }
-      return listConfiguredTools(id, context, request.mandateId);
+      return await listConfiguredTools(id, context, request.mandateId);
     }
     if (request.type === "call_tool") {
       if (typeof request.name !== "string" || request.name.length === 0) {
@@ -390,7 +393,7 @@ export async function handleDaemonRequest(
         };
       }
 
-      return callConfiguredTool(
+      return await callConfiguredTool(
         id,
         context,
         request.name,
@@ -406,11 +409,17 @@ export async function handleDaemonRequest(
       ok: false,
       error: `Unsupported daemon request: ${String(request.type)}`
     };
-  } catch {
+  } catch (error) {
+    const id = requestIdFromRaw(raw);
     return {
-      id: "unknown",
+      id,
       ok: false,
-      error: "Invalid daemon request."
+      error:
+        error instanceof SyntaxError
+          ? "Invalid daemon request."
+          : error instanceof Error
+            ? error.message
+            : String(error)
     };
   }
 }
@@ -850,7 +859,7 @@ async function routerForConfiguredProfiles(
     }
   }
 
-  const profiles = stdioProfilesFromConfig(
+  const profiles = await stdioProfilesFromConfig(
     mandate
       ? Object.fromEntries(
           Object.entries(loaded.config.profiles).filter(([profileName]) =>
@@ -858,7 +867,8 @@ async function routerForConfiguredProfiles(
           )
         )
       : loaded.config.profiles,
-    configCwdBase(loaded, context.cwd)
+    configCwdBase(loaded, context.cwd),
+    secretStore
   );
   if (profiles.length === 0) {
     return { ok: false, error: "No stdio upstream profiles are configured." };
@@ -931,20 +941,35 @@ function loadedConfigError(
     : undefined;
 }
 
-function stdioProfilesFromConfig(
+async function stdioProfilesFromConfig(
   profiles: ReturnType<typeof loadSwitchboardConfig>["config"]["profiles"],
-  cwdBase: string
-): StdioUpstreamProfile[] {
-  return Object.entries(profiles).flatMap(([profileName, profile]) => {
-    const upstream = profileConfigToStdioUpstream(profileName, profile, {
-      cwdBase
-    });
-    return upstream ? [upstream] : [];
-  });
+  cwdBase: string,
+  secretStore: SecretStore
+): Promise<StdioUpstreamProfile[]> {
+  const upstreams = await Promise.all(
+    Object.entries(profiles).map(([profileName, profile]) =>
+      profileConfigToStdioUpstreamWithSecrets(profileName, profile, {
+        cwdBase,
+        secretStore
+      })
+    )
+  );
+  return upstreams.filter((upstream): upstream is StdioUpstreamProfile =>
+    Boolean(upstream)
+  );
 }
 
 function optionsFromCwd(cwd: string | undefined): { cwd?: string } {
   return cwd ? { cwd } : {};
+}
+
+function requestIdFromRaw(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw) as { id?: unknown };
+    return typeof parsed.id === "string" ? parsed.id : "unknown";
+  } catch {
+    return "unknown";
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

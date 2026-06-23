@@ -10,7 +10,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { createApprovalRequest, markApprovalRequestStale } from "@switchboard-mcp/core";
+import {
+  createApprovalRequest,
+  createMemorySecretStore,
+  markApprovalRequestStale
+} from "@switchboard-mcp/core";
 import { createProgram } from "./program.js";
 
 const fixtureServerPath = fileURLToPath(
@@ -193,6 +197,226 @@ describe("switchboard CLI program", () => {
       "switchboard install codex --write",
       "switchboard install claude --write"
     ]);
+  });
+
+  it("reports missing secret refs in doctor without printing values", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_findu:",
+        "    provider: generic",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "      env:",
+        "        GITHUB_TOKEN:",
+        "          secretRef: github/findu/dev/token"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      secretStore: createMemorySecretStore(),
+      writeOut: (message) => output.push(message)
+    });
+    await program.parseAsync(["--cwd", root, "doctor", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      checks: Array<{ name: string; ok: boolean }>;
+      nextSteps: string[];
+      secrets: { missing: Array<{ ref: string; message: string }> };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.checks.find((check) => check.name === "secrets")).toMatchObject({
+      ok: false
+    });
+    expect(parsed.secrets.missing).toMatchObject([
+      { ref: "github/findu/dev/token" }
+    ]);
+    expect(parsed.nextSteps).toContain(
+      "switchboard secrets set github/findu/dev/token --value-stdin"
+    );
+    expect(JSON.stringify(parsed)).not.toContain("ghp_secret");
+  });
+
+  it("returns JSON error envelopes when runtime commands hit missing secret refs", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(join(root, ".switchboard.yaml"), secretRefProfileYaml());
+
+    const output: string[] = [];
+    const program = createProgram({
+      secretStore: createMemorySecretStore(),
+      writeOut: (message) => output.push(message)
+    });
+    await program.parseAsync(["--cwd", root, "tools", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      code: string;
+      message: string;
+      nextActions: string[];
+    };
+    expect(parsed).toMatchObject({
+      ok: false,
+      code: "secret_resolution_failed"
+    });
+    expect(parsed.message).toContain('secretRef "github/findu/dev/token"');
+    expect(parsed.nextActions).toContain(
+      "switchboard secrets set github/findu/dev/token --value-stdin"
+    );
+    expect(output.join("\n")).not.toContain("ghp_secret");
+  });
+
+  it("reports missing secret refs before testing a profile", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(join(root, ".switchboard.yaml"), secretRefProfileYaml());
+
+    const output: string[] = [];
+    const program = createProgram({
+      secretStore: createMemorySecretStore(),
+      writeOut: (message) => output.push(message)
+    });
+    await program.parseAsync(
+      ["--cwd", root, "test", "github_findu", "--json"],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as { code: string };
+    expect(parsed.code).toBe("secret_resolution_failed");
+  });
+
+  it("reports missing secret refs before serving profiles", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(join(root, ".switchboard.yaml"), secretRefProfileYaml());
+
+    const errors: string[] = [];
+    const program = createProgram({
+      secretStore: createMemorySecretStore(),
+      writeErr: (message) => errors.push(message),
+      serveMcp: async () => {
+        throw new Error("serve should not start");
+      }
+    });
+    await program.parseAsync(["--cwd", root, "serve"], { from: "user" });
+
+    expect(errors.join("\n")).toContain('secretRef "github/findu/dev/token"');
+  });
+
+  it("prints config diagnostics in secrets doctor", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_findu:",
+        "    provider: generic",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "      env:",
+        "        GITHUB_TOKEN:",
+        "          secretRef: Bad Secret"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      secretStore: createMemorySecretStore(),
+      writeOut: (message) => output.push(message)
+    });
+    await program.parseAsync(["--cwd", root, "secrets", "doctor", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      diagnostics: Array<{ message: string }>;
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.diagnostics[0]?.message).toContain("secretRef");
+  });
+
+  it("sets, lists, and removes secret refs without printing values", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const store = createMemorySecretStore();
+    const program = createProgram({
+      secretStore: store,
+      secretIndexPath: join(root, "state", "secrets", "index.json"),
+      readSecretFromStdin: async () => "ghp_secret",
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(
+      ["secrets", "set", "github/findu/dev/token", "--value-stdin", "--json"],
+      { from: "user" }
+    );
+    await program.parseAsync(["secrets", "list", "--json"], { from: "user" });
+    await program.parseAsync(
+      ["secrets", "remove", "github/findu/dev/token", "--json"],
+      { from: "user" }
+    );
+
+    expect(await store.get("github/findu/dev/token")).toBeNull();
+    const setResult = JSON.parse(output[0] ?? "{}") as { ref: string };
+    const listResult = JSON.parse(output[1] ?? "{}") as {
+      refs: Array<{ ref: string }>;
+    };
+    const removeResult = JSON.parse(output[2] ?? "{}") as { ref: string };
+    expect(setResult.ref).toBe("github/findu/dev/token");
+    expect(listResult.refs).toEqual([
+      expect.objectContaining({ ref: "github/findu/dev/token" })
+    ]);
+    expect(removeResult.ref).toBe("github/findu/dev/token");
+    expect(output.join("\n")).not.toContain("ghp_secret");
+  });
+
+  it("does not include raw secrets in generated client config", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_findu:",
+        "    provider: generic",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "      env:",
+        "        GITHUB_TOKEN:",
+        "          secretRef: github/findu/dev/token"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      secretStore: createMemorySecretStore({
+        "github/findu/dev/token": "ghp_secret"
+      }),
+      writeOut: (message) => output.push(message)
+    });
+    await program.parseAsync(["--cwd", root, "install", "codex", "--json"], {
+      from: "user"
+    });
+
+    expect(output[0]).not.toContain("ghp_secret");
+    expect(output[0]).not.toContain("github/findu/dev/token");
   });
 
   it("reports installed project client configs in doctor JSON", async () => {
@@ -4547,6 +4771,21 @@ function writeStdioConfig(root: string): void {
       "        - fixture.mjs"
     ].join("\n")
   );
+}
+
+function secretRefProfileYaml(): string {
+  return [
+    "version: 1",
+    "profiles:",
+    "  github_findu:",
+    "    provider: generic",
+    "    upstream:",
+    "      type: stdio",
+    "      command: node",
+    "      env:",
+    "        GITHUB_TOKEN:",
+    "          secretRef: github/findu/dev/token"
+  ].join("\n");
 }
 
 function writeMandateConfig(root: string): void {

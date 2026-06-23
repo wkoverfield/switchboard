@@ -1,6 +1,6 @@
 # Secrets and Keychain Architecture
 
-Status: accepted for roadmap; not implemented.
+Status: accepted for roadmap; foundation implementation started.
 
 Last updated: 2026-06-22
 

@@ -1324,7 +1324,7 @@ Acceptance:
 - no provider integrations, secrets broker, remote service, or orchestrator
 - no keychain/secrets architecture decision in this slice
 
-### Current Slice: Secrets and Keychain Architecture V0
+### Completed Slice: Secrets and Keychain Architecture V0
 
 Goal: make the credential boundary explicit before provider presets or secret
 runtime work starts.
@@ -1344,6 +1344,30 @@ Acceptance:
 - no provider integrations
 - no secret backend implementation
 - no remote service or cloud broker
+
+### Current Slice: Secrets Foundation V0
+
+Goal: make local secret refs real enough for profiles and mandates without
+starting provider presets.
+
+Acceptance:
+
+- add a core `SecretStore` interface and default local keychain-backed adapter
+- add config schema support for upstream env values using `{ secretRef: string }`
+  while preserving harmless literal env values
+- add `switchboard secrets set <ref> --value-stdin`
+- add `switchboard secrets list` without printing values
+- add `switchboard secrets remove <ref>`
+- add `switchboard secrets doctor`
+- add `switchboard doctor` missing-secret checks and next steps
+- resolve secret-backed env values before `test`, `serve`, `tools`, and
+  daemon-backed `mcp` upstream launches
+- keep generated Codex/Claude config value-free
+- add tests for validation, missing-secret doctor behavior, secret runtime
+  injection, generated-config safety, and no secret values in command output
+- no provider presets
+- no provider OAuth
+- no cloud secret broker
 
 ## Rules For Future Agents
 
