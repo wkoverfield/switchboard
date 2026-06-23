@@ -33,6 +33,7 @@ jobs:
       - run: pnpm smoke:init
       - run: pnpm smoke:profile-test
       - run: pnpm smoke:audit-profile-test
+      - run: pnpm smoke:secret-ref-profile
       - run: pnpm smoke:mandate-lifecycle
       - run: pnpm smoke:mandate-walkthrough
       - run: pnpm smoke:install-codex
