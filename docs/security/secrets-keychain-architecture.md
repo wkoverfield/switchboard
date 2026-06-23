@@ -116,26 +116,35 @@ developer migration, but they should be treated as an explicit fallback mode,
 not the recommended steady state. If env refs are supported, generated client
 config and repo config should still avoid writing raw values.
 
-## Planned CLI Shape
+## CLI Shape
 
-The future CLI should be scriptable and human-usable:
+The V0 CLI is scriptable and human-usable:
 
 ```bash
-switchboard secrets set github/findu/dev/token
+switchboard secrets set github/findu/dev/token --value-stdin
 switchboard secrets list
 switchboard secrets remove github/findu/dev/token
 switchboard secrets doctor
 ```
 
-Useful JSON surfaces can come after the human path is clear:
+JSON surfaces use the same value-free shape:
 
 ```bash
+switchboard secrets set github/findu/dev/token --value-stdin --json
 switchboard secrets list --json
 switchboard secrets doctor --json
 ```
 
 `secrets list` should print refs and metadata only. It must not print secret
 values.
+
+Switchboard's keychain adapter allows native OS-protected backends by default:
+native macOS, native Windows, and native Linux. The dependency also exposes
+fallback backends such as macOS CLI, Windows PowerShell, Linux `secret-tool`,
+encrypted file storage, and null storage; Switchboard refuses those for normal
+secret storage. File/null/CLI fallback storage is only for tests, CI, or local
+demos that explicitly set
+`SWITCHBOARD_ALLOW_UNSAFE_SECRET_BACKENDS=1`.
 
 ## Runtime Model
 
@@ -204,8 +213,9 @@ redact it before logging, as it already does for current audit error text.
 Provider presets may begin only after the following are true:
 
 - repo/global config can reference local secrets by `secretRef`
-- at least one local secret backend can store and resolve refs
+- at least one allowed local secret backend can store and resolve refs
 - doctor can detect missing referenced secrets without printing values
+- doctor reports backend health without printing values
 - runtime secret injection is covered by tests
 - audit logs remain value-redacted
 - generated Codex/Claude config still contains no raw provider secrets

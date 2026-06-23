@@ -64,7 +64,9 @@ strategy lives at `docs/product/mandate-strategy.md`. Original planning-thread
 source docs are preserved in `docs/product/source/`.
 The accepted local secrets/keychain direction lives at
 `docs/security/secrets-keychain-architecture.md`; provider presets remain gated
-behind that work.
+behind that work. Local secrets use OS-protected keychain backends by default;
+file/null/CLI fallbacks require an explicit
+`SWITCHBOARD_ALLOW_UNSAFE_SECRET_BACKENDS=1` dev or demo opt-in.
 Harness-facing JSON contracts, including `switchboard.error.v1` failure
 envelopes for mandate `--json` commands, are summarized in
 `docs/use-cases/harness-json-contracts.md`. For a local human dogfood path,

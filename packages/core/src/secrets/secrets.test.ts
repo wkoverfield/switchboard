@@ -4,15 +4,22 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { switchboardConfigSchema } from "../schemas/config.js";
 import {
+  allowUnsafeSecretBackendsEnv,
+  allowedKeychainBackendIds,
   collectSecretRefUsages,
   createMemorySecretStore,
+  crossKeychainBackendEnv,
+  defaultAllowedKeychainBackendIds,
+  diagnoseKeychainBackendPolicy,
   findMissingSecretRefs,
   forgetSecretRef,
+  isAllowedKeychainBackendId,
   listSecretRefs,
   keychainAccountForSecretRef,
   rememberSecretRef,
   resolveEnvSecretRefs,
-  resolveSecretIndexPath
+  resolveSecretIndexPath,
+  unsafeKeychainBackendIds
 } from "./secrets.js";
 import { validateSecretRef } from "./secret-refs.js";
 
@@ -34,6 +41,60 @@ describe("secret refs", () => {
     expect(keychainAccountForSecretRef("github/findu/dev/token")).not.toContain(
       "/"
     );
+  });
+
+  it("allows only OS-protected keychain backends by default", () => {
+    expect(allowedKeychainBackendIds()).toEqual([
+      ...defaultAllowedKeychainBackendIds
+    ]);
+    expect(isAllowedKeychainBackendId("native-macos")).toBe(true);
+    expect(isAllowedKeychainBackendId("native-linux")).toBe(true);
+    expect(isAllowedKeychainBackendId("secret-service")).toBe(false);
+    expect(isAllowedKeychainBackendId("file")).toBe(false);
+    expect(isAllowedKeychainBackendId("null")).toBe(false);
+    expect(isAllowedKeychainBackendId("macos")).toBe(false);
+    expect(isAllowedKeychainBackendId("windows")).toBe(false);
+  });
+
+  it("requires explicit Switchboard opt-in for unsafe secret backends", () => {
+    const options = {
+      env: { [allowUnsafeSecretBackendsEnv]: "1" } as NodeJS.ProcessEnv
+    };
+
+    expect(allowedKeychainBackendIds(options)).toEqual([
+      ...defaultAllowedKeychainBackendIds,
+      ...unsafeKeychainBackendIds
+    ]);
+    expect(isAllowedKeychainBackendId("file", options)).toBe(true);
+    expect(isAllowedKeychainBackendId("null", options)).toBe(true);
+  });
+
+  it("explains rejected dependency-requested unsafe backends", async () => {
+    await expect(
+      diagnoseKeychainBackendPolicy({
+        env: {
+          [crossKeychainBackendEnv]: "file"
+        } as NodeJS.ProcessEnv
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      message: expect.stringContaining(
+        `Switchboard refused keychain backend "file"`
+      )
+    });
+
+    await expect(
+      diagnoseKeychainBackendPolicy({
+        env: {
+          [crossKeychainBackendEnv]: "secret-service"
+        } as NodeJS.ProcessEnv
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      message: expect.stringContaining(
+        `Switchboard refused keychain backend "secret-service"`
+      )
+    });
   });
 
   it("parses upstream env secret refs in config", () => {
