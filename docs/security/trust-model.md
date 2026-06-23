@@ -20,7 +20,9 @@ for listing. Native OS-protected backends are allowed by default; file/null/CLI
 fallback storage, including Linux `secret-tool`, requires an explicit unsafe
 dev/demo opt-in. Active mandates
 should grant temporary access to profiles and
-tools, not raw secret values. Provider presets are blocked until the secret
+tools, not raw secret values. Mandate reports and escalations may identify
+missing `secretRef` ids for scoped profiles as local readiness blockers, but
+they must not include secret values. Provider presets are blocked until the secret
 foundation has held up through local dogfood with doctor checks, runtime
 injection, generated-config safety, and audit redaction. See
 `secrets-keychain-architecture.md`.
