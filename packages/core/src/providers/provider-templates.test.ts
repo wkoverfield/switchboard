@@ -2,8 +2,10 @@ import { parse as parseYaml } from "yaml";
 import { describe, expect, it } from "vitest";
 import { switchboardConfigSchema } from "../schemas/config.js";
 import {
+  checkProviderSafetyTemplateTools,
   getProviderSafetyTemplate,
   listProviderSafetyTemplates,
+  providerSafetyTemplatePolicy,
   renderProviderSafetyTemplate
 } from "./provider-templates.js";
 
@@ -88,6 +90,88 @@ describe("provider safety templates", () => {
     expect(getProviderSafetyTemplate("missing")).toBeUndefined();
     expect(() => renderProviderSafetyTemplate("missing")).toThrow(
       'unknown provider safety template "missing"'
+    );
+  });
+
+  it("renders reusable mandate policy for template checks", () => {
+    expect(providerSafetyTemplatePolicy("github-ci", "GitHub FindU")).toMatchObject({
+      allowedTools: ["github_findu_*"],
+      deniedTools: [
+        "github_findu_deploy_prod",
+        "github_findu_delete_*",
+        "github_findu_admin_*"
+      ],
+      approvalGates: [
+        {
+          id: "gate-1",
+          toolPattern: "github_findu_*rerun*",
+          risk: "medium"
+        },
+        {
+          id: "gate-2",
+          toolPattern: "github_findu_*merge*",
+          risk: "high"
+        }
+      ]
+    });
+  });
+
+  it("checks observed provider tools against template policy", () => {
+    const result = checkProviderSafetyTemplateTools("github-ci", {
+      namespace: "github_findu",
+      toolNames: [
+        "github_findu_checks_list",
+        "github_findu_checks_rerun",
+        "github_findu_deploy_prod",
+        "github_findu_delete_branch",
+        "github_findu_secret_update",
+        "github_findu_delete-repo",
+        "github_findu_create.issue",
+        "github_findu_updatePullRequest",
+        "vercel_preview_logs"
+      ]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.counts).toMatchObject({
+      tools: 9,
+      allowed: 1,
+      approvalRequired: 1,
+      denied: 2,
+      allowedSensitive: 4,
+      notAllowed: 1
+    });
+    expect(result.policyCovered).toBe(false);
+    expect(result.requiresMandatePolicy).toBe(true);
+    expect(result.tools).toMatchObject([
+      { toolName: "github_findu_checks_list", classification: "allowed" },
+      {
+        toolName: "github_findu_checks_rerun",
+        classification: "approval_required",
+        approvalGateId: "gate-1"
+      },
+      { toolName: "github_findu_deploy_prod", classification: "denied" },
+      { toolName: "github_findu_delete_branch", classification: "denied" },
+      {
+        toolName: "github_findu_secret_update",
+        classification: "allowed_sensitive"
+      },
+      {
+        toolName: "github_findu_delete-repo",
+        classification: "allowed_sensitive"
+      },
+      {
+        toolName: "github_findu_create.issue",
+        classification: "allowed_sensitive"
+      },
+      {
+        toolName: "github_findu_updatePullRequest",
+        classification: "allowed_sensitive"
+      },
+      { toolName: "vercel_preview_logs", classification: "not_allowed" }
+    ]);
+    expect(result.nextActions).toContain(
+      "Review allowed sensitive-looking tools and add deny or approval patterns before using this preset for unattended work."
     );
   });
 });

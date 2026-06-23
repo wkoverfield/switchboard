@@ -536,16 +536,20 @@ Shipped foundation:
 
 - `switchboard presets list`
 - `switchboard presets show <github-ci|vercel-preview>`
+- `switchboard presets check <github-ci|vercel-preview> --profile <profile>`
 - `switchboard.provider-preset.v1` JSON output for scripts/harnesses
+- `switchboard.provider-preset-check.v1` JSON output for provider dogfood
 - schema-valid, value-free GitHub CI and Vercel Preview profile YAML templates
 - recommended `secretRef` setup commands
 - recommended mandate allow/deny/approval policy for each template
+- observed tool classification against template policy, including
+  allowed-sensitive warnings for write-like tools that are not denied or gated
 - docs at `docs/providers/safety-templates.md`
 
 Still needed:
 
 - local dogfood with real upstream MCP server commands and least-privilege tokens
-- provider-specific doctor checks
+- provider-specific doctor checks beyond the current preset check
 - stronger policy defaults informed by real tool names
 - promotion of one dogfooded template into a real preset
 - OAuth or provider auth flow, if a provider path needs it

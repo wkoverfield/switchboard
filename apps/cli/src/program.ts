@@ -31,6 +31,7 @@ import {
   rollbackSwitchboardClientConfig,
   safeAuditLog,
   collectSecretRefUsages,
+  checkProviderSafetyTemplateTools,
   createKeychainSecretStore,
   getProviderSafetyTemplate,
   type PathResolutionOptions,
@@ -90,6 +91,7 @@ const toolSurfaceSchemaVersion = "switchboard.tool-surface.v1";
 const auditLogSchemaVersion = "switchboard.audit-log.v1";
 const secretsSchemaVersion = "switchboard.secrets.v1";
 const providerPresetSchemaVersion = "switchboard.provider-preset.v1";
+const providerPresetCheckSchemaVersion = "switchboard.provider-preset-check.v1";
 const errorSchemaVersion = "switchboard.error.v1";
 
 interface CommandErrorEnvelope {
@@ -769,7 +771,8 @@ export function createProgram(io: ProgramIo = {}): Command {
           json?: boolean;
         }
       ) => {
-        if (!getProviderSafetyTemplate(id)) {
+        const template = getProviderSafetyTemplate(id);
+        if (!template) {
           writeCommandError({
             json: options.json,
             code: "unknown_provider_preset",
@@ -817,6 +820,134 @@ export function createProgram(io: ProgramIo = {}): Command {
             message: messageFromError(error),
             nextActions: [
               "Check profile name, namespace, secretRef, and command values."
+            ]
+          });
+        }
+      }
+    );
+
+  presets
+    .command("check <id>")
+    .description("Check a configured profile's discovered tools against a provider safety template.")
+    .requiredOption("--profile <name>", "configured profile name to inspect")
+    .option("--json", "print machine-readable JSON")
+    .action(
+      async (
+        id: string,
+        options: {
+          profile: string;
+          json?: boolean;
+        }
+      ) => {
+        const template = getProviderSafetyTemplate(id);
+        if (!template) {
+          writeCommandError({
+            json: options.json,
+            code: "unknown_provider_preset",
+            message: `unknown provider safety template "${id}"`,
+            nextActions: [
+              "Run switchboard presets list to see available templates."
+            ]
+          });
+          return;
+        }
+
+        const globalOptions = program.opts<{ cwd?: string }>();
+        const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
+        if (!validateLoadedConfigForJsonCommand(loaded, options.json)) {
+          return;
+        }
+
+        const profile = loaded.config.profiles[options.profile];
+        if (!profile) {
+          writeCommandError({
+            json: options.json,
+            code: "profile_not_found",
+            message: `profile "${options.profile}" was not found`,
+            nextActions: [
+              "Run switchboard status --json to inspect configured profiles."
+            ]
+          });
+          return;
+        }
+        if (profile.provider !== template.provider) {
+          writeCommandError({
+            json: options.json,
+            code: "provider_preset_profile_mismatch",
+            message: `preset "${id}" expects provider "${template.provider}", but profile "${options.profile}" uses provider "${profile.provider}"`,
+            nextActions: [
+              `Choose a ${template.provider} profile or run switchboard presets list to pick another template.`
+            ]
+          });
+          return;
+        }
+
+        const upstream = await profileConfigToStdioUpstreamWithSecrets(
+          options.profile,
+          profile,
+          {
+            cwdBase: configCwdBase(loaded, globalOptions.cwd),
+            secretStore
+          }
+        ).catch((error: unknown) => {
+          writeCommandError({
+            json: options.json,
+            code: "secret_resolution_failed",
+            message: messageFromError(error),
+            nextActions: secretResolutionNextActions(messageFromError(error))
+          });
+          return undefined;
+        });
+        if (!upstream) {
+          if (process.exitCode) {
+            return;
+          }
+          writeCommandError({
+            json: options.json,
+            code: "profile_not_stdio",
+            message: `profile "${options.profile}" does not define a stdio upstream`,
+            nextActions: [
+              "Provider preset checks currently inspect stdio MCP profiles."
+            ]
+          });
+          return;
+        }
+
+        try {
+          const tools = await listToolsForProfiles([upstream], { auditLogger });
+          const check = checkProviderSafetyTemplateTools(id, {
+            namespace: upstream.namespace,
+            toolNames: tools.map((tool) => tool.name)
+          });
+          const result = {
+            ok: check.ok,
+            schemaVersion: providerPresetCheckSchemaVersion,
+            presetId: check.template.id,
+            provider: check.template.provider,
+            profileName: options.profile,
+            namespace: check.namespace,
+            policyCovered: check.policyCovered,
+            requiresMandatePolicy: check.requiresMandatePolicy,
+            counts: check.counts,
+            policy: check.policy,
+            tools: check.tools,
+            nextActions: check.nextActions
+          };
+          writeOut(
+            options.json
+              ? JSON.stringify(result, null, 2)
+              : formatProviderPresetCheck(result)
+          );
+          if (!result.ok) {
+            process.exitCode = 1;
+          }
+        } catch (error) {
+          writeCommandError({
+            json: options.json,
+            code: "provider_preset_check_failed",
+            message: messageFromError(error),
+            nextActions: [
+              `Run switchboard test ${options.profile} to debug the upstream MCP profile.`
             ]
           });
         }
@@ -2697,6 +2828,76 @@ function formatProviderPresetShow(
     "",
     "This template does not install, authenticate, or vendor a provider MCP server."
   ].join("\n");
+}
+
+function formatProviderPresetCheck(result: {
+  ok: boolean;
+  presetId: string;
+  provider: string;
+  profileName: string;
+  namespace: string;
+  policyCovered: boolean;
+  requiresMandatePolicy: boolean;
+  counts: {
+    tools: number;
+    allowed: number;
+    allowedSensitive: number;
+    approvalRequired: number;
+    denied: number;
+    notAllowed: number;
+  };
+  tools: Array<{
+    toolName: string;
+    classification:
+      | "allowed"
+      | "allowed_sensitive"
+      | "approval_required"
+      | "denied"
+      | "not_allowed";
+    reason: string;
+    approvalGateId?: string;
+    approvalGatePattern?: string;
+  }>;
+  nextActions: string[];
+}): string {
+  const lines = [
+    result.policyCovered
+      ? "Switchboard provider preset check: policy-covered"
+      : "Switchboard provider preset check: needs attention",
+    `Preset: ${result.presetId} (${result.provider})`,
+    `Profile: ${result.profileName}`,
+    `Namespace: ${result.namespace}`,
+    `Requires mandate policy: ${result.requiresMandatePolicy ? "yes" : "no"}`,
+    `Tools: ${result.counts.tools}`,
+    `Allowed: ${result.counts.allowed}`,
+    `Allowed sensitive: ${result.counts.allowedSensitive}`,
+    `Approval required: ${result.counts.approvalRequired}`,
+    `Denied: ${result.counts.denied}`,
+    `Not allowed: ${result.counts.notAllowed}`
+  ];
+
+  const notableTools = result.tools.filter(
+    (tool) => tool.classification !== "allowed"
+  );
+  if (notableTools.length > 0) {
+    lines.push("", "Notable tools:");
+    for (const tool of notableTools) {
+      lines.push(`  ${tool.toolName} - ${tool.classification}`);
+      if (tool.approvalGateId) {
+        lines.push(`    gate: ${tool.approvalGateId} (${tool.approvalGatePattern})`);
+      }
+      lines.push(`    ${tool.reason}`);
+    }
+  }
+
+  if (result.nextActions.length > 0) {
+    lines.push("", "Next actions:");
+    for (const action of result.nextActions) {
+      lines.push(`  ${action}`);
+    }
+  }
+
+  return lines.join("\n");
 }
 
 function formatSecretsList(result: {

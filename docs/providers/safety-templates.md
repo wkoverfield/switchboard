@@ -14,6 +14,7 @@ stores credentials through `switchboard secrets`.
 switchboard presets list
 switchboard presets show github-ci
 switchboard presets show vercel-preview --json
+switchboard presets check github-ci --profile github_findu
 ```
 
 Customize rendered names without changing the safety posture:
@@ -41,6 +42,32 @@ pbpaste | switchboard secrets set github/findu/dev/token --value-stdin
 
 The rendered YAML can be copied into `.switchboard.yaml`. It uses `{ secretRef }`
 env values and never contains raw provider tokens.
+
+After the profile is configured and the upstream MCP server can start, run a
+template check:
+
+```bash
+switchboard presets check github-ci --profile github_findu --json
+```
+
+The check discovers the configured profile's actual namespaced tools and
+classifies them against the template's recommended mandate policy:
+
+- `allowed`: covered by the allow list
+- `approval_required`: matched by an approval gate
+- `denied`: matched by a deny rule
+- `not_allowed`: outside the template allow list, often a namespace mismatch
+- `allowed_sensitive`: write-like or privileged-looking tool name that is
+  currently allowed without an explicit deny or approval gate
+
+Treat `allowed_sensitive` as a dogfood signal. Tighten the template policy or
+create a narrower mandate before using that provider profile for unattended
+agent work.
+
+An `ok` or `policy-covered` result means the discovered tools are covered by the
+template's recommended mandate policy. It does not make direct, unmandated use
+of the profile safe. Use the profile through a mandate so Switchboard can apply
+the rendered allow, deny, and approval rules.
 
 ## Included Templates
 

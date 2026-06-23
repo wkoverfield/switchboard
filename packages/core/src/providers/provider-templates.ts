@@ -1,4 +1,9 @@
 import { stringify as stringifyYaml } from "yaml";
+import {
+  evaluateMandateToolPolicy,
+  type MandateApprovalGate,
+  type MandateToolPolicy
+} from "../mandates/mandates.js";
 import { normalizeNamespace } from "../namespaces/namespaces.js";
 import { switchboardConfigSchema } from "../schemas/config.js";
 
@@ -52,6 +57,38 @@ export interface RenderedProviderSafetyTemplate {
   secretCommands: string[];
   mandateCommand: string;
   notes: string[];
+}
+
+export interface ProviderPresetToolCheck {
+  toolName: string;
+  classification:
+    | "allowed"
+    | "allowed_sensitive"
+    | "approval_required"
+    | "denied"
+    | "not_allowed";
+  reason: string;
+  approvalGateId?: string;
+  approvalGatePattern?: string;
+}
+
+export interface ProviderPresetCheckResult {
+  template: ProviderSafetyTemplate;
+  namespace: string;
+  policy: MandateToolPolicy;
+  ok: boolean;
+  policyCovered: boolean;
+  requiresMandatePolicy: boolean;
+  counts: {
+    tools: number;
+    allowed: number;
+    allowedSensitive: number;
+    approvalRequired: number;
+    denied: number;
+    notAllowed: number;
+  };
+  tools: ProviderPresetToolCheck[];
+  nextActions: string[];
 }
 
 export const providerSafetyTemplates: ProviderSafetyTemplate[] = [
@@ -225,11 +262,102 @@ export function renderProviderSafetyTemplate(
   };
 }
 
+export function providerSafetyTemplatePolicy(
+  id: string,
+  namespaceInput?: string
+): MandateToolPolicy {
+  const template = getProviderSafetyTemplate(id);
+  if (!template) {
+    throw new Error(`unknown provider safety template "${id}"`);
+  }
+
+  const namespace = normalizeNamespace(namespaceInput ?? template.defaultNamespace);
+  return {
+    allowedTools: template.recommendedMandate.allowedTools.map((pattern) =>
+      interpolateNamespace(pattern, namespace)
+    ),
+    deniedTools: template.recommendedMandate.deniedTools.map((pattern) =>
+      interpolateNamespace(pattern, namespace)
+    ),
+    approvalGates: template.recommendedMandate.approvalGates.map(
+      (gate, index): MandateApprovalGate => ({
+        id: `gate-${index + 1}`,
+        toolPattern: interpolateNamespace(gate.toolPattern, namespace),
+        reason: gate.reason,
+        risk: gate.risk,
+        labels: gate.labels
+      })
+    )
+  };
+}
+
+export function checkProviderSafetyTemplateTools(
+  id: string,
+  options: { namespace?: string; toolNames: string[] }
+): ProviderPresetCheckResult {
+  const template = getProviderSafetyTemplate(id);
+  if (!template) {
+    throw new Error(`unknown provider safety template "${id}"`);
+  }
+
+  const namespace = normalizeNamespace(options.namespace ?? template.defaultNamespace);
+  const policy = providerSafetyTemplatePolicy(id, namespace);
+  const tools = options.toolNames.map((toolName) =>
+    classifyProviderPresetTool(toolName, policy)
+  );
+  const counts = {
+    tools: tools.length,
+    allowed: tools.filter((tool) => tool.classification === "allowed").length,
+    allowedSensitive: tools.filter(
+      (tool) => tool.classification === "allowed_sensitive"
+    ).length,
+    approvalRequired: tools.filter(
+      (tool) => tool.classification === "approval_required"
+    ).length,
+    denied: tools.filter((tool) => tool.classification === "denied").length,
+    notAllowed: tools.filter((tool) => tool.classification === "not_allowed")
+      .length
+  };
+  const policyCovered = counts.allowedSensitive === 0 && counts.notAllowed === 0;
+  const requiresMandatePolicy =
+    counts.approvalRequired > 0 || counts.denied > 0 || counts.allowedSensitive > 0;
+  const nextActions = [
+    ...(requiresMandatePolicy
+      ? [
+          "Use this profile through a mandate that applies the rendered allow, deny, and approval policy; direct unmandated profile use is not safety-checked."
+        ]
+      : []),
+    ...(counts.allowedSensitive > 0
+      ? [
+          "Review allowed sensitive-looking tools and add deny or approval patterns before using this preset for unattended work."
+        ]
+      : []),
+    ...(counts.notAllowed > 0
+      ? [
+          "Check that the rendered namespace matches the configured profile namespace."
+        ]
+      : [])
+  ];
+
+  return {
+    template,
+    namespace,
+    policy,
+    ok: policyCovered,
+    policyCovered,
+    requiresMandatePolicy,
+    counts,
+    tools,
+    nextActions
+  };
+}
+
 function renderMandateCommand(
   template: ProviderSafetyTemplate,
   profileName: string,
   namespace: string
 ): string {
+  const policy = providerSafetyTemplatePolicy(template.id, namespace);
   const parts = [
     "switchboard",
     "mandate",
@@ -243,26 +371,82 @@ function renderMandateCommand(
     template.recommendedMandate.branch,
     "--lease",
     template.recommendedMandate.lease,
-    ...template.recommendedMandate.allowedTools.flatMap((pattern) => [
+    ...(policy.allowedTools ?? []).flatMap((pattern) => [
       "--allow-tool",
-      interpolateNamespace(pattern, namespace)
+      pattern
     ]),
-    ...template.recommendedMandate.deniedTools.flatMap((pattern) => [
+    ...(policy.deniedTools ?? []).flatMap((pattern) => [
       "--deny-tool",
-      interpolateNamespace(pattern, namespace)
+      pattern
     ]),
-    ...template.recommendedMandate.approvalGates.flatMap((gate) => [
+    ...(policy.approvalGates ?? []).flatMap((gate) => [
       "--require-approval-tool",
-      interpolateNamespace(gate.toolPattern, namespace),
+      gate.toolPattern,
       "--require-approval-reason",
-      gate.reason,
-      "--require-approval-risk",
-      gate.risk,
-      ...gate.labels.flatMap((label) => ["--require-approval-label", label])
+      gate.reason ?? "",
+      ...(gate.risk ? ["--require-approval-risk", gate.risk] : []),
+      ...(gate.labels ?? []).flatMap((label) => [
+        "--require-approval-label",
+        label
+      ])
     ])
   ];
 
   return parts.map(shellQuoteIfNeeded).join(" ");
+}
+
+function classifyProviderPresetTool(
+  toolName: string,
+  policy: MandateToolPolicy
+): ProviderPresetToolCheck {
+  const decision = evaluateMandateToolPolicy(toolName, policy);
+  if (!decision.allowed && "approvalRequired" in decision) {
+    return {
+      toolName,
+      classification: "approval_required",
+      reason: decision.reason,
+      approvalGateId: decision.approvalGate.id,
+      approvalGatePattern: decision.approvalGate.toolPattern
+    };
+  }
+  if (!decision.allowed && decision.reason.includes("is denied")) {
+    return {
+      toolName,
+      classification: "denied",
+      reason: decision.reason
+    };
+  }
+  if (!decision.allowed) {
+    return {
+      toolName,
+      classification: "not_allowed",
+      reason: decision.reason
+    };
+  }
+  if (isSensitiveLookingToolName(toolName)) {
+    return {
+      toolName,
+      classification: "allowed_sensitive",
+      reason:
+        "tool name looks write-like or privileged but is currently allowed without explicit approval"
+    };
+  }
+
+  return {
+    toolName,
+    classification: "allowed",
+    reason: "tool is allowed by the preset policy"
+  };
+}
+
+function isSensitiveLookingToolName(toolName: string): boolean {
+  const normalized = toolName
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .toLowerCase();
+  return /(^|_)(admin|cancel|create|delete|deploy|destroy|domain|drop|env|merge|promote|remove|rerun|rollback|secret|set|token|update|write)(_|$)/.test(
+    normalized
+  );
 }
 
 function interpolateNamespace(value: string, namespace: string): string {
