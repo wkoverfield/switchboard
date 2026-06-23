@@ -16,7 +16,10 @@ socket security are later milestones.
 The accepted secrets direction is local OS-backed secret storage referenced by
 printable `secretRef` ids from config/profiles. `switchboard secrets` stores
 values through the local keychain adapter and maintains a value-free ref index
-for listing. Active mandates should grant temporary access to profiles and
+for listing. Native OS-protected backends are allowed by default; file/null/CLI
+fallback storage, including Linux `secret-tool`, requires an explicit unsafe
+dev/demo opt-in. Active mandates
+should grant temporary access to profiles and
 tools, not raw secret values. Provider presets are blocked until the secret
 foundation has held up through local dogfood with doctor checks, runtime
 injection, generated-config safety, and audit redaction. See

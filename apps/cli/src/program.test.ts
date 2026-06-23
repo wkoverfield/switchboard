@@ -13,7 +13,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createApprovalRequest,
   createMemorySecretStore,
-  markApprovalRequestStale
+  markApprovalRequestStale,
+  type SecretStore
 } from "@switchboard-mcp/core";
 import { createProgram } from "./program.js";
 
@@ -348,6 +349,38 @@ describe("switchboard CLI program", () => {
     };
     expect(parsed.ok).toBe(false);
     expect(parsed.diagnostics[0]?.message).toContain("secretRef");
+  });
+
+  it("fails secrets doctor when the secret backend reports unavailable", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+
+    const secretStore: SecretStore = {
+      async get() {
+        return null;
+      },
+      async set() {},
+      async delete() {},
+      async diagnose() {
+        return { ok: false, message: "unsafe backend rejected" };
+      }
+    };
+    const output: string[] = [];
+    const program = createProgram({
+      secretStore,
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(["--cwd", root, "secrets", "doctor", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      backend: { message: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.backend.message).toContain("unsafe backend rejected");
   });
 
   it("sets, lists, and removes secret refs without printing values", async () => {

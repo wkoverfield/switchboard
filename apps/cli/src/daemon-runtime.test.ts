@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  allowUnsafeSecretBackendsEnv,
   createApprovalRequest,
   createMandate,
   decideApprovalRequest,
@@ -25,6 +26,8 @@ const fixtureServerPath = fileURLToPath(
 describe("daemon runtime mandate context", () => {
   const previousStateHome = process.env.XDG_STATE_HOME;
   const previousKeyringBackend = process.env.TS_KEYRING_BACKEND;
+  const previousAllowUnsafeSecretBackends =
+    process.env[allowUnsafeSecretBackendsEnv];
 
   afterEach(() => {
     if (previousStateHome === undefined) {
@@ -36,6 +39,12 @@ describe("daemon runtime mandate context", () => {
       delete process.env.TS_KEYRING_BACKEND;
     } else {
       process.env.TS_KEYRING_BACKEND = previousKeyringBackend;
+    }
+    if (previousAllowUnsafeSecretBackends === undefined) {
+      delete process.env[allowUnsafeSecretBackendsEnv];
+    } else {
+      process.env[allowUnsafeSecretBackendsEnv] =
+        previousAllowUnsafeSecretBackends;
     }
   });
 
@@ -98,6 +107,7 @@ describe("daemon runtime mandate context", () => {
     const root = await mkdtemp(join(tmpdir(), "switchboard-daemon-runtime-"));
     process.env.XDG_STATE_HOME = join(root, "state");
     process.env.TS_KEYRING_BACKEND = "null";
+    process.env[allowUnsafeSecretBackendsEnv] = "1";
     await writeFile(
       join(root, ".switchboard.yaml"),
       [

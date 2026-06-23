@@ -12,6 +12,7 @@ import {
   deletePassword,
   diagnose as diagnoseKeychain,
   getPassword,
+  initBackend,
   setPassword
 } from "cross-keychain";
 import type { PathResolutionOptions } from "../config/paths.js";
@@ -33,6 +34,33 @@ export interface SecretStore {
 
 export interface KeychainSecretStoreOptions {
   serviceName?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+export const allowUnsafeSecretBackendsEnv =
+  "SWITCHBOARD_ALLOW_UNSAFE_SECRET_BACKENDS";
+export const crossKeychainBackendEnv = "TS_KEYRING_BACKEND";
+
+export const defaultAllowedKeychainBackendIds = [
+  "native-macos",
+  "native-windows",
+  "native-linux"
+] as const;
+
+export const unsafeKeychainBackendIds = [
+  "macos",
+  "windows",
+  "secret-service",
+  "file",
+  "null"
+] as const;
+
+export interface KeychainBackendPolicyDiagnostic extends Record<string, unknown> {
+  ok: boolean;
+  allowedBackendIds: string[];
+  unsafeBackendsAllowed: boolean;
+  backend?: Record<string, unknown>;
+  message?: string;
 }
 
 export interface SecretRefUsage {
@@ -67,27 +95,132 @@ export function createKeychainSecretStore(
   options: KeychainSecretStoreOptions = {}
 ): SecretStore {
   const serviceName = options.serviceName ?? switchboardSecretServiceName;
+  const ensureBackend = createKeychainBackendInitializer(options);
   return {
     async get(ref) {
       assertValidSecretRef(ref);
+      await ensureBackend();
       return withSuppressedKeychainWarnings(() =>
         getPassword(serviceName, keychainAccountForSecretRef(ref))
       );
     },
     async set(ref, value) {
       assertValidSecretRef(ref);
+      await ensureBackend();
       await withSuppressedKeychainWarnings(() =>
         setPassword(serviceName, keychainAccountForSecretRef(ref), value)
       );
     },
     async delete(ref) {
       assertValidSecretRef(ref);
+      await ensureBackend();
       await withSuppressedKeychainWarnings(() =>
         deletePassword(serviceName, keychainAccountForSecretRef(ref))
       );
     },
-    diagnose: () => withSuppressedKeychainWarnings(diagnoseKeychain)
+    diagnose: () => diagnoseKeychainBackendPolicy(options)
   };
+}
+
+export async function diagnoseKeychainBackendPolicy(
+  options: KeychainSecretStoreOptions = {}
+): Promise<KeychainBackendPolicyDiagnostic> {
+  const allowedBackendIds = allowedKeychainBackendIds(options);
+  const unsafeBackendsAllowed = areUnsafeKeychainBackendsAllowed(options);
+  try {
+    await initializeKeychainBackend(options);
+    const backend = await withSuppressedKeychainWarnings(diagnoseKeychain);
+    return {
+      ok: true,
+      allowedBackendIds,
+      unsafeBackendsAllowed,
+      backend
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      allowedBackendIds,
+      unsafeBackendsAllowed,
+      message: messageFromUnknownError(error)
+    };
+  }
+}
+
+export function allowedKeychainBackendIds(
+  options: KeychainSecretStoreOptions = {}
+): string[] {
+  return areUnsafeKeychainBackendsAllowed(options)
+    ? [
+        ...defaultAllowedKeychainBackendIds,
+        ...unsafeKeychainBackendIds
+      ]
+    : [...defaultAllowedKeychainBackendIds];
+}
+
+export function isAllowedKeychainBackendId(
+  backendId: string,
+  options: KeychainSecretStoreOptions = {}
+): boolean {
+  return allowedKeychainBackendIds(options).includes(backendId);
+}
+
+function createKeychainBackendInitializer(
+  options: KeychainSecretStoreOptions
+): () => Promise<void> {
+  let initialized = false;
+  return async () => {
+    if (initialized) {
+      return;
+    }
+    await initializeKeychainBackend(options);
+    initialized = true;
+  };
+}
+
+async function initializeKeychainBackend(
+  options: KeychainSecretStoreOptions
+): Promise<void> {
+  const allowedBackendIds = allowedKeychainBackendIds(options);
+  assertRequestedKeychainBackendAllowed(options, allowedBackendIds);
+  await withSuppressedKeychainWarnings(() =>
+    initBackend((backend: { id: string }) =>
+      allowedBackendIds.includes(backend.id)
+    )
+  );
+  const backend = await withSuppressedKeychainWarnings(diagnoseKeychain);
+  const backendId = typeof backend.id === "string" ? backend.id : "unknown";
+  if (!allowedBackendIds.includes(backendId)) {
+    throw new Error(
+      [
+        `Switchboard refused keychain backend "${backendId}" for local secrets.`,
+        `Allowed backends: ${allowedBackendIds.join(", ")}.`,
+        `Set ${allowUnsafeSecretBackendsEnv}=1 only for tests or local demos that intentionally use unsafe fallback storage.`
+      ].join(" ")
+    );
+  }
+}
+
+function assertRequestedKeychainBackendAllowed(
+  options: KeychainSecretStoreOptions,
+  allowedBackendIds: string[]
+): void {
+  const requestedBackend = (options.env ?? process.env)[crossKeychainBackendEnv];
+  if (requestedBackend && !allowedBackendIds.includes(requestedBackend)) {
+    throw new Error(
+      [
+        `Switchboard refused keychain backend "${requestedBackend}" requested by ${crossKeychainBackendEnv} for local secrets.`,
+        `Allowed backends: ${allowedBackendIds.join(", ")}.`,
+        `Set ${allowUnsafeSecretBackendsEnv}=1 only for tests or local demos that intentionally use unsafe fallback storage.`
+      ].join(" ")
+    );
+  }
+}
+
+function areUnsafeKeychainBackendsAllowed(
+  options: KeychainSecretStoreOptions
+): boolean {
+  const value = (options.env ?? process.env)[allowUnsafeSecretBackendsEnv];
+  return value === "1" || value === "true" || value === "yes";
 }
 
 export function keychainAccountForSecretRef(ref: string): string {
@@ -105,6 +238,10 @@ async function withSuppressedKeychainWarnings<T>(
   } finally {
     console.warn = originalWarn;
   }
+}
+
+function messageFromUnknownError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function createMemorySecretStore(

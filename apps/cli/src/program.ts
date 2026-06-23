@@ -670,14 +670,17 @@ export function createProgram(io: ProgramIo = {}): Command {
         loaded.config,
         secretStore
       );
+      const backend = await diagnoseSecretStore(secretStore);
       const result = {
         ok:
+          isSecretBackendDiagnosticOk(backend) &&
           missingSecrets.length === 0 &&
           !loaded.diagnostics.some((item) => item.level === "error"),
         schemaVersion: secretsSchemaVersion,
         indexPath: resolveSecretIndexPath(
           secretIndexOptions(io.secretIndexPath)
         ),
+        backend,
         diagnostics: loaded.diagnostics,
         usages: collectSecretRefUsages(loaded.config),
         missing: missingSecrets
@@ -2519,6 +2522,7 @@ function formatSecretsList(result: {
 function formatSecretsDoctor(result: {
   ok: boolean;
   indexPath: string;
+  backend?: Record<string, unknown>;
   diagnostics: Array<{ level: string; message: string }>;
   usages: ReturnType<typeof collectSecretRefUsages>;
   missing: MissingSecretRef[];
@@ -2527,6 +2531,10 @@ function formatSecretsDoctor(result: {
     result.ok ? "Switchboard secrets doctor: OK" : "Switchboard secrets doctor: failed",
     `Index: ${result.indexPath}`
   ];
+
+  if (result.backend) {
+    lines.push(`Backend: ${formatSecretBackendDiagnostic(result.backend)}`);
+  }
 
   for (const diagnostic of result.diagnostics) {
     lines.push(`${diagnostic.level}: ${diagnostic.message}`);
@@ -2553,6 +2561,57 @@ function formatSecretsDoctor(result: {
   }
 
   return lines.join("\n");
+}
+
+async function diagnoseSecretStore(
+  store: SecretStore
+): Promise<Record<string, unknown>> {
+  if (!store.diagnose) {
+    return { ok: true, backend: "unknown" };
+  }
+
+  try {
+    return await store.diagnose();
+  } catch (error) {
+    return { ok: false, error: messageFromError(error) };
+  }
+}
+
+function formatSecretBackendDiagnostic(
+  diagnostic: Record<string, unknown>
+): string {
+  if (typeof diagnostic.error === "string") {
+    return `error (${diagnostic.error})`;
+  }
+
+  if (diagnostic.ok === false && typeof diagnostic.message === "string") {
+    return `error (${diagnostic.message})`;
+  }
+
+  if (
+    typeof diagnostic.backend === "object" &&
+    diagnostic.backend !== null &&
+    "id" in diagnostic.backend &&
+    typeof diagnostic.backend.id === "string"
+  ) {
+    return diagnostic.backend.id;
+  }
+
+  if (typeof diagnostic.backend === "string") {
+    return diagnostic.backend;
+  }
+
+  return "unknown";
+}
+
+function isSecretBackendDiagnosticOk(
+  diagnostic: Record<string, unknown>
+): boolean {
+  return (
+    diagnostic.ok !== false &&
+    typeof diagnostic.error !== "string" &&
+    typeof diagnostic.message !== "string"
+  );
 }
 
 function formatInit(result: {
