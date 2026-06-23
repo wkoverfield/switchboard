@@ -49,6 +49,8 @@ switchboard secrets set <ref> --value-stdin
 switchboard secrets list
 switchboard secrets remove <ref>
 switchboard secrets doctor
+switchboard presets list
+switchboard presets show <github-ci|vercel-preview>
 switchboard logs
 switchboard logs --mandate <id>
 switchboard daemon <status|start|ping|tools|stop>
@@ -72,7 +74,9 @@ file/null/CLI fallbacks require an explicit
 Harness-facing JSON contracts, including `switchboard.error.v1` failure
 envelopes for mandate `--json` commands, are summarized in
 `docs/use-cases/harness-json-contracts.md`. For a local human dogfood path,
-use `docs/use-cases/mandate-demo-runbook.md`.
+use `docs/use-cases/mandate-demo-runbook.md`. Provider safety templates for
+value-free GitHub/Vercel-style profile setup live in
+`docs/providers/safety-templates.md`.
 
 ## Config Files
 

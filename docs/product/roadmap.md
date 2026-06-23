@@ -217,6 +217,8 @@ Implemented in the current codebase:
 - secret-backed mandate smoke coverage proving scoped `serve --mandate`,
   mandate-linked audit entries, and no raw secret values in CLI output, MCP
   responses, audit logs, or mandate reports
+- provider safety template foundation with `switchboard presets list` and
+  `switchboard presets show <github-ci|vercel-preview>`
 
 Not started:
 
@@ -504,7 +506,8 @@ Still needed:
 
 ### Milestone 10: Provider Presets
 
-Status: not started; deliberately deferred.
+Status: safety-template foundation started; full integrations deliberately
+deferred.
 
 Original order:
 
@@ -522,11 +525,30 @@ Gate before starting:
 - runtime secret injection covered by tests
 - generated client configs still contain no raw provider secrets
 - mandate-scoped runtime behavior works with secret-backed profiles
-- clear provider-specific read/write/default mode policy
-- audit redaction coverage for secret-backed profile use
+- clear provider-specific read/write/default mode policy: started with safety
+  templates
+- audit redaction coverage for secret-backed profile use: shipped
 
 New constraint: a provider preset must serve a mandate use case, such as a
 bounded GitHub/Vercel CI-fix demo, rather than broad connector coverage.
+
+Shipped foundation:
+
+- `switchboard presets list`
+- `switchboard presets show <github-ci|vercel-preview>`
+- `switchboard.provider-preset.v1` JSON output for scripts/harnesses
+- schema-valid, value-free GitHub CI and Vercel Preview profile YAML templates
+- recommended `secretRef` setup commands
+- recommended mandate allow/deny/approval policy for each template
+- docs at `docs/providers/safety-templates.md`
+
+Still needed:
+
+- local dogfood with real upstream MCP server commands and least-privilege tokens
+- provider-specific doctor checks
+- stronger policy defaults informed by real tool names
+- promotion of one dogfooded template into a real preset
+- OAuth or provider auth flow, if a provider path needs it
 
 ### Milestone 11: Agent Discovery Kit + Distribution Assets
 

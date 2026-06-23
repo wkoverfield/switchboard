@@ -19,6 +19,7 @@
     "smoke:audit-profile-test": "tmpdir=$(mktemp -d) && repo=$PWD && (cd \"$tmpdir\" && XDG_STATE_HOME=\"$tmpdir\" node \"$repo/apps/cli/dist/index.js\" --cwd \"$repo\" test switchboard_fixture --json >/dev/null && XDG_STATE_HOME=\"$tmpdir\" node \"$repo/apps/cli/dist/index.js\" logs --json); status=$?; rm -rf \"$tmpdir\"; exit $status",
     "smoke:secret-ref-profile": "pnpm --filter @switchboard-mcp/mcp-runtime smoke:secret-ref-profile",
     "smoke:mandate-secret-ref": "pnpm --filter @switchboard-mcp/mcp-runtime smoke:mandate-secret-ref",
+    "smoke:provider-presets": "node scripts/smoke/provider-presets.mjs",
     "smoke:mandate-lifecycle": "node scripts/smoke/mandate-lifecycle.mjs",
     "smoke:install-codex": "tmpdir=$(mktemp -d) && repo=$PWD && outfile=\"$tmpdir/codex.json\" && (cd \"$tmpdir\" && node \"$repo/apps/cli/dist/index.js\" --cwd \"$repo\" install codex --json > \"$outfile\" && node \"$repo/scripts/smoke/assert-install-snippet.mjs\" codex \"$outfile\"); status=$?; rm -rf \"$tmpdir\"; exit $status",
     "smoke:install-claude": "tmpdir=$(mktemp -d) && repo=$PWD && outfile=\"$tmpdir/claude.json\" && (cd \"$tmpdir\" && node \"$repo/apps/cli/dist/index.js\" --cwd \"$repo\" install claude --json > \"$outfile\" && node \"$repo/scripts/smoke/assert-install-snippet.mjs\" claude \"$outfile\"); status=$?; rm -rf \"$tmpdir\"; exit $status",
