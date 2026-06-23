@@ -19,8 +19,10 @@ preflight the available tool surface, and inspect state afterward.
 | Mandate command errors | `switchboard mandate <create\|child\|status\|handoff\|report\|escalate> ... --json` | `schemaVersion: "switchboard.error.v1"` | Stable enough for harness failure handling |
 
 These contracts are additive within a version: consumers should ignore unknown
-fields and should not depend on object key order. A future breaking change should
-use a new `schemaVersion`.
+fields and should not depend on object key order. Arrays that describe local
+work queues, such as mandate escalation `items`, may add new item `type` and
+`priority` values within a version; consumers should skip item kinds they do
+not understand. A future breaking change should use a new `schemaVersion`.
 
 ## Current Payload Roles
 
@@ -53,7 +55,10 @@ mandates over time.
 `switchboard.mandate-escalation.v1` lets a harness build a local escalation
 plan from the report data without calling a remote approval service. The payload
 includes pending approval decisions, open child mandates, blocked/cancelled
-handoffs, suggested local commands, and copy text suitable for a human handoff.
+handoffs, missing scoped `secretRef` setup blockers, suggested local commands,
+and copy text suitable for a human handoff. Harnesses should treat escalation
+`items[].type` and `items[].priority` as extensible and ignore unknown item
+kinds.
 
 `switchboard.approvals.v1` lets a harness inspect approval requests for a
 single mandate or, with `--include-children`, for the selected mandate's whole

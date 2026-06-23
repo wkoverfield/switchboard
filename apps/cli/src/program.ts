@@ -166,6 +166,13 @@ interface MandateReportReadiness {
     toolName: string;
     approvalGateId: string;
   }>;
+  missingSecretRefs: Array<{
+    ref: string;
+    profiles: string[];
+    envNames: string[];
+    status: MissingSecretRef["status"];
+    message: string;
+  }>;
   blockers: string[];
   nextActions: string[];
 }
@@ -228,6 +235,7 @@ interface MandateEscalationPayload {
     items: number;
     approvalRequests: number;
     openChildMandates: number;
+    missingSecretRefs: number;
     blockedHandoffs: number;
     cancelledHandoffs: number;
   };
@@ -240,9 +248,10 @@ interface MandateEscalationItem {
   type:
     | "approval_request"
     | "open_child_mandate"
+    | "missing_secret_ref"
     | "blocked_handoff"
     | "cancelled_handoff";
-  priority: "decision" | "handoff" | "review";
+  priority: "decision" | "handoff" | "setup" | "review";
   mandateId: string;
   mandateUid: string | null;
   title: string;
@@ -1843,6 +1852,7 @@ export function createProgram(io: ProgramIo = {}): Command {
 
             const globalOptions = program.opts<{ cwd?: string }>();
             const repoPath = installTargetCwd(globalOptions.cwd);
+            const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
             const path = io.mandateStorePath ?? resolveMandateStorePath();
             const auditLogPath = io.auditLogPath ?? resolveAuditLogPath();
             const approvalStorePath =
@@ -1855,7 +1865,9 @@ export function createProgram(io: ProgramIo = {}): Command {
                   auditLogPath,
                   approvalStorePath,
                   logLimit: 1,
-                  repoPath
+                  repoPath,
+                  config: loaded.config,
+                  secretStore
                 });
                 if (report.readiness.blockers.length > 0) {
                   writeCommandError({
@@ -1920,6 +1932,7 @@ export function createProgram(io: ProgramIo = {}): Command {
             }
 
             const globalOptions = program.opts<{ cwd?: string }>();
+            const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
             const repoPath = options.all
               ? undefined
               : installTargetCwd(globalOptions.cwd);
@@ -1934,7 +1947,8 @@ export function createProgram(io: ProgramIo = {}): Command {
                 auditLogPath,
                 approvalStorePath,
                 logLimit,
-                ...(repoPath ? { repoPath } : {})
+                ...(repoPath ? { repoPath } : {}),
+                ...(repoPath ? { config: loaded.config, secretStore } : {})
               });
               const escalation = createMandateEscalationPayload(report);
               writeOut(
@@ -1979,6 +1993,7 @@ export function createProgram(io: ProgramIo = {}): Command {
             }
 
             const globalOptions = program.opts<{ cwd?: string }>();
+            const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
             const repoPath = options.all
               ? undefined
               : installTargetCwd(globalOptions.cwd);
@@ -1993,7 +2008,8 @@ export function createProgram(io: ProgramIo = {}): Command {
                 auditLogPath,
                 approvalStorePath,
                 logLimit,
-                ...(repoPath ? { repoPath } : {})
+                ...(repoPath ? { repoPath } : {}),
+                ...(repoPath ? { config: loaded.config, secretStore } : {})
               });
               writeOut(
                 options.json
@@ -2950,6 +2966,8 @@ async function createMandateReportPayload(options: {
   approvalStorePath: string;
   logLimit: number;
   repoPath?: string;
+  config?: ReturnType<typeof loadSwitchboardConfig>["config"];
+  secretStore?: SecretStore;
 }): Promise<MandateReportPayload> {
   const selectedMandateId = normalizeMandateId(options.id);
   if (!selectedMandateId) {
@@ -3008,10 +3026,21 @@ async function createMandateReportPayload(options: {
     }
     return true;
   });
+  const missingSecretRefs =
+    options.config && options.secretStore
+      ? await findMissingSecretRefs(
+          {
+            ...options.config,
+            profiles: profilesForMandateChain(options.config.profiles, chain)
+          },
+          options.secretStore
+        )
+      : [];
   const readiness = mandateReportReadiness({
     selected,
     chain,
-    approvalRequests
+    approvalRequests,
+    missingSecretRefs
   });
   const results = mandateReportResults(chain);
 
@@ -3056,6 +3085,7 @@ function mandateReportReadiness(options: {
   selected: MandateWithStatus;
   chain: MandateWithStatus[];
   approvalRequests: ApprovalRequestWithStatus[];
+  missingSecretRefs: MissingSecretRef[];
 }): MandateReportReadiness {
   const selectedSubtree = options.chain.filter((mandate) =>
     mandateInSelectedSubtree(mandate, options.selected)
@@ -3100,6 +3130,27 @@ function mandateReportReadiness(options: {
       toolName: request.toolName,
       approvalGateId: request.approvalGateId
     }));
+  const selectedProfileNames = new Set(
+    selectedSubtree.flatMap((mandate) => mandate.profiles)
+  );
+  const missingSecretRefs = options.missingSecretRefs
+    .map((missing) => {
+      const usages = missing.usages.filter((usage) =>
+        selectedProfileNames.has(usage.profileName)
+      );
+      if (usages.length === 0) {
+        return null;
+      }
+
+      return {
+        ref: missing.ref,
+        profiles: uniqueStrings(usages.map((usage) => usage.profileName)),
+        envNames: uniqueStrings(usages.map((usage) => usage.envName)),
+        status: missing.status,
+        message: missing.message
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
   const blockers = [
     ...(options.selected.handoffState !== "open"
       ? [`selected mandate is already ${options.selected.handoffState}`]
@@ -3109,6 +3160,9 @@ function mandateReportReadiness(options: {
     ),
     ...pendingApprovalRequests.map(
       (request) => `approval request "${request.id}" is pending`
+    ),
+    ...missingSecretRefs.map(
+      (missing) => `secretRef "${missing.ref}" is ${missing.status}`
     )
   ];
   const nextActions = [
@@ -3119,6 +3173,9 @@ function mandateReportReadiness(options: {
     ...pendingApprovalRequests.map(
       (request) =>
         `switchboard approve ${request.id} or switchboard deny ${request.id}`
+    ),
+    ...missingSecretRefs.map(
+      (missing) => `switchboard secrets set ${missing.ref} --value-stdin`
     )
   ];
 
@@ -3127,6 +3184,7 @@ function mandateReportReadiness(options: {
     selectedHandoffState: options.selected.handoffState,
     openChildMandates,
     pendingApprovalRequests,
+    missingSecretRefs,
     blockers,
     nextActions
   };
@@ -3227,6 +3285,16 @@ function createMandateEscalationPayload(
         `switchboard mandate handoff ${mandate.id} --state completed --summary <summary>`
       ]
     }));
+  const missingSecretItems: MandateEscalationItem[] =
+    report.readiness.missingSecretRefs.map((missing) => ({
+      type: "missing_secret_ref",
+      priority: "setup",
+      mandateId: report.selectedMandateId,
+      mandateUid: report.selectedMandateUid,
+      title: `Secret ref ${missing.ref} is ${missing.status}`,
+      detail: `Profiles ${missing.profiles.join(", ")} need ${missing.envNames.join(", ")} before this mandate can run.`,
+      commands: [`switchboard secrets set ${missing.ref} --value-stdin`]
+    }));
   const handoffItems: MandateEscalationItem[] = report.results.handoffs
     .filter(
       (handoff) =>
@@ -3250,7 +3318,12 @@ function createMandateEscalationPayload(
         `Mandate ${handoff.id} handed off with state ${handoff.state}.`,
       commands: [`switchboard mandate report ${handoff.id} --json`]
     }));
-  const items = [...approvalItems, ...openChildItems, ...handoffItems];
+  const items = [
+    ...approvalItems,
+    ...openChildItems,
+    ...missingSecretItems,
+    ...handoffItems
+  ];
   const nextCommands = uniqueStrings(items.flatMap((item) => item.commands));
   const copyText = formatMandateEscalationCopyText(report, items);
 
@@ -3270,6 +3343,7 @@ function createMandateEscalationPayload(
       items: items.length,
       approvalRequests: approvalItems.length,
       openChildMandates: openChildItems.length,
+      missingSecretRefs: missingSecretItems.length,
       blockedHandoffs: handoffItems.filter(
         (item) => item.type === "blocked_handoff"
       ).length,
@@ -3312,6 +3386,18 @@ function uniqueStrings(values: string[]): string[] {
     result.push(value);
   }
   return result;
+}
+
+function profilesForMandateChain(
+  profiles: ReturnType<typeof loadSwitchboardConfig>["config"]["profiles"],
+  mandates: MandateWithStatus[]
+): ReturnType<typeof loadSwitchboardConfig>["config"]["profiles"] {
+  const allowedProfiles = new Set(mandates.flatMap((mandate) => mandate.profiles));
+  return Object.fromEntries(
+    Object.entries(profiles).filter(([profileName]) =>
+      allowedProfiles.has(profileName)
+    )
+  ) as ReturnType<typeof loadSwitchboardConfig>["config"]["profiles"];
 }
 
 function mandateInSelectedSubtree(
@@ -3601,6 +3687,15 @@ function formatMandateReport(report: MandateReportPayload): string {
     lines.push("", "Readiness blockers:");
     for (const blocker of report.readiness.blockers) {
       lines.push(`  ${blocker}`);
+    }
+  }
+
+  if (report.readiness.missingSecretRefs.length > 0) {
+    lines.push("", "Missing secret refs:");
+    for (const missing of report.readiness.missingSecretRefs) {
+      lines.push(
+        `  ${missing.ref} (${missing.status}) - profiles:${missing.profiles.join(", ")} env:${missing.envNames.join(", ")}`
+      );
     }
   }
 

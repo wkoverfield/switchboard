@@ -1436,6 +1436,102 @@ describe("switchboard CLI program", () => {
     ]);
   });
 
+  it("scopes missing secret refs to mandate-mounted profiles in tool discovery", async () => {
+    const root = makeTempProject();
+    const mandateStorePath = join(root, "state", "mandates.json");
+    writeMandateSecretConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath,
+      secretStore: createMemorySecretStore({
+        "github/findu/dev/token": "ghp_secret"
+      })
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      ["--cwd", root, "tools", "--mandate", "fix-ci", "--json"],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[1] ?? "{}")).toMatchObject({
+      schemaVersion: "switchboard.tool-surface.v1",
+      ok: true,
+      mandate: { id: "fix-ci" },
+      profileCount: 1
+    });
+    expect(output[1]).not.toContain("vercel/preview/token");
+    expect(output[1]).not.toContain("ghp_secret");
+  });
+
+  it("reports only mounted profile missing secret refs in mandate tool errors", async () => {
+    const root = makeTempProject();
+    const mandateStorePath = join(root, "state", "mandates.json");
+    writeMandateSecretConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath,
+      secretStore: createMemorySecretStore({
+        "vercel/preview/token": "vercel_secret"
+      })
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      ["--cwd", root, "tools", "--mandate", "fix-ci", "--json"],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[1] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "secret_resolution_failed",
+      message: expect.stringContaining('secretRef "github/findu/dev/token"')
+    });
+    expect(output[1]).not.toContain("vercel/preview/token");
+    expect(output[1]).not.toContain("vercel_secret");
+  });
+
   it("prints next commands for human mandate tool discovery", async () => {
     const root = makeTempProject();
     const mandateStorePath = join(root, "state", "mandates.json");
@@ -3558,6 +3654,241 @@ describe("switchboard CLI program", () => {
     expect(output[4]).toContain("switchboard approve approval-1");
   });
 
+  it("reports scoped missing secret refs as mandate readiness blockers", async () => {
+    const root = makeTempProject();
+    writeMandateSecretConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const approvalStorePath = join(root, "state", "approvals.json");
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath,
+      approvalStorePath,
+      secretStore: createMemorySecretStore({
+        "github/findu/dev/token": "ghp_secret"
+      })
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "preview",
+        "--agent",
+        "worker",
+        "--profiles",
+        "vercel_preview",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "30m",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "report", "preview", "--json"],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "escalate", "preview", "--json"],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "report", "preview"],
+      { from: "user" }
+    );
+
+    const report = JSON.parse(output[1] ?? "{}") as {
+      readiness: {
+        selectedCanHandoff: boolean;
+        missingSecretRefs: Array<{
+          ref: string;
+          profiles: string[];
+          envNames: string[];
+          status: string;
+        }>;
+        blockers: string[];
+        nextActions: string[];
+      };
+    };
+    expect(report.readiness).toMatchObject({
+      selectedCanHandoff: false,
+      missingSecretRefs: [
+        {
+          ref: "vercel/preview/token",
+          profiles: ["vercel_preview"],
+          envNames: ["VERCEL_TOKEN"],
+          status: "missing"
+        }
+      ],
+      blockers: ['secretRef "vercel/preview/token" is missing'],
+      nextActions: [
+        "switchboard secrets set vercel/preview/token --value-stdin"
+      ]
+    });
+    expect(JSON.stringify(report)).not.toContain("github/findu/dev/token");
+    expect(JSON.stringify(report)).not.toContain("ghp_secret");
+
+    expect(JSON.parse(output[2] ?? "{}")).toMatchObject({
+      status: "needs_attention",
+      counts: {
+        items: 1,
+        missingSecretRefs: 1
+      },
+      items: [
+        {
+          type: "missing_secret_ref",
+          priority: "setup",
+          mandateId: "preview",
+          title: "Secret ref vercel/preview/token is missing",
+          commands: [
+            "switchboard secrets set vercel/preview/token --value-stdin"
+          ]
+        }
+      ]
+    });
+    expect(output[3]).toContain("Missing secret refs:");
+    expect(output[3]).toContain("vercel/preview/token (missing)");
+    expect(output[3]).not.toContain("github/findu/dev/token");
+    expect(output[3]).not.toContain("ghp_secret");
+  });
+
+  it("scopes missing secret readiness to the selected mandate subtree", async () => {
+    const root = makeTempProject();
+    writeMandateSecretConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath,
+      secretStore: createMemorySecretStore()
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "parent",
+        "--agent",
+        "lead",
+        "--profiles",
+        "github_findu,vercel_preview",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "child",
+        "preview",
+        "--parent",
+        "parent",
+        "--agent",
+        "worker",
+        "--profiles",
+        "vercel_preview",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "30m",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "report", "parent", "--json"],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "report", "preview", "--json"],
+      { from: "user" }
+    );
+
+    const parentReport = JSON.parse(output[2] ?? "{}") as {
+      readiness: { missingSecretRefs: Array<{ ref: string }> };
+    };
+    const childReport = JSON.parse(output[3] ?? "{}") as {
+      readiness: { missingSecretRefs: Array<{ ref: string }> };
+    };
+    expect(
+      parentReport.readiness.missingSecretRefs.map((missing) => missing.ref)
+    ).toEqual(["github/findu/dev/token", "vercel/preview/token"]);
+    expect(
+      childReport.readiness.missingSecretRefs.map((missing) => missing.ref)
+    ).toEqual(["vercel/preview/token"]);
+  });
+
+  it("does not use caller cwd config for all-repo mandate secret readiness", async () => {
+    const callerRoot = makeTempProject();
+    const mandateRoot = makeTempProject();
+    writeMandateSecretConfig(callerRoot);
+    const mandateStorePath = join(callerRoot, "state", "mandates.json");
+    mkdirSync(join(callerRoot, "state"), { recursive: true });
+    writeFileSync(
+      mandateStorePath,
+      JSON.stringify(
+        {
+          version: 1,
+          mandates: [
+            {
+              version: 1,
+              id: "preview",
+              mandateUid: "preview:2026-06-22T20:00:00.000Z",
+              task: "preview",
+              repoPath: mandateRoot,
+              worktreePath: mandateRoot,
+              branch: "fix/ci",
+              agentRole: "worker",
+              profiles: ["vercel_preview"],
+              lease: "30m",
+              createdAt: "2026-06-22T20:00:00.000Z",
+              expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+              allowedTools: [],
+              deniedTools: [],
+              approvalGates: [],
+              handoffState: "open"
+            }
+          ]
+        },
+        null,
+        2
+      ) + "\n"
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath,
+      secretStore: createMemorySecretStore()
+    });
+
+    await program.parseAsync(
+      ["--cwd", callerRoot, "mandate", "report", "preview", "--all", "--json"],
+      { from: "user" }
+    );
+
+    const report = JSON.parse(output[0] ?? "{}") as {
+      repoPath: string;
+      readiness: { missingSecretRefs: unknown[]; blockers: string[] };
+    };
+    expect(report.repoPath).toBeNull();
+    expect(report.readiness.missingSecretRefs).toEqual([]);
+    expect(report.readiness.blockers).toEqual([]);
+    expect(output[0]).not.toContain("vercel/preview/token");
+  });
+
   it("escalates blocked mandate handoffs for review", async () => {
     const root = makeTempProject();
     writeMandateConfig(root);
@@ -4861,6 +5192,41 @@ function writeMandateFixtureConfig(root: string): void {
       "      args:",
       `        - ${JSON.stringify(fixtureServerPath)}`,
       "        - vercel-preview"
+    ].join("\n")
+  );
+}
+
+function writeMandateSecretConfig(root: string): void {
+  writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+  writeFileSync(
+    join(root, ".switchboard.yaml"),
+    [
+      "version: 1",
+      "profiles:",
+      "  github_findu:",
+      "    provider: generic",
+      "    namespace: github_findu",
+      "    upstream:",
+      "      type: stdio",
+      `      command: ${JSON.stringify(process.execPath)}`,
+      "      args:",
+      `        - ${JSON.stringify(fixtureServerPath)}`,
+      "        - github-findu",
+      "      env:",
+      "        GITHUB_TOKEN:",
+      "          secretRef: github/findu/dev/token",
+      "  vercel_preview:",
+      "    provider: generic",
+      "    namespace: vercel_preview",
+      "    upstream:",
+      "      type: stdio",
+      `      command: ${JSON.stringify(process.execPath)}`,
+      "      args:",
+      `        - ${JSON.stringify(fixtureServerPath)}`,
+      "        - vercel-preview",
+      "      env:",
+      "        VERCEL_TOKEN:",
+      "          secretRef: vercel/preview/token"
     ].join("\n")
   );
 }
