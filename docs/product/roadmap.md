@@ -392,7 +392,7 @@ Next acceptable slice:
 
 ### Milestone 7: Secrets
 
-Status: architecture decision accepted; implementation not started.
+Status: foundation shipped; mandate-aware hardening still in progress.
 
 Original intent:
 
@@ -411,12 +411,30 @@ Current decision:
 - raw provider secrets stay out of repo config, agent client config, mandates,
   harness JSON payloads, and audit logs
 - config uses printable `secretRef` ids
-- local OS-backed secret storage is the preferred backend
+- native local OS-backed secret storage is the default backend
+- fallback file/null/CLI backends require explicit unsafe dev/demo opt-in
 - mandates grant temporary access to profiles/tools, not raw secrets
-- provider presets remain blocked until secret refs, doctor checks, runtime
-  injection, and audit redaction are implemented
+- provider presets remain blocked until mandate-scoped secret/profile behavior,
+  provider-specific read/write/default mode policy, and audit redaction hold up
+  in dogfood
 
 See `docs/security/secrets-keychain-architecture.md`.
+
+Shipped foundation:
+
+- `SecretStore` interface and `cross-keychain` adapter behind a swappable core
+  boundary
+- backend policy hardening for native keychain backends by default
+- readable `secretRef` ids mapped to keychain-safe account names
+- value-free secret ref index
+- config schema support for `{ secretRef }` upstream env values
+- `switchboard secrets set/list/remove/doctor`
+- missing-secret checks in `switchboard doctor`
+- runtime secret resolution before `test`, `serve`, `tools`, and daemon-backed
+  `mcp`
+- generated Codex/Claude client configs remain value-free
+- CI smoke proving a secretRef-backed fixture profile receives the exact
+  resolved env value without printing it
 
 ### Milestone 8: Client Installers
 
@@ -1345,7 +1363,7 @@ Acceptance:
 - no secret backend implementation
 - no remote service or cloud broker
 
-### Current Slice: Secrets Foundation V0
+### Completed Slice: Secrets Foundation V0
 
 Goal: make local secret refs real enough for profiles and mandates without
 starting provider presets.
@@ -1367,6 +1385,24 @@ Acceptance:
   injection, generated-config safety, and no secret values in command output
 - add CI smoke coverage for a secretRef-backed fixture profile that proves
   runtime env injection without printing secret values
+- no provider presets
+- no provider OAuth
+- no cloud secret broker
+
+### Current Slice: Mandate-Scoped Secret Readiness V0
+
+Goal: close the gap between "profiles can use secretRefs" and "mandates can be
+trusted as the local authority context for secret-backed profiles."
+
+Acceptance:
+
+- mandate-scoped tool/profile surfaces report missing secretRefs only for
+  profiles mounted by the active mandate
+- mandate report/escalation surfaces include non-secret readiness blockers for
+  missing secretRefs when they block a scoped run
+- audit entries for secret-backed profile runs remain value-redacted and include
+  mandate context when active
+- docs explain that mandates bind profile access, not raw secret values
 - no provider presets
 - no provider OAuth
 - no cloud secret broker
