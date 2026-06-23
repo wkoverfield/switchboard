@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   profileConfigToStdioUpstream,
+  profileConfigToStdioUpstreamWithSecrets,
   testStdioUpstreamProfile,
   type StdioUpstreamProfile
 } from "./stdio-upstream.js";
@@ -76,6 +77,54 @@ describe("profileConfigToStdioUpstream", () => {
     ).toMatchObject({
       cwd: "/repo/tools"
     });
+  });
+
+  it("resolves secretRef env values only when a secret store is supplied", async () => {
+    await expect(
+      profileConfigToStdioUpstreamWithSecrets(
+        "secret_profile",
+        {
+          provider: "generic",
+          readOnly: false,
+          upstream: {
+            type: "stdio",
+            command: "node",
+            env: {
+              API_TOKEN: { secretRef: "github/findu/dev/token" },
+              LOG_LEVEL: "debug"
+            }
+          }
+        },
+        {
+          secretStore: {
+            async get(ref) {
+              return ref === "github/findu/dev/token" ? "ghp_secret" : null;
+            },
+            async set() {},
+            async delete() {}
+          }
+        }
+      )
+    ).resolves.toMatchObject({
+      env: {
+        API_TOKEN: "ghp_secret",
+        LOG_LEVEL: "debug"
+      }
+    });
+
+    expect(() =>
+      profileConfigToStdioUpstream("secret_profile", {
+        provider: "generic",
+        readOnly: false,
+        upstream: {
+          type: "stdio",
+          command: "node",
+          env: {
+            API_TOKEN: { secretRef: "github/findu/dev/token" }
+          }
+        }
+      })
+    ).toThrow(/resolve secrets/);
   });
 
   it("tests a stdio upstream profile by listing tools", async () => {

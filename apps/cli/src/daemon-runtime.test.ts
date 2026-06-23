@@ -24,12 +24,18 @@ const fixtureServerPath = fileURLToPath(
 
 describe("daemon runtime mandate context", () => {
   const previousStateHome = process.env.XDG_STATE_HOME;
+  const previousKeyringBackend = process.env.TS_KEYRING_BACKEND;
 
   afterEach(() => {
     if (previousStateHome === undefined) {
       delete process.env.XDG_STATE_HOME;
     } else {
       process.env.XDG_STATE_HOME = previousStateHome;
+    }
+    if (previousKeyringBackend === undefined) {
+      delete process.env.TS_KEYRING_BACKEND;
+    } else {
+      process.env.TS_KEYRING_BACKEND = previousKeyringBackend;
     }
   });
 
@@ -86,6 +92,38 @@ describe("daemon runtime mandate context", () => {
         decisionReason: "daemon restarted"
       })
     ]);
+  });
+
+  it("returns structured daemon errors with request ids for missing secret refs", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-daemon-runtime-"));
+    process.env.XDG_STATE_HOME = join(root, "state");
+    process.env.TS_KEYRING_BACKEND = "null";
+    await writeFile(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_findu:",
+        "    provider: generic",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "      env:",
+        "        GITHUB_TOKEN:",
+        "          secretRef: github/findu/dev/token"
+      ].join("\n")
+    );
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({ id: "req-secret", type: "list_tools" }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "req-secret",
+      ok: false,
+      error: expect.stringContaining('secretRef "github/findu/dev/token"')
+    });
   });
 
   it("rejects mandate-scoped list_tools when the daemon cwd is on another branch", async () => {

@@ -30,12 +30,22 @@ import {
   resolveMandateStorePath,
   rollbackSwitchboardClientConfig,
   safeAuditLog,
+  collectSecretRefUsages,
+  createKeychainSecretStore,
   type PathResolutionOptions,
+  findMissingSecretRefs,
+  forgetSecretRef,
+  listSecretRefs,
+  rememberSecretRef,
+  resolveSecretIndexPath,
   resolveGlobalConfigPath,
   resolveRepoConfigPaths,
   starterUpstreamArgPlaceholder,
+  type MissingSecretRef,
   type SupportedClient,
+  type SecretStore,
   updateMandateHandoff,
+  validateSecretRef,
   validateInitConfigOptions,
   validateSwitchboardClientConfigOptions,
   type ProjectClientConfigInspection,
@@ -48,6 +58,7 @@ import {
   listDaemonTools,
   pingDaemon,
   profileConfigToStdioUpstream,
+  profileConfigToStdioUpstreamWithSecrets,
   serveDaemonBackedMcpStdio,
   serveSwitchboardMcpStdio,
   testStdioUpstreamProfile,
@@ -73,6 +84,7 @@ const mandateEscalationSchemaVersion = "switchboard.mandate-escalation.v1";
 const approvalRequestsSchemaVersion = "switchboard.approvals.v1";
 const toolSurfaceSchemaVersion = "switchboard.tool-surface.v1";
 const auditLogSchemaVersion = "switchboard.audit-log.v1";
+const secretsSchemaVersion = "switchboard.secrets.v1";
 const errorSchemaVersion = "switchboard.error.v1";
 
 interface CommandErrorEnvelope {
@@ -328,6 +340,9 @@ export interface ProgramIo {
     socketPath: string,
     options?: { mandateId?: string; approvalWaitMs?: number }
   ) => Promise<void>;
+  secretStore?: SecretStore;
+  secretIndexPath?: string;
+  readSecretFromStdin?: () => Promise<string>;
 }
 
 export function createProgram(io: ProgramIo = {}): Command {
@@ -340,6 +355,8 @@ export function createProgram(io: ProgramIo = {}): Command {
   const startDaemonProcess = io.startDaemon ?? startDaemon;
   const serveDaemonMcp = io.serveDaemonMcp ?? serveDaemonBackedMcpStdio;
   const auditLogger = io.auditLogger ?? noopAuditLogger;
+  const secretStore = io.secretStore ?? createKeychainSecretStore();
+  const readSecretFromStdin = io.readSecretFromStdin ?? readAllStdin;
   const program = new Command();
   let currentParseArgs: string[] = [];
   const writeCommandError = (options: CommandErrorOptions): void => {
@@ -447,6 +464,10 @@ export function createProgram(io: ProgramIo = {}): Command {
       const localIgnore = checkLocalConfigIgnored(globalOptions.cwd);
       const cwd = configCwdBase(loaded, globalOptions.cwd);
       const clientConfigs = await inspectProjectClientConfigs({ cwd });
+      const missingSecrets = await findMissingSecretRefs(
+        loaded.config,
+        secretStore
+      );
       const checks = [
         {
           name: "config-schema",
@@ -467,6 +488,11 @@ export function createProgram(io: ProgramIo = {}): Command {
           name: "client-configs",
           ok: clientConfigs.every((item) => item.status !== "invalid"),
           message: clientConfigSummary(clientConfigs)
+        },
+        {
+          name: "secrets",
+          ok: missingSecrets.length === 0,
+          message: secretCheckSummary(missingSecrets)
         }
       ];
 
@@ -477,11 +503,16 @@ export function createProgram(io: ProgramIo = {}): Command {
         diagnostics: loaded.diagnostics,
         namespaceCollisions: loaded.namespaceCollisions,
         clientConfigs,
+        secrets: {
+          usages: collectSecretRefUsages(loaded.config),
+          missing: missingSecrets
+        },
         nextSteps: doctorNextSteps({
           ok,
           loaded,
           localIgnoreOk: localIgnore.ok,
           clientConfigs,
+          missingSecrets,
           cwd: globalOptions.cwd
         })
       };
@@ -493,6 +524,170 @@ export function createProgram(io: ProgramIo = {}): Command {
       }
 
       if (!ok) {
+        process.exitCode = 1;
+      }
+    });
+
+  const secrets = program
+    .command("secrets")
+    .description("Manage local Switchboard secret references.");
+
+  secrets
+    .command("set <ref>")
+    .description("Store or update a local secret value by secretRef.")
+    .option("--value-stdin", "read the secret value from stdin")
+    .option("--json", "print machine-readable JSON")
+    .action(
+      async (ref: string, options: { valueStdin?: boolean; json?: boolean }) => {
+        const validation = validateSecretRef(ref);
+        if (!validation.ok) {
+          writeCommandError({
+            json: options.json,
+            code: "invalid_secret_ref",
+            message: validation.errors.join("; "),
+            nextActions: [
+              "Use a lowercase path-like ref such as github/findu/dev/token."
+            ]
+          });
+          return;
+        }
+        if (!options.valueStdin) {
+          writeCommandError({
+            json: options.json,
+            code: "missing_secret_input",
+            message: "--value-stdin is required for this non-interactive V0",
+            nextActions: [
+              `Pipe a secret value on stdin, for example: pbpaste | switchboard secrets set ${ref} --value-stdin`
+            ]
+          });
+          return;
+        }
+
+        try {
+          const value = await readSecretFromStdin();
+          if (value.length === 0) {
+            writeCommandError({
+              json: options.json,
+              code: "empty_secret",
+              message: "secret value must not be empty",
+              nextActions: ["Pipe a non-empty secret value on stdin."]
+            });
+            return;
+          }
+          await secretStore.set(ref, value);
+          await rememberSecretRef(ref, secretIndexOptions(io.secretIndexPath));
+          const result = {
+            ok: true,
+            schemaVersion: secretsSchemaVersion,
+            action: "set",
+            ref,
+            indexPath: resolveSecretIndexPath(
+              secretIndexOptions(io.secretIndexPath)
+            )
+          };
+          writeOut(options.json ? JSON.stringify(result, null, 2) : `Stored secretRef ${ref}`);
+        } catch (error) {
+          writeCommandError({
+            json: options.json,
+            code: "secret_set_failed",
+            message: messageFromError(error)
+          });
+        }
+      }
+    );
+
+  secrets
+    .command("list")
+    .description("List local Switchboard secret references without values.")
+    .option("--json", "print machine-readable JSON")
+    .action(async (options: { json?: boolean }) => {
+      const indexPath = resolveSecretIndexPath(
+        secretIndexOptions(io.secretIndexPath)
+      );
+      const refs = await listSecretRefs(secretIndexOptions(io.secretIndexPath));
+      const result = {
+        ok: true,
+        schemaVersion: secretsSchemaVersion,
+        indexPath,
+        count: refs.length,
+        refs
+      };
+      writeOut(options.json ? JSON.stringify(result, null, 2) : formatSecretsList(result));
+    });
+
+  secrets
+    .command("remove <ref>")
+    .alias("rm")
+    .description("Remove a local secret value and forget its ref.")
+    .option("--json", "print machine-readable JSON")
+    .action(async (ref: string, options: { json?: boolean }) => {
+      const validation = validateSecretRef(ref);
+      if (!validation.ok) {
+        writeCommandError({
+          json: options.json,
+          code: "invalid_secret_ref",
+          message: validation.errors.join("; "),
+          nextActions: [
+            "Use a lowercase path-like ref such as github/findu/dev/token."
+          ]
+        });
+        return;
+      }
+      try {
+        await secretStore.delete(ref);
+        await forgetSecretRef(ref, secretIndexOptions(io.secretIndexPath));
+        const result = {
+          ok: true,
+          schemaVersion: secretsSchemaVersion,
+          action: "remove",
+          ref,
+          indexPath: resolveSecretIndexPath(
+            secretIndexOptions(io.secretIndexPath)
+          )
+        };
+        writeOut(
+          options.json
+            ? JSON.stringify(result, null, 2)
+            : `Removed secretRef ${ref}`
+        );
+      } catch (error) {
+        writeCommandError({
+          json: options.json,
+          code: "secret_remove_failed",
+          message: messageFromError(error)
+        });
+      }
+    });
+
+  secrets
+    .command("doctor")
+    .description("Check configured secretRefs without printing values.")
+    .option("--json", "print machine-readable JSON")
+    .action(async (options: { json?: boolean }) => {
+      const globalOptions = program.opts<{ cwd?: string }>();
+      const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
+      const missingSecrets = await findMissingSecretRefs(
+        loaded.config,
+        secretStore
+      );
+      const result = {
+        ok:
+          missingSecrets.length === 0 &&
+          !loaded.diagnostics.some((item) => item.level === "error"),
+        schemaVersion: secretsSchemaVersion,
+        indexPath: resolveSecretIndexPath(
+          secretIndexOptions(io.secretIndexPath)
+        ),
+        diagnostics: loaded.diagnostics,
+        usages: collectSecretRefUsages(loaded.config),
+        missing: missingSecrets
+      };
+      writeOut(
+        options.json
+          ? JSON.stringify(result, null, 2)
+          : formatSecretsDoctor(result)
+      );
+      if (!result.ok) {
         process.exitCode = 1;
       }
     });
@@ -523,12 +718,19 @@ export function createProgram(io: ProgramIo = {}): Command {
         return;
       }
 
-      const profiles = stdioProfilesFromConfig(
-        mandate
+      const profiles = await stdioProfilesFromConfigForCommand({
+        profiles: mandate
           ? profilesForMandate(loaded.config.profiles, mandate)
           : loaded.config.profiles,
-        configCwdBase(loaded, globalOptions.cwd)
-      );
+        cwdBase: configCwdBase(loaded, globalOptions.cwd),
+        secretStore,
+        json: options.json,
+        writeCommandError,
+        writeErr
+      });
+      if (!profiles) {
+        return;
+      }
       if (profiles.length === 0) {
         writeCommandError({
           json: options.json,
@@ -620,7 +822,7 @@ export function createProgram(io: ProgramIo = {}): Command {
       [] as string[]
     )
     .action(
-      (
+      async (
         profileName: string | undefined,
         options: {
           task?: string;
@@ -640,7 +842,10 @@ export function createProgram(io: ProgramIo = {}): Command {
         }
 
         const cwd = configCwdBase(loaded, globalOptions.cwd);
-        const stdioProfiles = stdioProfilesFromConfig(loaded.config.profiles, cwd);
+        const stdioProfiles = stdioProfilePreviewsFromConfig(
+          loaded.config.profiles,
+          cwd
+        );
         if (stdioProfiles.length === 0) {
           writeErr("error: no stdio upstream profiles are configured");
           process.exitCode = 1;
@@ -1042,12 +1247,19 @@ export function createProgram(io: ProgramIo = {}): Command {
         return;
       }
 
-      const profiles = stdioProfilesFromConfig(
-        mandate
+      const profiles = await stdioProfilesFromConfigForCommand({
+        profiles: mandate
           ? profilesForMandate(loaded.config.profiles, mandate)
           : loaded.config.profiles,
-        configCwdBase(loaded, globalOptions.cwd)
-      );
+        cwdBase: configCwdBase(loaded, globalOptions.cwd),
+        secretStore,
+        json: undefined,
+        writeCommandError,
+        writeErr
+      });
+      if (!profiles) {
+        return;
+      }
       if (profiles.length === 0) {
         writeErr("error: no stdio upstream profiles are configured");
         process.exitCode = 1;
@@ -1106,10 +1318,26 @@ export function createProgram(io: ProgramIo = {}): Command {
           return;
         }
 
-        const upstream = profileConfigToStdioUpstream(profileName, profile, {
-          cwdBase: configCwdBase(loaded, globalOptions.cwd)
+        const upstream = await profileConfigToStdioUpstreamWithSecrets(
+          profileName,
+          profile,
+          {
+            cwdBase: configCwdBase(loaded, globalOptions.cwd),
+            secretStore
+          }
+        ).catch((error: unknown) => {
+          writeCommandError({
+            json: options.json,
+            code: "secret_resolution_failed",
+            message: messageFromError(error),
+            nextActions: secretResolutionNextActions(messageFromError(error))
+          });
+          return undefined;
         });
         if (!upstream) {
+          if (process.exitCode) {
+            return;
+          }
           writeErr(
             `error: profile "${profileName}" does not define a stdio upstream`
           );
@@ -2093,7 +2321,10 @@ export function createProgram(io: ProgramIo = {}): Command {
         }
 
         const cwd = configCwdBase(loaded, globalOptions.cwd);
-        const profiles = stdioProfilesFromConfig(loaded.config.profiles, cwd);
+        const profiles = stdioProfilePreviewsFromConfig(
+          loaded.config.profiles,
+          cwd
+        );
         if (profiles.length === 0) {
           writeErr("error: no stdio upstream profiles are configured");
           process.exitCode = 1;
@@ -2193,6 +2424,10 @@ function formatDoctor(result: {
   checks: Array<{ name: string; ok: boolean; message: string }>;
   diagnostics: Array<{ level: string; message: string }>;
   clientConfigs?: ProjectClientConfigInspection[];
+  secrets?: {
+    usages: ReturnType<typeof collectSecretRefUsages>;
+    missing: MissingSecretRef[];
+  };
   nextSteps: string[];
 }): string {
   const lines = [
@@ -2220,6 +2455,20 @@ function formatDoctor(result: {
     }
   }
 
+  if (result.secrets && result.secrets.usages.length > 0) {
+    lines.push("", "Secret refs:");
+    for (const usage of result.secrets.usages) {
+      const missing = result.secrets.missing.some(
+        (item) => item.ref === usage.ref
+      )
+        ? "missing"
+        : "set";
+      lines.push(
+        `  ${usage.ref} (${missing}) - ${usage.profileName}.${usage.envName}`
+      );
+    }
+  }
+
   if (result.nextSteps.length > 0) {
     lines.push("", "Next steps:");
     for (const step of result.nextSteps) {
@@ -2239,6 +2488,71 @@ function clientConfigSummary(configs: ProjectClientConfigInspection[]): string {
   }
 
   return `${installed}/${configs.length} project client config(s) route through switchboard mcp.`;
+}
+
+function secretCheckSummary(missingSecrets: MissingSecretRef[]): string {
+  if (missingSecrets.length === 0) {
+    return "Configured secretRefs are available.";
+  }
+
+  return `${missingSecrets.length} configured secretRef(s) are missing or unavailable.`;
+}
+
+function formatSecretsList(result: {
+  indexPath: string;
+  count: number;
+  refs: Array<{ ref: string; updatedAt: string }>;
+}): string {
+  const lines = ["Switchboard secrets", `Index: ${result.indexPath}`];
+  if (result.count === 0) {
+    lines.push("No secret refs are indexed.");
+    return lines.join("\n");
+  }
+
+  lines.push("", "Refs:");
+  for (const entry of result.refs) {
+    lines.push(`  ${entry.ref} (updated ${entry.updatedAt})`);
+  }
+  return lines.join("\n");
+}
+
+function formatSecretsDoctor(result: {
+  ok: boolean;
+  indexPath: string;
+  diagnostics: Array<{ level: string; message: string }>;
+  usages: ReturnType<typeof collectSecretRefUsages>;
+  missing: MissingSecretRef[];
+}): string {
+  const lines = [
+    result.ok ? "Switchboard secrets doctor: OK" : "Switchboard secrets doctor: failed",
+    `Index: ${result.indexPath}`
+  ];
+
+  for (const diagnostic of result.diagnostics) {
+    lines.push(`${diagnostic.level}: ${diagnostic.message}`);
+  }
+
+  if (result.usages.length === 0) {
+    lines.push("No configured secretRefs.");
+    return lines.join("\n");
+  }
+
+  lines.push("", "Configured secretRefs:");
+  for (const usage of result.usages) {
+    const missing = result.missing.find((item) => item.ref === usage.ref);
+    lines.push(
+      `  ${usage.ref} - ${usage.profileName}.${usage.envName}${missing ? ` (${missing.status})` : ""}`
+    );
+  }
+
+  if (result.missing.length > 0) {
+    lines.push("", "Next steps:");
+    for (const missing of result.missing) {
+      lines.push(`  switchboard secrets set ${missing.ref} --value-stdin`);
+    }
+  }
+
+  return lines.join("\n");
 }
 
 function formatInit(result: {
@@ -3504,8 +3818,21 @@ function optionsFromCwd(cwd: string | undefined): LoadConfigOptions &
   return cwd ? { cwd } : {};
 }
 
+function secretIndexOptions(path: string | undefined): { path?: string } {
+  return path ? { path } : {};
+}
+
 function messageFromError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function readAllStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+  }
+
+  return Buffer.concat(chunks).toString("utf8").replace(/\r?\n$/, "");
 }
 
 function configureParserErrorHandling(
@@ -3870,13 +4197,14 @@ function doctorNextSteps(options: {
   loaded: ReturnType<typeof loadSwitchboardConfig>;
   localIgnoreOk: boolean;
   clientConfigs: ProjectClientConfigInspection[];
+  missingSecrets: MissingSecretRef[];
   cwd: string | undefined;
 }): string[] {
   const steps: string[] = [];
   const hasRepoConfig = options.loaded.sources.some(
     (source) => source.kind === "repo" && source.loaded
   );
-  const stdioProfiles = stdioProfilesFromConfig(
+  const stdioProfiles = stdioProfilePreviewsFromConfig(
     options.loaded.config.profiles,
     configCwdBase(options.loaded, options.cwd)
   );
@@ -3898,6 +4226,10 @@ function doctorNextSteps(options: {
 
   if (options.loaded.diagnostics.some((diagnostic) => diagnostic.level === "error")) {
     steps.push("fix config diagnostics above, then rerun switchboard doctor");
+  }
+
+  for (const missing of options.missingSecrets) {
+    steps.push(`switchboard secrets set ${missing.ref} --value-stdin`);
   }
 
   for (const config of options.clientConfigs) {
@@ -3969,16 +4301,68 @@ function parseSupportedClient(value: string): SupportedClient | undefined {
   return undefined;
 }
 
-function stdioProfilesFromConfig(
+function stdioProfilePreviewsFromConfig(
   profiles: ReturnType<typeof loadSwitchboardConfig>["config"]["profiles"],
   cwdBase: string
 ): StdioUpstreamProfile[] {
   return Object.entries(profiles).flatMap(([profileName, profile]) => {
     const upstream = profileConfigToStdioUpstream(profileName, profile, {
-      cwdBase
+      cwdBase,
+      unresolvedSecretBehavior: "omit"
     });
     return upstream ? [upstream] : [];
   });
+}
+
+async function stdioProfilesFromConfig(
+  profiles: ReturnType<typeof loadSwitchboardConfig>["config"]["profiles"],
+  cwdBase: string,
+  secretStore: SecretStore
+): Promise<StdioUpstreamProfile[]> {
+  const upstreams = await Promise.all(
+    Object.entries(profiles).map(([profileName, profile]) =>
+      profileConfigToStdioUpstreamWithSecrets(profileName, profile, {
+        cwdBase,
+        secretStore
+      })
+    )
+  );
+  return upstreams.filter((upstream): upstream is StdioUpstreamProfile =>
+    Boolean(upstream)
+  );
+}
+
+async function stdioProfilesFromConfigForCommand(options: {
+  profiles: ReturnType<typeof loadSwitchboardConfig>["config"]["profiles"];
+  cwdBase: string;
+  secretStore: SecretStore;
+  json: boolean | undefined;
+  writeCommandError: (error: CommandErrorOptions) => void;
+  writeErr: (message: string) => void;
+}): Promise<StdioUpstreamProfile[] | undefined> {
+  try {
+    return await stdioProfilesFromConfig(
+      options.profiles,
+      options.cwdBase,
+      options.secretStore
+    );
+  } catch (error) {
+    const message = messageFromError(error);
+    options.writeCommandError({
+      json: options.json,
+      code: "secret_resolution_failed",
+      message,
+      nextActions: secretResolutionNextActions(message)
+    });
+    return undefined;
+  }
+}
+
+function secretResolutionNextActions(message: string): string[] {
+  const ref = /secretRef "([^"]+)"/.exec(message)?.[1];
+  return ref
+    ? [`switchboard secrets set ${ref} --value-stdin`]
+    : ["Run switchboard secrets doctor to inspect configured secretRefs."];
 }
 
 async function serveProfilesOverStdio(

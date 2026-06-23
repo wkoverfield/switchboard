@@ -8,7 +8,9 @@ import { isAbsolute, resolve } from "node:path";
 import { Readable } from "node:stream";
 import {
   namespaceForProfile,
-  type ProfileConfig
+  resolveEnvSecretRefs,
+  type ProfileConfig,
+  type SecretStore
 } from "@switchboard-mcp/core";
 
 export interface StdioUpstreamProfile {
@@ -34,6 +36,8 @@ export interface StdioProfileTestOptions {
 
 export interface ProfileConfigToStdioOptions {
   cwdBase?: string;
+  secretStore?: SecretStore;
+  unresolvedSecretBehavior?: "error" | "omit";
 }
 
 export function profileConfigToStdioUpstream(
@@ -61,7 +65,38 @@ export function profileConfigToStdioUpstream(
     upstream.cwd = options.cwdBase;
   }
   if (profile.upstream.env) {
-    upstream.env = profile.upstream.env;
+    const env = literalEnvValues(
+      profileName,
+      profile.upstream.env,
+      options.unresolvedSecretBehavior ?? "error"
+    );
+    if (Object.keys(env).length > 0) {
+      upstream.env = env;
+    }
+  }
+
+  return upstream;
+}
+
+export async function profileConfigToStdioUpstreamWithSecrets(
+  profileName: string,
+  profile: ProfileConfig,
+  options: ProfileConfigToStdioOptions
+): Promise<StdioUpstreamProfile | undefined> {
+  const upstream = profileConfigToStdioUpstream(profileName, profile, {
+    ...(options.cwdBase ? { cwdBase: options.cwdBase } : {}),
+    unresolvedSecretBehavior: "omit"
+  });
+  if (!upstream || !profile.upstream?.env) {
+    return upstream;
+  }
+  if (!options.secretStore) {
+    throw new Error("secretStore is required to resolve secretRef env values");
+  }
+
+  const env = await resolveEnvSecretRefs(profile.upstream.env, options.secretStore);
+  if (Object.keys(env).length > 0) {
+    upstream.env = env;
   }
 
   return upstream;
@@ -75,6 +110,27 @@ function isStdioUpstreamConfig(
     typeof upstream.command === "string" &&
     upstream.command.length > 0
   );
+}
+
+function literalEnvValues(
+  profileName: string,
+  env: NonNullable<NonNullable<ProfileConfig["upstream"]>["env"]>,
+  unresolvedSecretBehavior: "error" | "omit"
+): Record<string, string> {
+  const literals: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value === "string") {
+      literals[key] = value;
+      continue;
+    }
+    if (unresolvedSecretBehavior === "error") {
+      throw new Error(
+        `profile "${profileName}" env ${key} uses secretRef; resolve secrets before creating the stdio upstream`
+      );
+    }
+  }
+
+  return literals;
 }
 
 export type UpstreamTool = Awaited<
