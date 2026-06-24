@@ -771,9 +771,12 @@ export function createProgram(io: ProgramIo = {}): Command {
           return;
         }
 
+        const cwd = resolve(globalOptions.cwd ?? process.cwd());
+        const branch = currentGitBranch(cwd);
         const planOptions = {
           id: preset,
           ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+          ...(branch ? { mandateBranch: branch } : {}),
           ...(options.profileName ? { profileName: options.profileName } : {}),
           ...(options.namespace ? { namespace: options.namespace } : {}),
           ...(options.secretRef ? { secretRef: options.secretRef } : {}),
@@ -1807,6 +1810,12 @@ export function createProgram(io: ProgramIo = {}): Command {
           collectOption,
           [] as string[]
         )
+        .option(
+          "--require-approval-labels <labels>",
+          "comma-separated labels for one approval gate (repeatable, matches --require-approval-tool order)",
+          collectOption,
+          [] as string[]
+        )
         .option("--json", "print machine-readable JSON")
         .action(
           async (
@@ -1822,6 +1831,7 @@ export function createProgram(io: ProgramIo = {}): Command {
               requireApprovalReason: string[];
               requireApprovalRisk: string[];
               requireApprovalLabel: string[];
+              requireApprovalLabels: string[];
               json?: boolean;
             }
           ) => {
@@ -1893,6 +1903,18 @@ export function createProgram(io: ProgramIo = {}): Command {
               });
               return;
             }
+            if (
+              options.requireApprovalLabels.length > 0 &&
+              options.requireApprovalLabels.length !==
+                options.requireApprovalTool.length
+            ) {
+              writeCommandError({
+                json: options.json,
+                code: "invalid_approval_gate_options",
+                message: "--require-approval-labels must be provided once for each --require-approval-tool"
+              });
+              return;
+            }
             const path = io.mandateStorePath ?? resolveMandateStorePath();
 
             try {
@@ -1916,8 +1938,8 @@ export function createProgram(io: ProgramIo = {}): Command {
                     ...(options.requireApprovalRisk[index]
                       ? { risk: options.requireApprovalRisk[index] }
                       : {}),
-                    ...(options.requireApprovalLabel.length > 0
-                      ? { labels: options.requireApprovalLabel }
+                    ...(approvalGateLabels(options, index).length > 0
+                      ? { labels: approvalGateLabels(options, index) }
                       : {})
                   })
                 )
@@ -2000,6 +2022,12 @@ export function createProgram(io: ProgramIo = {}): Command {
           collectOption,
           [] as string[]
         )
+        .option(
+          "--require-approval-labels <labels>",
+          "comma-separated labels for one approval gate (repeatable, matches --require-approval-tool order)",
+          collectOption,
+          [] as string[]
+        )
         .option("--json", "print machine-readable JSON")
         .action(
           async (
@@ -2017,6 +2045,7 @@ export function createProgram(io: ProgramIo = {}): Command {
               requireApprovalReason: string[];
               requireApprovalRisk: string[];
               requireApprovalLabel: string[];
+              requireApprovalLabels: string[];
               json?: boolean;
             }
           ) => {
@@ -2088,6 +2117,18 @@ export function createProgram(io: ProgramIo = {}): Command {
               });
               return;
             }
+            if (
+              options.requireApprovalLabels.length > 0 &&
+              options.requireApprovalLabels.length !==
+                options.requireApprovalTool.length
+            ) {
+              writeCommandError({
+                json: options.json,
+                code: "invalid_approval_gate_options",
+                message: "--require-approval-labels must be provided once for each --require-approval-tool"
+              });
+              return;
+            }
             const path = io.mandateStorePath ?? resolveMandateStorePath();
 
             try {
@@ -2115,8 +2156,8 @@ export function createProgram(io: ProgramIo = {}): Command {
                     ...(options.requireApprovalRisk[index]
                       ? { risk: options.requireApprovalRisk[index] }
                       : {}),
-                    ...(options.requireApprovalLabel.length > 0
-                      ? { labels: options.requireApprovalLabel }
+                    ...(approvalGateLabels(options, index).length > 0
+                      ? { labels: approvalGateLabels(options, index) }
                       : {})
                   })
                 )
@@ -4693,6 +4734,19 @@ function isMandateNotFoundMessage(message: string): boolean {
     /^mandate "[^"]+" was not found(?:$|\sfor\s)/.test(message) ||
     /^active parent mandate "[^"]+" was not found(?:$|\sfor\s)/.test(message)
   );
+}
+
+function approvalGateLabels(
+  options: {
+    requireApprovalLabel: string[];
+    requireApprovalLabels: string[];
+  },
+  index: number
+): string[] {
+  return uniqueStrings([
+    ...options.requireApprovalLabel,
+    ...parseCommaSeparatedList(options.requireApprovalLabels[index] ?? "")
+  ]);
 }
 
 function commandErrorEnvelope(

@@ -57,7 +57,23 @@ describe("provider safety templates", () => {
       "--deny-tool github_findu_deploy_prod"
     );
     expect(rendered.mandateCommand).toContain("--require-approval-risk medium");
+    expect(rendered.mandateCommand).toContain(
+      "--require-approval-labels 'github,write'"
+    );
+    expect(rendered.mandateCommand).toContain(
+      "--require-approval-labels 'github,copilot,write'"
+    );
+    expect(rendered.mandateCommand).not.toContain("--require-approval-label ");
     expect(rendered.configYaml).not.toContain("ghp_");
+  });
+
+  it("renders provider mandate commands for an override branch", () => {
+    const rendered = renderProviderSafetyTemplate("github-ci", {
+      mandateBranch: "main"
+    });
+
+    expect(rendered.mandateCommand).toContain("--branch main");
+    expect(rendered.mandateCommand).not.toContain("--branch fix/ci");
   });
 
   it("renders Vercel preview policy with production actions denied", () => {
