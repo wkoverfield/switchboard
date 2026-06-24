@@ -44,6 +44,7 @@ export interface RenderProviderSafetyTemplateOptions {
   secretRef?: string;
   command?: string;
   args?: string[];
+  mandateBranch?: string;
 }
 
 export interface RenderedProviderSafetyTemplate {
@@ -314,7 +315,12 @@ export function renderProviderSafetyTemplate(
     args,
     configYaml: stringifyYaml(config, { lineWidth: 0 }),
     secretCommands: [`switchboard secrets set ${secretRef} --value-stdin`],
-    mandateCommand: renderMandateCommand(template, profileName, namespace),
+    mandateCommand: renderMandateCommand(
+      template,
+      profileName,
+      namespace,
+      options.mandateBranch ? { branch: options.mandateBranch } : {}
+    ),
     notes: template.notes
   };
 }
@@ -412,9 +418,11 @@ export function checkProviderSafetyTemplateTools(
 function renderMandateCommand(
   template: ProviderSafetyTemplate,
   profileName: string,
-  namespace: string
+  namespace: string,
+  options: { branch?: string } = {}
 ): string {
   const policy = providerSafetyTemplatePolicy(template.id, namespace);
+  const branch = options.branch ?? template.recommendedMandate.branch;
   const parts = [
     "switchboard",
     "mandate",
@@ -425,7 +433,7 @@ function renderMandateCommand(
     "--profiles",
     profileName,
     "--branch",
-    template.recommendedMandate.branch,
+    branch,
     "--lease",
     template.recommendedMandate.lease,
     ...(policy.allowedTools ?? []).flatMap((pattern) => [
@@ -442,10 +450,9 @@ function renderMandateCommand(
       "--require-approval-reason",
       gate.reason ?? "",
       ...(gate.risk ? ["--require-approval-risk", gate.risk] : []),
-      ...(gate.labels ?? []).flatMap((label) => [
-        "--require-approval-label",
-        label
-      ])
+      ...(gate.labels && gate.labels.length > 0
+        ? ["--require-approval-labels", gate.labels.join(",")]
+        : [])
     ])
   ];
 

@@ -49,7 +49,8 @@ export async function createProviderAddPlan(
     ...(options.namespace ? { namespace: options.namespace } : {}),
     ...(options.secretRef ? { secretRef: options.secretRef } : {}),
     ...(options.command ? { command: options.command } : {}),
-    ...(options.args ? { args: options.args } : {})
+    ...(options.args ? { args: options.args } : {}),
+    ...(options.mandateBranch ? { mandateBranch: options.mandateBranch } : {})
   });
   const nextContent = renderMergedProviderConfig(existing, rendered.configYaml);
 

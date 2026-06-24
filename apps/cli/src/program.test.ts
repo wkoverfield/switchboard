@@ -199,6 +199,7 @@ describe("switchboard CLI program", () => {
 
   it("prints a provider add dry-run plan without writing", async () => {
     const root = makeTempProject();
+    initGitRepo(root, "current-branch");
     const output: string[] = [];
     const program = createProgram({ writeOut: (message) => output.push(message) });
 
@@ -217,6 +218,7 @@ describe("switchboard CLI program", () => {
     expect(parsed.schemaVersion).toBe("switchboard.provider-add.v1");
     expect(parsed.action).toBe("create-planned");
     expect(parsed.targetPath).toBe(join(root, ".switchboard.yaml"));
+    expect(output[0]).toContain("--branch current-branch");
     expect(existsSync(join(root, ".switchboard.yaml"))).toBe(false);
   });
 
@@ -1711,6 +1713,72 @@ describe("switchboard CLI program", () => {
         }
       }
     });
+  });
+
+  it("applies per-gate approval labels without leaking labels across gates", async () => {
+    const root = makeTempProject();
+    const mandateStorePath = join(root, "state", "mandates.json");
+    writeMandateFixtureConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--allow-tool",
+        "github_findu_*",
+        "--require-approval-tool",
+        "github_findu_echo",
+        "--require-approval-reason",
+        "echo changes remote state",
+        "--require-approval-risk",
+        "medium",
+        "--require-approval-labels",
+        "github,write",
+        "--require-approval-tool",
+        "github_findu_whoami",
+        "--require-approval-reason",
+        "copilot delegation",
+        "--require-approval-risk",
+        "high",
+        "--require-approval-labels",
+        "github,copilot,write",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      mandate: {
+        approvalGates: Array<{ labels?: string[] }>;
+      };
+    };
+
+    expect(parsed.mandate.approvalGates[0]?.labels).toEqual([
+      "github",
+      "write"
+    ]);
+    expect(parsed.mandate.approvalGates[1]?.labels).toEqual([
+      "github",
+      "copilot",
+      "write"
+    ]);
   });
 
   it("keeps denied and unallowed tools out of mandate tool discovery", async () => {
