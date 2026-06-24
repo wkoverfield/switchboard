@@ -66,8 +66,25 @@ export async function createProviderAddPlan(
       "switchboard install codex --write",
       "switchboard install claude --write"
     ],
-    mandateCommand: rendered.mandateCommand
+    mandateCommand: renderPresetMandateCommand(rendered)
   };
+}
+
+function renderPresetMandateCommand(
+  rendered: RenderedProviderSafetyTemplate
+): string {
+  return [
+    "switchboard",
+    "mandate",
+    "create",
+    rendered.template.recommendedMandate.task,
+    "--from",
+    rendered.template.id,
+    "--profiles",
+    rendered.profileName
+  ]
+    .map(shellQuoteIfNeeded)
+    .join(" ");
 }
 
 function resolveProviderAddTargetPath(cwd: string): string {
@@ -225,4 +242,12 @@ function backupTimestamp(now: Date = new Date()): string {
 
 function unique(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+function shellQuoteIfNeeded(value: string): string {
+  if (/^[A-Za-z0-9_./:@-]+$/.test(value)) {
+    return value;
+  }
+
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }

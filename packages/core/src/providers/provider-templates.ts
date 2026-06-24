@@ -57,6 +57,7 @@ export interface RenderedProviderSafetyTemplate {
   configYaml: string;
   secretCommands: string[];
   mandateCommand: string;
+  mandateCommandArgs: string[];
   notes: string[];
 }
 
@@ -306,6 +307,13 @@ export function renderProviderSafetyTemplate(
     throw new Error(parsed.error.issues.map((issue) => issue.message).join("\n"));
   }
 
+  const mandateCommandArgs = renderMandateCommandArgs(
+    template,
+    profileName,
+    namespace,
+    options.mandateBranch ? { branch: options.mandateBranch } : {}
+  );
+
   return {
     template,
     profileName,
@@ -315,12 +323,8 @@ export function renderProviderSafetyTemplate(
     args,
     configYaml: stringifyYaml(config, { lineWidth: 0 }),
     secretCommands: [`switchboard secrets set ${secretRef} --value-stdin`],
-    mandateCommand: renderMandateCommand(
-      template,
-      profileName,
-      namespace,
-      options.mandateBranch ? { branch: options.mandateBranch } : {}
-    ),
+    mandateCommand: mandateCommandArgs.map(shellQuoteIfNeeded).join(" "),
+    mandateCommandArgs,
     notes: template.notes
   };
 }
@@ -415,15 +419,15 @@ export function checkProviderSafetyTemplateTools(
   };
 }
 
-function renderMandateCommand(
+function renderMandateCommandArgs(
   template: ProviderSafetyTemplate,
   profileName: string,
   namespace: string,
   options: { branch?: string } = {}
-): string {
+): string[] {
   const policy = providerSafetyTemplatePolicy(template.id, namespace);
   const branch = options.branch ?? template.recommendedMandate.branch;
-  const parts = [
+  return [
     "switchboard",
     "mandate",
     "create",
@@ -455,8 +459,6 @@ function renderMandateCommand(
         : [])
     ])
   ];
-
-  return parts.map(shellQuoteIfNeeded).join(" ");
 }
 
 function classifyProviderPresetTool(
