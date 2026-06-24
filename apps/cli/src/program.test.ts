@@ -214,12 +214,45 @@ describe("switchboard CLI program", () => {
       schemaVersion: string;
       action: string;
       targetPath: string;
+      commands: {
+        mandateCreate: { command: string; args: string[] };
+      };
     };
     expect(parsed.schemaVersion).toBe("switchboard.provider-add.v1");
     expect(parsed.action).toBe("create-planned");
     expect(parsed.targetPath).toBe(join(root, ".switchboard.yaml"));
-    expect(output[0]).toContain("--branch current-branch");
+    expect(parsed.commands.mandateCreate).toMatchObject({
+      command: "switchboard",
+      args: expect.arrayContaining([
+        "mandate",
+        "create",
+        "fix-ci",
+        "--from",
+        "github-ci"
+      ])
+    });
     expect(existsSync(join(root, ".switchboard.yaml"))).toBe(false);
+  });
+
+  it("prints a provider add value summary before the config preview", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "main");
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await program.parseAsync(["--cwd", root, "add", "github-ci"], {
+      from: "user"
+    });
+
+    const text = output.join("\n");
+    expect(text).toContain("What this prepares:");
+    expect(text).toContain("one github MCP profile: github_ci");
+    expect(text).toContain(
+      "mandate policy: 1 allow pattern(s), 10 approval gate(s), 5 deny pattern(s)"
+    );
+    expect(text.indexOf("What this prepares:")).toBeLessThan(
+      text.indexOf("Config preview:")
+    );
   });
 
   it("rejects conflicting provider add dry-run and write modes", async () => {
@@ -544,9 +577,11 @@ describe("switchboard CLI program", () => {
 
     const parsed = JSON.parse(output[0] ?? "{}") as {
       ok: boolean;
+      status: string;
       nextSteps: string[];
     };
     expect(parsed.ok).toBe(true);
+    expect(parsed.status).toBe("setup-incomplete");
     expect(parsed.nextSteps).toContain("switchboard init --write");
   });
 
@@ -562,9 +597,11 @@ describe("switchboard CLI program", () => {
 
     const parsed = JSON.parse(output[0] ?? "{}") as {
       ok: boolean;
+      status: string;
       nextSteps: string[];
     };
     expect(parsed.ok).toBe(true);
+    expect(parsed.status).toBe("setup-incomplete");
     expect(parsed.nextSteps).toEqual([
       "switchboard test local_echo",
       "switchboard install codex --write",
@@ -849,10 +886,12 @@ describe("switchboard CLI program", () => {
 
     const parsed = JSON.parse(output[0] ?? "{}") as {
       ok: boolean;
+      status: string;
       clientConfigs: Array<{ client: string; status: string }>;
       nextSteps: string[];
     };
     expect(parsed.ok).toBe(true);
+    expect(parsed.status).toBe("ok");
     expect(parsed.clientConfigs).toEqual([
       expect.objectContaining({ client: "codex", status: "installed" }),
       expect.objectContaining({ client: "claude", status: "installed" })
@@ -3021,6 +3060,111 @@ describe("switchboard CLI program", () => {
     );
   });
 
+  it("creates a provider-preset mandate with current branch defaults", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "main");
+    const mandateStorePath = join(root, "state", "mandates.json");
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_ci:",
+        "    provider: github",
+        "    namespace: github_ci",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "workspaces:",
+        "  default:",
+        "    paths:",
+        "      - .",
+        "    profiles:",
+        "      - github_ci"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "create", "--from", "github-ci", "--json"],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      mandate: {
+        id: string;
+        branch: string;
+        agentRole: string;
+        profiles: string[];
+        lease: string;
+        allowedTools: string[];
+        deniedTools: string[];
+        approvalGates: Array<{
+          toolPattern: string;
+          labels?: string[];
+        }>;
+      };
+      mcpLaunch: { args: string[] };
+    };
+
+    expect(parsed.mandate).toMatchObject({
+      id: "fix-ci",
+      branch: "main",
+      agentRole: "implementer",
+      profiles: ["github_ci"],
+      lease: "2h",
+      allowedTools: ["github_ci_*"],
+      deniedTools: expect.arrayContaining([
+        "github_ci_delete*",
+        "github_ci_create_repository"
+      ])
+    });
+    expect(parsed.mandate.approvalGates).toHaveLength(10);
+    expect(parsed.mandate.approvalGates[0]).toMatchObject({
+      toolPattern: "github_ci_*comment*",
+      labels: ["github", "write"]
+    });
+    expect(parsed.mandate.approvalGates[2]).toMatchObject({
+      toolPattern: "github_ci_assign_copilot*",
+      labels: ["github", "copilot", "write"]
+    });
+    expect(parsed.mcpLaunch.args).toEqual([
+      "--cwd",
+      root,
+      "mcp",
+      "--mandate",
+      "fix-ci"
+    ]);
+  });
+
+  it("rejects mandate create without explicit options or a preset", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "create", "fix-ci", "--json"],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "missing_mandate_options",
+      message:
+        "missing required mandate option(s): --agent, --profiles, --lease"
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
   it("prints next commands after human mandate creation", async () => {
     const root = makeTempProject();
     const mandateStorePath = join(root, "state", "mandates.json");
@@ -4554,11 +4698,9 @@ describe("switchboard CLI program", () => {
       writeErr: (message) => errors.push(message)
     });
 
-    await expect(
-      program.parseAsync(["mandate", "create", "fix-ci", "--json"], {
-        from: "user"
-      })
-    ).rejects.toMatchObject({ exitCode: 1 });
+    await program.parseAsync(["mandate", "create", "fix-ci", "--json"], {
+      from: "user"
+    });
     await expect(
       program.parseAsync(["mandate", "status", "--bogus", "--json"], {
         from: "user"
@@ -4574,8 +4716,9 @@ describe("switchboard CLI program", () => {
     expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
       ok: false,
       schemaVersion: "switchboard.error.v1",
-      code: "missing_required_option",
-      message: "required option '--agent <role>' not specified"
+      code: "missing_mandate_options",
+      message:
+        "missing required mandate option(s): --agent, --profiles, --lease"
     });
     expect(JSON.parse(output[1] ?? "{}")).toMatchObject({
       ok: false,

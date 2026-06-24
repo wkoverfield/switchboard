@@ -22,6 +22,8 @@
     "smoke:provider-add": "node scripts/smoke/provider-add.mjs",
     "smoke:provider-presets": "node scripts/smoke/provider-presets.mjs",
     "smoke:github-ci-first-loop": "pnpm --filter @switchboard-mcp/mcp-runtime smoke:github-ci-first-loop",
+    "smoke:harness-subagent-proof": "node scripts/smoke/harness-subagent-proof.mjs",
+    "smoke:vercel-preview-dogfood": "node scripts/smoke/vercel-preview-dogfood.mjs",
     "smoke:mandate-lifecycle": "node scripts/smoke/mandate-lifecycle.mjs",
     "smoke:install-codex": "tmpdir=$(mktemp -d) && repo=$PWD && outfile=\"$tmpdir/codex.json\" && (cd \"$tmpdir\" && node \"$repo/apps/cli/dist/index.js\" --cwd \"$repo\" install codex --json > \"$outfile\" && node \"$repo/scripts/smoke/assert-install-snippet.mjs\" codex \"$outfile\"); status=$?; rm -rf \"$tmpdir\"; exit $status",
     "smoke:install-claude": "tmpdir=$(mktemp -d) && repo=$PWD && outfile=\"$tmpdir/claude.json\" && (cd \"$tmpdir\" && node \"$repo/apps/cli/dist/index.js\" --cwd \"$repo\" install claude --json > \"$outfile\" && node \"$repo/scripts/smoke/assert-install-snippet.mjs\" claude \"$outfile\"); status=$?; rm -rf \"$tmpdir\"; exit $status",

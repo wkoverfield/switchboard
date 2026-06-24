@@ -35,6 +35,7 @@ import {
   createProviderAddPlan,
   createKeychainSecretStore,
   getProviderSafetyTemplate,
+  providerSafetyTemplatePolicy,
   type PathResolutionOptions,
   findMissingSecretRefs,
   forgetSecretRef,
@@ -518,8 +519,18 @@ export function createProgram(io: ProgramIo = {}): Command {
       ];
 
       const ok = checks.every((check) => check.ok);
+      const nextSteps = doctorNextSteps({
+        ok,
+        loaded,
+        localIgnoreOk: localIgnore.ok,
+        clientConfigs,
+        missingSecrets,
+        cwd: globalOptions.cwd
+      });
+      const status = doctorStatus({ ok, nextSteps });
       const result = {
         ok,
+        status,
         checks,
         diagnostics: loaded.diagnostics,
         namespaceCollisions: loaded.namespaceCollisions,
@@ -528,14 +539,7 @@ export function createProgram(io: ProgramIo = {}): Command {
           usages: collectSecretRefUsages(loaded.config),
           missing: missingSecrets
         },
-        nextSteps: doctorNextSteps({
-          ok,
-          loaded,
-          localIgnoreOk: localIgnore.ok,
-          clientConfigs,
-          missingSecrets,
-          cwd: globalOptions.cwd
-        })
+        nextSteps
       };
 
       if (options.json) {
@@ -1766,14 +1770,18 @@ export function createProgram(io: ProgramIo = {}): Command {
     .addCommand(
       new Command("create")
         .description("Create a local task-scoped mandate.")
-        .argument("<task>", "task name or summary")
-        .requiredOption("--agent <role>", "agent role for this mandate")
-        .requiredOption(
+        .argument("[task]", "task name or summary")
+        .option(
+          "--from <preset>",
+          "use a provider safety template to fill mandate defaults and policy"
+        )
+        .option("--agent <role>", "agent role for this mandate")
+        .option(
           "--profiles <profiles>",
           "comma-separated Switchboard profiles to bind"
         )
-        .requiredOption("--branch <branch>", "branch the mandate is scoped to")
-        .requiredOption("--lease <duration>", "lease duration, like 30m, 2h, or 1d")
+        .option("--branch <branch>", "branch the mandate is scoped to")
+        .option("--lease <duration>", "lease duration, like 30m, 2h, or 1d")
         .option(
           "--allow-tool <pattern>",
           "allow a namespaced tool pattern (repeatable)",
@@ -1819,12 +1827,13 @@ export function createProgram(io: ProgramIo = {}): Command {
         .option("--json", "print machine-readable JSON")
         .action(
           async (
-            task: string,
+            task: string | undefined,
             options: {
-              agent: string;
-              profiles: string;
-              branch: string;
-              lease: string;
+              from?: string;
+              agent?: string;
+              profiles?: string;
+              branch?: string;
+              lease?: string;
               allowTool: string[];
               denyTool: string[];
               requireApprovalTool: string[];
@@ -1841,7 +1850,47 @@ export function createProgram(io: ProgramIo = {}): Command {
               return;
             }
 
-            const profiles = parseCommaSeparatedList(options.profiles);
+            const template = options.from
+              ? getProviderSafetyTemplate(options.from)
+              : undefined;
+            if (options.from && !template) {
+              writeCommandError({
+                json: options.json,
+                code: "unknown_provider_preset",
+                message: `unknown provider safety template "${options.from}"`,
+                nextActions: [
+                  "Run switchboard presets list to see available templates."
+                ]
+              });
+              return;
+            }
+
+            const profiles = parseCommaSeparatedList(
+              options.profiles ?? template?.defaultProfileName ?? ""
+            );
+            const taskName = task ?? template?.recommendedMandate.task;
+            const agentRole = options.agent ?? template?.recommendedMandate.agent;
+            const lease = options.lease ?? template?.recommendedMandate.lease;
+            const missingRequired = [
+              ...(taskName ? [] : ["task"]),
+              ...(agentRole ? [] : ["--agent"]),
+              ...(profiles.length > 0 ? [] : ["--profiles"]),
+              ...(lease ? [] : ["--lease"])
+            ];
+            if (missingRequired.length > 0) {
+              writeCommandError({
+                json: options.json,
+                code: "missing_mandate_options",
+                message: `missing required mandate option(s): ${missingRequired.join(", ")}`,
+                nextActions: [
+                  "Pass the required options explicitly or use --from <preset>."
+                ]
+              });
+              return;
+            }
+            if (!taskName || !agentRole || !lease) {
+              return;
+            }
             const missingProfiles = profiles.filter(
               (profile) => !loaded.config.profiles[profile]
             );
@@ -1867,7 +1916,21 @@ export function createProgram(io: ProgramIo = {}): Command {
               });
               return;
             }
-            const branch = options.branch.trim();
+            const branch =
+              options.branch?.trim() ??
+              gitBinding?.branch ??
+              template?.recommendedMandate.branch;
+            if (!branch) {
+              writeCommandError({
+                json: options.json,
+                code: "missing_mandate_options",
+                message: "missing required mandate option(s): --branch",
+                nextActions: [
+                  "Pass --branch explicitly or run from a git worktree."
+                ]
+              });
+              return;
+            }
             if (gitBinding && gitBinding.branch !== branch) {
               writeCommandError({
                 json: options.json,
@@ -1916,33 +1979,50 @@ export function createProgram(io: ProgramIo = {}): Command {
               return;
             }
             const path = io.mandateStorePath ?? resolveMandateStorePath();
+            const templatePolicy = template
+              ? providerSafetyTemplatePolicy(
+                  template.id,
+                  loaded.config.profiles[profiles[0] ?? ""]?.namespace ??
+                    template.defaultNamespace
+                )
+              : undefined;
+            const manualApprovalGates = options.requireApprovalTool.map(
+              (toolPattern, index) => ({
+                toolPattern,
+                ...(options.requireApprovalReason[index]
+                  ? { reason: options.requireApprovalReason[index] }
+                  : {}),
+                ...(options.requireApprovalRisk[index]
+                  ? { risk: options.requireApprovalRisk[index] }
+                  : {}),
+                ...(approvalGateLabels(options, index).length > 0
+                  ? { labels: approvalGateLabels(options, index) }
+                  : {})
+              })
+            );
 
             try {
               const mandate = await createMandate({
                 path,
-                task,
+                task: taskName,
                 repoPath,
                 worktreePath: gitBinding?.worktreePath ?? repoPath,
                 branch,
-                agentRole: options.agent,
+                agentRole,
                 profiles,
-                lease: options.lease,
-                allowedTools: options.allowTool,
-                deniedTools: options.denyTool,
-                approvalRequiredTools: options.requireApprovalTool.map(
-                  (toolPattern, index) => ({
-                    toolPattern,
-                    ...(options.requireApprovalReason[index]
-                      ? { reason: options.requireApprovalReason[index] }
-                      : {}),
-                    ...(options.requireApprovalRisk[index]
-                      ? { risk: options.requireApprovalRisk[index] }
-                      : {}),
-                    ...(approvalGateLabels(options, index).length > 0
-                      ? { labels: approvalGateLabels(options, index) }
-                      : {})
-                  })
-                )
+                lease,
+                allowedTools: [
+                  ...(templatePolicy?.allowedTools ?? []),
+                  ...options.allowTool
+                ],
+                deniedTools: [
+                  ...(templatePolicy?.deniedTools ?? []),
+                  ...options.denyTool
+                ],
+                approvalRequiredTools: [
+                  ...(templatePolicy?.approvalGates ?? []),
+                  ...manualApprovalGates
+                ]
               });
               if (options.json) {
                 writeOut(
@@ -2831,6 +2911,7 @@ function formatStatus(status: {
 
 function formatDoctor(result: {
   ok: boolean;
+  status: "ok" | "setup-incomplete" | "failed";
   checks: Array<{ name: string; ok: boolean; message: string }>;
   diagnostics: Array<{ level: string; message: string }>;
   clientConfigs?: ProjectClientConfigInspection[];
@@ -2840,9 +2921,7 @@ function formatDoctor(result: {
   };
   nextSteps: string[];
 }): string {
-  const lines = [
-    result.ok ? "Switchboard doctor: OK" : "Switchboard doctor: failed"
-  ];
+  const lines = [`Switchboard doctor: ${formatDoctorStatus(result.status)}`];
 
   for (const check of result.checks) {
     lines.push(`${check.ok ? "ok" : "fail"} ${check.name} - ${check.message}`);
@@ -2889,6 +2968,15 @@ function formatDoctor(result: {
   return lines.join("\n");
 }
 
+function formatDoctorStatus(
+  status: "ok" | "setup-incomplete" | "failed"
+): string {
+  if (status === "setup-incomplete") {
+    return "setup incomplete";
+  }
+  return status === "ok" ? "OK" : "failed";
+}
+
 function clientConfigSummary(configs: ProjectClientConfigInspection[]): string {
   const installed = configs.filter((item) => item.status === "installed").length;
   const invalid = configs.filter((item) => item.status === "invalid").length;
@@ -2926,7 +3014,43 @@ function formatProviderAddPlanJson(plan: ProviderAddPlan): Record<string, unknow
     checkCommand: plan.checkCommand,
     installCommands: plan.installCommands,
     mandateCommand: plan.mandateCommand,
+    commands: formatProviderAddCommands(plan),
     notes: plan.rendered.notes
+  };
+}
+
+function formatProviderAddCommands(plan: ProviderAddPlan): Record<string, unknown> {
+  return {
+    secrets: plan.secretCommands.map((command) => ({
+      command: "switchboard",
+      args: command.split(" ").slice(1)
+    })),
+    presetCheck: {
+      command: "switchboard",
+      args: [
+        "presets",
+        "check",
+        plan.id,
+        "--profile",
+        plan.rendered.profileName
+      ]
+    },
+    installs: [
+      { command: "switchboard", args: ["install", "codex", "--write"] },
+      { command: "switchboard", args: ["install", "claude", "--write"] }
+    ],
+    mandateCreate: {
+      command: "switchboard",
+      args: [
+        "mandate",
+        "create",
+        plan.rendered.template.recommendedMandate.task,
+        "--from",
+        plan.id,
+        "--profiles",
+        plan.rendered.profileName
+      ]
+    }
   };
 }
 
@@ -2981,6 +3105,9 @@ function formatProviderAdd(
       ? [`Args: ${plan.rendered.args.join(" ")}`]
       : []),
     "",
+    "What this prepares:",
+    ...formatProviderAddSummary(plan).map((line) => `  ${line}`),
+    "",
     "Config preview:",
     plan.nextContent.trimEnd(),
     "",
@@ -2996,6 +3123,20 @@ function formatProviderAdd(
       ? []
       : ["", "Dry run by default. Re-run with --write to apply this plan."])
   ].join("\n");
+}
+
+function formatProviderAddSummary(plan: ProviderAddPlan): string[] {
+  const policy = providerSafetyTemplatePolicy(
+    plan.id,
+    plan.rendered.namespace
+  );
+  return [
+    `one ${plan.rendered.template.provider} MCP profile: ${plan.rendered.profileName}`,
+    `one local secretRef for ${plan.rendered.template.secretEnvName}: ${plan.rendered.secretRef}`,
+    `agent clients route through Switchboard after install`,
+    `mandate policy: ${policy.allowedTools?.length ?? 0} allow pattern(s), ${policy.approvalGates?.length ?? 0} approval gate(s), ${policy.deniedTools?.length ?? 0} deny pattern(s)`,
+    `mandate command binds authority to the current repo, branch, and ${plan.rendered.template.recommendedMandate.lease} lease`
+  ];
 }
 
 function formatProviderPresetList(result: {
@@ -5038,6 +5179,20 @@ function doctorNextSteps(options: {
   }
 
   return [...new Set(steps)];
+}
+
+function doctorStatus(options: {
+  ok: boolean;
+  nextSteps: string[];
+}): "ok" | "setup-incomplete" | "failed" {
+  if (!options.ok) {
+    return "failed";
+  }
+
+  const setupSteps = options.nextSteps.filter(
+    (step) => !step.startsWith("switchboard test ")
+  );
+  return setupSteps.length > 0 ? "setup-incomplete" : "ok";
 }
 
 function parseTimeoutMs(value: string): number | undefined {

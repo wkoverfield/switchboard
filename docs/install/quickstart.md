@@ -94,62 +94,12 @@ the local daemon and routes MCP traffic through it.
 
 ## 5. Create A CI Mandate
 
-Use the mandate command printed by `switchboard add github-ci`; that generated
-command is the authoritative policy for the installed template and uses your
-current git branch. From a repo on `main`, it looks like:
+Use the mandate command printed by `switchboard add github-ci`; it expands the
+template's allow, deny, and approval policy, uses your current git branch, and
+keeps the full policy inspectable in the created mandate.
 
 ```bash
-switchboard mandate create fix-ci \
-  --agent implementer \
-  --profiles github_ci \
-  --branch main \
-  --lease 2h \
-  --allow-tool 'github_ci_*' \
-  --deny-tool github_ci_deploy_prod \
-  --deny-tool 'github_ci_delete*' \
-  --deny-tool 'github_ci_delete_*' \
-  --deny-tool 'github_ci_admin_*' \
-  --deny-tool github_ci_create_repository \
-  --require-approval-tool 'github_ci_*comment*' \
-  --require-approval-reason "commenting changes GitHub conversation state" \
-  --require-approval-risk medium \
-  --require-approval-labels github,write \
-  --require-approval-tool 'github_ci_add_reply*' \
-  --require-approval-reason "replying changes GitHub conversation state" \
-  --require-approval-risk medium \
-  --require-approval-labels github,write \
-  --require-approval-tool 'github_ci_assign_copilot*' \
-  --require-approval-reason "assigning Copilot starts delegated remote work" \
-  --require-approval-risk high \
-  --require-approval-labels github,copilot,write \
-  --require-approval-tool 'github_ci_create*' \
-  --require-approval-reason "creating GitHub resources changes repository or account state" \
-  --require-approval-risk high \
-  --require-approval-labels github,write \
-  --require-approval-tool 'github_ci_fork_*' \
-  --require-approval-reason "forking creates a repository under an account or organization" \
-  --require-approval-risk medium \
-  --require-approval-labels github,write \
-  --require-approval-tool 'github_ci_*write*' \
-  --require-approval-reason "write tools change GitHub repository, issue, or pull request state" \
-  --require-approval-risk medium \
-  --require-approval-labels github,write \
-  --require-approval-tool 'github_ci_*rerun*' \
-  --require-approval-reason "rerunning CI changes remote provider state" \
-  --require-approval-risk medium \
-  --require-approval-labels github,write \
-  --require-approval-tool 'github_ci_push_*' \
-  --require-approval-reason "pushing changes repository contents or refs" \
-  --require-approval-risk high \
-  --require-approval-labels github,write \
-  --require-approval-tool 'github_ci_*update*' \
-  --require-approval-reason "updating GitHub resources changes repository state" \
-  --require-approval-risk medium \
-  --require-approval-labels github,write \
-  --require-approval-tool 'github_ci_*merge*' \
-  --require-approval-reason "merging changes repository state and should stay human-gated" \
-  --require-approval-risk high \
-  --require-approval-labels github,write
+switchboard mandate create fix-ci --from github-ci --profiles github_ci
 ```
 
 Then inspect the scoped tool surface:
