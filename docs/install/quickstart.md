@@ -1,54 +1,69 @@
 # Quickstart
 
-Use this path for the local daemon-backed setup. Provider presets are still a
-future milestone.
+Use this path to make one repo ready for a bounded GitHub CI agent task. The
+flow is local-first: Switchboard writes repo config, stores provider tokens
+behind `secretRef`s, installs a single local MCP endpoint into agent clients,
+and creates mandates for task-scoped authority.
 
-## 1. Create Starter Config
+## 1. Add GitHub CI
 
-Preview a starter repo config:
-
-```bash
-switchboard init
-```
-
-Write `.switchboard.yaml`:
+Preview the setup plan:
 
 ```bash
-switchboard init --write
+switchboard add github-ci
 ```
 
-The generated profile is a generic stdio MCP profile. Replace
-`./path/to/your-mcp-server.mjs` with the command/args for the MCP server you
-want Switchboard to route.
+The plan shows the `.switchboard.yaml` change, the `secretRef` command, the
+provider check command, Codex/Claude install commands, and a recommended
+mandate command. It does not write by default.
 
-## 2. Check The Repo
+Write or update `.switchboard.yaml`:
+
+```bash
+switchboard add github-ci --write
+```
+
+The default GitHub CI template uses GitHub's official local MCP server through
+Docker:
+
+```text
+docker run -i --rm -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server
+```
+
+Customize the profile, namespace, secret ref, command, or args when needed:
+
+```bash
+switchboard add github-ci \
+  --profile-name github_findu \
+  --namespace "GitHub FindU" \
+  --secret-ref github/findu/dev/token \
+  --write
+```
+
+## 2. Store The Token
+
+Switchboard config stores only a printable `secretRef`; the token value goes
+into the local keychain-backed secret store:
+
+```bash
+pbpaste | switchboard secrets set github/example/dev/token --value-stdin
+```
+
+Use the exact command printed by `switchboard add` if you customized
+`--secret-ref`.
+
+## 3. Check The Repo
 
 ```bash
 switchboard doctor
+switchboard secrets doctor
+switchboard presets check github-ci --profile github_ci
 ```
 
-Doctor prints next steps. A ready stdio profile should point you toward:
-
-```bash
-switchboard test <profile>
-switchboard install codex
-switchboard install claude
-```
-
-Doctor also reports project client config state for Codex and Claude as
-`missing`, `installed`, `stale`, or `invalid`, plus other MCP server names
-already present in those project config files. Doctor allows fresh or temporary
-repos without `.switchboard.local.yaml`, but once you create local overrides it
-expects that file to be ignored by git.
-
-## 3. Test One Profile
-
-```bash
-switchboard test local_example
-```
-
-This starts the upstream stdio MCP server, lists tools, and writes a local audit
-entry.
+The preset check starts the configured GitHub MCP server, discovers its
+namespaced tools, and classifies them against the template's recommended
+mandate policy. Treat `allowed_sensitive` as a signal to tighten the policy
+before unattended work.
 
 ## 4. Connect A Client
 
@@ -59,8 +74,7 @@ switchboard install codex
 switchboard install claude
 ```
 
-Copy the dry-run snippet into the client config you choose, or write
-project-scoped config:
+Write project-scoped config:
 
 ```bash
 switchboard install codex --write
@@ -76,5 +90,83 @@ switchboard install claude --rollback <backup>
 ```
 
 The generated snippets run `switchboard --cwd <repo> mcp`, which auto-starts
-the local daemon and routes MCP traffic through it. Use `switchboard serve`
-only when you need a daemonless debug or CI fallback.
+the local daemon and routes MCP traffic through it.
+
+## 5. Create A CI Mandate
+
+Use the mandate command printed by `switchboard add github-ci`. It looks like:
+
+```bash
+switchboard mandate create fix-ci \
+  --agent implementer \
+  --profiles github_ci \
+  --branch fix/ci \
+  --lease 2h \
+  --allow-tool 'github_ci_*' \
+  --deny-tool github_ci_deploy_prod \
+  --deny-tool 'github_ci_delete_*' \
+  --deny-tool 'github_ci_admin_*' \
+  --require-approval-tool 'github_ci_*rerun*' \
+  --require-approval-reason "rerunning CI changes remote provider state" \
+  --require-approval-risk medium \
+  --require-approval-label github \
+  --require-approval-label write
+```
+
+Then inspect the scoped tool surface:
+
+```bash
+switchboard tools --mandate fix-ci
+switchboard tools --mandate fix-ci --json
+```
+
+## 6. Run The Agent Through The Mandate
+
+For an agent client or harness, use the mandate-scoped endpoint:
+
+```bash
+switchboard mcp --mandate fix-ci
+```
+
+For approval-gated tools, either let the client use MCP elicitation when it is
+available or approve from another terminal:
+
+```bash
+switchboard approvals --mandate fix-ci
+switchboard approve <approval-id> --reason "CI rerun approved"
+```
+
+Use a bounded wait when the MCP client can tolerate pending calls:
+
+```bash
+switchboard mcp --mandate fix-ci --approval-wait 30s
+```
+
+## 7. Report And Handoff
+
+```bash
+switchboard logs --mandate fix-ci
+switchboard mandate handoff fix-ci \
+  --state completed \
+  --summary "CI is green" \
+  --next-step "merge after review" \
+  --by implementer-agent
+switchboard mandate report fix-ci --json
+```
+
+## Local Demo Without GitHub
+
+To exercise the mandate approval path without a provider token, use the fixture
+walkthrough:
+
+```bash
+pnpm build
+pnpm smoke:mandate-walkthrough
+```
+
+To exercise the GitHub CI setup planner without a real token:
+
+```bash
+pnpm build
+pnpm smoke:provider-add
+```

@@ -32,6 +32,7 @@ import {
   safeAuditLog,
   collectSecretRefUsages,
   checkProviderSafetyTemplateTools,
+  createProviderAddPlan,
   createKeychainSecretStore,
   getProviderSafetyTemplate,
   type PathResolutionOptions,
@@ -45,6 +46,8 @@ import {
   resolveGlobalConfigPath,
   resolveRepoConfigPaths,
   type RenderedProviderSafetyTemplate,
+  type ProviderAddPlan,
+  type WrittenProviderAddPlan,
   starterUpstreamArgPlaceholder,
   type MissingSecretRef,
   type SupportedClient,
@@ -55,6 +58,7 @@ import {
   validateSwitchboardClientConfigOptions,
   type ProjectClientConfigInspection,
   writeSwitchboardClientConfig,
+  writeProviderAddPlan,
   type RolledBackClientConfig,
   type WrittenClientConfig
 } from "@switchboard-mcp/core";
@@ -92,6 +96,7 @@ const auditLogSchemaVersion = "switchboard.audit-log.v1";
 const secretsSchemaVersion = "switchboard.secrets.v1";
 const providerPresetSchemaVersion = "switchboard.provider-preset.v1";
 const providerPresetCheckSchemaVersion = "switchboard.provider-preset-check.v1";
+const providerAddSchemaVersion = "switchboard.provider-add.v1";
 const errorSchemaVersion = "switchboard.error.v1";
 
 interface CommandErrorEnvelope {
@@ -710,6 +715,101 @@ export function createProgram(io: ProgramIo = {}): Command {
         process.exitCode = 1;
       }
     });
+
+  program
+    .command("add <preset>")
+    .description("Plan or write a guided provider setup from a safety template.")
+    .option("--json", "print machine-readable JSON")
+    .option("--dry-run", "print the setup plan without writing")
+    .option("--write", "write or update .switchboard.yaml")
+    .option("--profile-name <name>", "profile name to render")
+    .option("--namespace <name>", "namespace to render")
+    .option("--secret-ref <ref>", "secretRef to render")
+    .option("--command <command>", "upstream MCP server command to render")
+    .option(
+      "--arg <arg>",
+      "upstream MCP server arg to render (repeatable)",
+      collectOption,
+      [] as string[]
+    )
+    .action(
+      async (
+        preset: string,
+        options: {
+          json?: boolean;
+          dryRun?: boolean;
+          write?: boolean;
+          profileName?: string;
+          namespace?: string;
+          secretRef?: string;
+          command?: string;
+          arg: string[];
+        }
+      ) => {
+        const globalOptions = program.opts<{ cwd?: string }>();
+        if (!getProviderSafetyTemplate(preset)) {
+          writeCommandError({
+            json: options.json,
+            code: "unknown_provider_preset",
+            message: `unknown provider safety template "${preset}"`,
+            nextActions: [
+              "Run switchboard presets list to see available templates."
+            ]
+          });
+          return;
+        }
+        if (options.dryRun && options.write) {
+          writeCommandError({
+            json: options.json,
+            code: "conflicting_provider_add_modes",
+            message: "use either --dry-run or --write, not both",
+            nextActions: [
+              "Run switchboard add without --write to preview the setup plan.",
+              "Run switchboard add --write when you are ready to update .switchboard.yaml."
+            ]
+          });
+          return;
+        }
+
+        const planOptions = {
+          id: preset,
+          ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+          ...(options.profileName ? { profileName: options.profileName } : {}),
+          ...(options.namespace ? { namespace: options.namespace } : {}),
+          ...(options.secretRef ? { secretRef: options.secretRef } : {}),
+          ...(options.command ? { command: options.command } : {}),
+          ...(options.arg.length > 0 ? { args: options.arg } : {})
+        };
+
+        try {
+          if (options.write) {
+            const result = await writeProviderAddPlan(planOptions);
+            writeOut(
+              options.json
+                ? JSON.stringify(formatProviderAddWriteJson(result), null, 2)
+                : formatProviderAddWrite(result)
+            );
+            return;
+          }
+
+          const plan = await createProviderAddPlan(planOptions);
+          writeOut(
+            options.json
+              ? JSON.stringify(formatProviderAddPlanJson(plan), null, 2)
+              : formatProviderAddPlan(plan)
+          );
+        } catch (error) {
+          writeCommandError({
+            json: options.json,
+            code: "provider_add_failed",
+            message: messageFromError(error),
+            nextActions: [
+              "Run switchboard presets show to inspect the template before writing."
+            ]
+          });
+        }
+      }
+    );
 
   const presets = program
     .command("presets")
@@ -2765,6 +2865,96 @@ function secretCheckSummary(missingSecrets: MissingSecretRef[]): string {
   }
 
   return `${missingSecrets.length} configured secretRef(s) are missing or unavailable.`;
+}
+
+function formatProviderAddPlanJson(plan: ProviderAddPlan): Record<string, unknown> {
+  return {
+    ok: true,
+    schemaVersion: providerAddSchemaVersion,
+    action: plan.exists ? "update-planned" : "create-planned",
+    targetPath: plan.targetPath,
+    presetId: plan.id,
+    provider: plan.rendered.template.provider,
+    profileName: plan.rendered.profileName,
+    namespace: plan.rendered.namespace,
+    secretRef: plan.rendered.secretRef,
+    command: plan.rendered.command,
+    args: plan.rendered.args,
+    configYaml: plan.nextContent,
+    secretCommands: plan.secretCommands,
+    checkCommand: plan.checkCommand,
+    installCommands: plan.installCommands,
+    mandateCommand: plan.mandateCommand,
+    notes: plan.rendered.notes
+  };
+}
+
+function formatProviderAddWriteJson(
+  result: WrittenProviderAddPlan
+): Record<string, unknown> {
+  return {
+    ...formatProviderAddPlanJson(result.plan),
+    action: result.action,
+    backupPath: result.backupPath
+  };
+}
+
+function formatProviderAddPlan(plan: ProviderAddPlan): string {
+  return formatProviderAdd(plan, {
+    heading: "Switchboard add plan",
+    action: plan.exists ? "update .switchboard.yaml" : "create .switchboard.yaml",
+    backupPath: null,
+    written: false
+  });
+}
+
+function formatProviderAddWrite(result: WrittenProviderAddPlan): string {
+  return formatProviderAdd(result.plan, {
+    heading: "Switchboard provider setup written",
+    action: result.action,
+    backupPath: result.backupPath,
+    written: true
+  });
+}
+
+function formatProviderAdd(
+  plan: ProviderAddPlan,
+  options: {
+    heading: string;
+    action: string;
+    backupPath: string | null;
+    written: boolean;
+  }
+): string {
+  return [
+    options.heading,
+    `Preset: ${plan.id} (${plan.rendered.template.label})`,
+    `Target: ${plan.targetPath}`,
+    `Action: ${options.action}`,
+    ...(options.backupPath ? [`Backup: ${options.backupPath}`] : []),
+    `Profile: ${plan.rendered.profileName}`,
+    `Namespace: ${plan.rendered.namespace}`,
+    `secretRef: ${plan.rendered.secretRef}`,
+    `Command: ${plan.rendered.command}`,
+    ...(plan.rendered.args.length > 0
+      ? [`Args: ${plan.rendered.args.join(" ")}`]
+      : []),
+    "",
+    "Config preview:",
+    plan.nextContent.trimEnd(),
+    "",
+    "Next steps:",
+    ...plan.secretCommands.map((command) => `  ${command}`),
+    `  ${plan.checkCommand}`,
+    ...plan.installCommands.map((command) => `  ${command}`),
+    `  ${plan.mandateCommand}`,
+    "",
+    "Notes:",
+    ...plan.rendered.notes.map((note) => `  ${note}`),
+    ...(options.written
+      ? []
+      : ["", "Dry run by default. Re-run with --write to apply this plan."])
+  ].join("\n");
 }
 
 function formatProviderPresetList(result: {

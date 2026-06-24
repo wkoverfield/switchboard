@@ -11,28 +11,40 @@ stores credentials through `switchboard secrets`.
 ## Commands
 
 ```bash
+switchboard add github-ci
+switchboard add github-ci --write
 switchboard presets list
 switchboard presets show github-ci
 switchboard presets show vercel-preview --json
 switchboard presets check github-ci --profile github_findu
 ```
 
+`switchboard add` is the guided setup surface. It prints a transparent plan by
+default and writes `.switchboard.yaml` only with `--write`. The plan includes
+the profile config, `secretRef` setup command, provider check command,
+Codex/Claude install commands, and recommended mandate command.
+
 Customize rendered names without changing the safety posture:
 
 ```bash
-switchboard presets show github-ci \
+switchboard add github-ci \
   --profile-name github_findu \
   --namespace "GitHub FindU" \
   --secret-ref github/findu/dev/token \
-  --command npx \
-  --arg -y \
-  --arg @modelcontextprotocol/server-github
+  --write
 ```
 
 `--namespace` is normalized before it is used in recommended mandate policy, so
 the example above renders policy for `github_findu_*` tools. Use repeatable
 `--arg` for stdio servers that need command arguments; do not put a whole shell
 command string into `--command`.
+
+`presets show` remains available when you only want value-free YAML without
+writing anything:
+
+```bash
+switchboard presets show github-ci --json
+```
 
 Then store the secret value locally:
 
@@ -88,8 +100,17 @@ Default posture:
 Recommended mandate policy:
 
 - allow namespaced GitHub tools for the task
-- deny production deploy, delete, and admin-shaped tools
-- require approval for rerun and merge-shaped tools
+- deny production deploy, delete, admin-shaped tools, and repository creation
+- require approval for comments/replies, Copilot assignment, create/update/write
+  operations, forks, pushes, reruns, and merges
+
+Dogfood result, 2026-06-23: the default template was checked against the
+official GitHub MCP Docker server using a real GitHub token. The server exposed
+43 namespaced tools. The template classified 26 as allowed, 15 as approval
+required, 2 as denied, 0 as allowed-sensitive, and 0 as not-allowed. Denied
+tools were repository creation and file deletion. Approval-gated examples
+included comments, Copilot assignment, branch/file/PR creation, issue writes,
+PR review writes, pushes, updates, and merge.
 
 ### `vercel-preview`
 
@@ -125,6 +146,6 @@ keeping claims modest:
 - no automatic provider MCP install
 - no claim that provider-specific permissions are fully enforced
 
-The next step is local dogfood with real upstream MCP commands and least
-privilege tokens. Once the template policy holds up, Switchboard can promote the
-most useful provider path into a real preset.
+The next step is local dogfood with the official GitHub MCP server and
+least-privilege tokens. Once the template policy holds up against observed tool
+names, Switchboard can promote the most useful provider path into a real preset.

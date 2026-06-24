@@ -9,6 +9,7 @@ export * from "./mandates/mandates.js";
 export * from "./namespaces/namespaces.js";
 export * from "./onboarding/init-config.js";
 export * from "./providers/provider-templates.js";
+export * from "./providers/provider-add.js";
 export * from "./schemas/config.js";
 export * from "./secrets/secret-refs.js";
 export * from "./secrets/secrets.js";

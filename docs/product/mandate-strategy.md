@@ -1,6 +1,6 @@
 # Switchboard Mandate Strategy
 
-Last updated: 2026-06-20
+Last updated: 2026-06-23
 
 ## Thesis
 
@@ -68,6 +68,25 @@ The market is splitting into adjacent lanes:
 Switchboard should avoid being only another MCP gateway, connector marketplace,
 or generic permissions wrapper. Its wedge should be repo-native setup plus
 delegated work authority for coding agents.
+
+The adversarial read is stricter: broad "repo agent-readiness" is also crowded.
+Repo instruction files, skills, hooks, client imports, MCP registries, secret
+managers, and harnesses all own slices of that story already. Switchboard should
+not try to be the user's primary AGENTS.md manager, skills marketplace, secret
+vault, MCP catalog, or agent orchestrator.
+
+Supporting setup features are still valuable when they feed mandate authority:
+
+- `switchboard add` can become a guided planner for profiles, secretRefs,
+  safe defaults, and provider checks.
+- provider templates can help users reach a safe mandate faster.
+- skills and runbooks can teach an agent how to operate inside a scoped
+  mandate.
+- checks and reports can make handoff quality visible.
+
+But these should remain feeders into the core wedge, not a second product
+center. The durable claim is task-scoped local authority for coding agents and
+harnesses.
 
 Useful reference links:
 
@@ -143,6 +162,13 @@ Mandates should be powerful but optional. A developer should be able to get
 value from Switchboard as a repo-aware MCP setup tool before learning the
 mandate model.
 
+Layer 1 should feel like setup, not governance homework. The ideal path is a
+guided command such as `switchboard add github` that produces a transparent
+plan: profile config, secretRef setup, discovered tools, recommended mandate
+policy, and optional Codex/Claude install. It should not silently claim to
+understand every provider action. When classification is uncertain, fail toward
+human-visible review and mandate approval gates.
+
 These layers describe product depth, not implementation order. Active mandates,
 child mandates, and the first harness JSON contracts now exist locally; the next
 build work should deepen approval visibility and enforcement without turning
@@ -200,8 +226,9 @@ Release:
 
 ## Product Implications
 
-Provider presets should wait unless they directly support mandate safety or the
-repo-aware setup wedge.
+Provider presets, `switchboard add`, skills, and runbooks should ship only when
+they make mandate setup safer, faster, or easier to reuse. Avoid broad connector
+coverage for its own sake.
 
 Policy, approvals, and secrets should be designed around mandates rather than
 around static profiles alone. Simple profile-only usage must remain supported

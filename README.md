@@ -17,6 +17,8 @@ pnpm --filter @switchboard-mcp/cli switchboard --help
 pnpm smoke:profile-test
 pnpm smoke:secret-ref-profile
 pnpm smoke:mandate-secret-ref
+pnpm smoke:provider-add
+pnpm smoke:github-ci-first-loop
 pnpm smoke:mcp-serve-session
 ```
 
@@ -25,6 +27,8 @@ pnpm smoke:mcp-serve-session
 ```bash
 switchboard --help
 switchboard init
+switchboard add <github-ci|vercel-preview>
+switchboard add <github-ci|vercel-preview> --write
 switchboard status
 switchboard doctor
 switchboard demo mandate [profile]
