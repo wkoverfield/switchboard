@@ -3,6 +3,7 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { deepMerge } from "../config/load-config.js";
+import { resolveRepoConfigPaths } from "../config/paths.js";
 import {
   type SwitchboardConfig,
   switchboardConfigSchema
@@ -41,7 +42,7 @@ export async function createProviderAddPlan(
   options: ProviderAddPlanOptions
 ): Promise<ProviderAddPlan> {
   const cwd = resolve(options.cwd ?? process.cwd());
-  const targetPath = join(cwd, ".switchboard.yaml");
+  const targetPath = resolveProviderAddTargetPath(cwd);
   const existing = await readOptionalTextFile(targetPath);
   const rendered = renderProviderSafetyTemplate(options.id, {
     ...(options.profileName ? { profileName: options.profileName } : {}),
@@ -66,6 +67,13 @@ export async function createProviderAddPlan(
     ],
     mandateCommand: rendered.mandateCommand
   };
+}
+
+function resolveProviderAddTargetPath(cwd: string): string {
+  return (
+    resolveRepoConfigPaths({ cwd }).repoConfigPath ??
+    join(cwd, ".switchboard.yaml")
+  );
 }
 
 export async function writeProviderAddPlan(

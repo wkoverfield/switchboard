@@ -104,4 +104,32 @@ describe("provider add plans", () => {
       "github_findu"
     ]);
   });
+
+  it("updates the nearest existing repo config from a nested cwd", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-add-nested-"));
+    const nested = join(root, "packages", "app");
+    const configPath = join(root, ".switchboard.yaml");
+    await writeFile(
+      configPath,
+      [
+        "version: 1",
+        "profiles:",
+        "  local_example:",
+        "    provider: generic",
+        "    namespace: local_example",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const plan = await createProviderAddPlan({
+      id: "github-ci",
+      cwd: nested,
+      profileName: "github_findu"
+    });
+
+    expect(plan.targetPath).toBe(configPath);
+  });
 });

@@ -197,6 +197,52 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("prints a provider add dry-run plan without writing", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await program.parseAsync(
+      ["--cwd", root, "add", "github-ci", "--dry-run", "--json"],
+      {
+        from: "user"
+      }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      schemaVersion: string;
+      action: string;
+      targetPath: string;
+    };
+    expect(parsed.schemaVersion).toBe("switchboard.provider-add.v1");
+    expect(parsed.action).toBe("create-planned");
+    expect(parsed.targetPath).toBe(join(root, ".switchboard.yaml"));
+    expect(existsSync(join(root, ".switchboard.yaml"))).toBe(false);
+  });
+
+  it("rejects conflicting provider add dry-run and write modes", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await program.parseAsync(
+      ["--cwd", root, "add", "github-ci", "--dry-run", "--write", "--json"],
+      {
+        from: "user"
+      }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      schemaVersion: string;
+      code: string;
+      message: string;
+    };
+    expect(parsed.schemaVersion).toBe("switchboard.error.v1");
+    expect(parsed.code).toBe("conflicting_provider_add_modes");
+    expect(parsed.message).toContain("--dry-run");
+    expect(process.exitCode).toBe(1);
+  });
+
   it("checks configured provider preset tools against recommended policy", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");

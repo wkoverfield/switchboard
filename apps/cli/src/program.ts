@@ -720,6 +720,7 @@ export function createProgram(io: ProgramIo = {}): Command {
     .command("add <preset>")
     .description("Plan or write a guided provider setup from a safety template.")
     .option("--json", "print machine-readable JSON")
+    .option("--dry-run", "print the setup plan without writing")
     .option("--write", "write or update .switchboard.yaml")
     .option("--profile-name <name>", "profile name to render")
     .option("--namespace <name>", "namespace to render")
@@ -736,6 +737,7 @@ export function createProgram(io: ProgramIo = {}): Command {
         preset: string,
         options: {
           json?: boolean;
+          dryRun?: boolean;
           write?: boolean;
           profileName?: string;
           namespace?: string;
@@ -752,6 +754,18 @@ export function createProgram(io: ProgramIo = {}): Command {
             message: `unknown provider safety template "${preset}"`,
             nextActions: [
               "Run switchboard presets list to see available templates."
+            ]
+          });
+          return;
+        }
+        if (options.dryRun && options.write) {
+          writeCommandError({
+            json: options.json,
+            code: "conflicting_provider_add_modes",
+            message: "use either --dry-run or --write, not both",
+            nextActions: [
+              "Run switchboard add without --write to preview the setup plan.",
+              "Run switchboard add --write when you are ready to update .switchboard.yaml."
             ]
           });
           return;
