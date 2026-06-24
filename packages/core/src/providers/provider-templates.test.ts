@@ -41,7 +41,7 @@ describe("provider safety templates", () => {
         command: "npx",
         args: ["-y", "@modelcontextprotocol/server-github"],
         env: {
-          GITHUB_TOKEN: {
+          GITHUB_PERSONAL_ACCESS_TOKEN: {
             secretRef: "github/findu/dev/token"
           }
         }
@@ -98,21 +98,33 @@ describe("provider safety templates", () => {
       allowedTools: ["github_findu_*"],
       deniedTools: [
         "github_findu_deploy_prod",
+        "github_findu_delete*",
         "github_findu_delete_*",
-        "github_findu_admin_*"
+        "github_findu_admin_*",
+        "github_findu_create_repository"
       ],
-      approvalGates: [
-        {
-          id: "gate-1",
+      approvalGates: expect.arrayContaining([
+        expect.objectContaining({
+          toolPattern: "github_findu_create*",
+          risk: "high"
+        }),
+        expect.objectContaining({
+          toolPattern: "github_findu_*write*",
+          risk: "medium"
+        }),
+        expect.objectContaining({
           toolPattern: "github_findu_*rerun*",
           risk: "medium"
-        },
-        {
-          id: "gate-2",
+        }),
+        expect.objectContaining({
+          toolPattern: "github_findu_*update*",
+          risk: "medium"
+        }),
+        expect.objectContaining({
           toolPattern: "github_findu_*merge*",
           risk: "high"
-        }
-      ]
+        })
+      ])
     });
   });
 
@@ -136,42 +148,39 @@ describe("provider safety templates", () => {
     expect(result.counts).toMatchObject({
       tools: 9,
       allowed: 1,
-      approvalRequired: 1,
-      denied: 2,
-      allowedSensitive: 4,
+      approvalRequired: 4,
+      denied: 3,
+      allowedSensitive: 0,
       notAllowed: 1
     });
+    expect(result.counts.approvalRequired).toBe(4);
     expect(result.policyCovered).toBe(false);
     expect(result.requiresMandatePolicy).toBe(true);
     expect(result.tools).toMatchObject([
       { toolName: "github_findu_checks_list", classification: "allowed" },
       {
         toolName: "github_findu_checks_rerun",
-        classification: "approval_required",
-        approvalGateId: "gate-1"
+        classification: "approval_required"
       },
       { toolName: "github_findu_deploy_prod", classification: "denied" },
       { toolName: "github_findu_delete_branch", classification: "denied" },
       {
         toolName: "github_findu_secret_update",
-        classification: "allowed_sensitive"
+        classification: "approval_required"
       },
       {
         toolName: "github_findu_delete-repo",
-        classification: "allowed_sensitive"
+        classification: "denied"
       },
       {
         toolName: "github_findu_create.issue",
-        classification: "allowed_sensitive"
+        classification: "approval_required"
       },
       {
         toolName: "github_findu_updatePullRequest",
-        classification: "allowed_sensitive"
+        classification: "approval_required"
       },
       { toolName: "vercel_preview_logs", classification: "not_allowed" }
     ]);
-    expect(result.nextActions).toContain(
-      "Review allowed sensitive-looking tools and add deny or approval patterns before using this preset for unattended work."
-    );
   });
 });

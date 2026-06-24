@@ -1,6 +1,6 @@
 # Switchboard Roadmap
 
-Last updated: 2026-06-22
+Last updated: 2026-06-23
 
 This is the working roadmap for Switchboard. The source planning documents live in
 `docs/product/source/` and are preserved source material from the original
@@ -34,6 +34,12 @@ The deeper product primitive is the local mandate layer for coding agents. A
 mandate gives an agent temporary, task-scoped authority for a specific repo,
 worktree, branch, role, profile set, tool surface, lease, approval posture, and
 audit trail.
+
+The June 2026 adversarial competitive read narrows the durable wedge: broad
+"repo agent-readiness" overlaps with AGENTS.md/client instructions, skills,
+MCP catalogs/gateways, secrets managers, and agent harnesses. Switchboard can
+use setup helpers, provider templates, skills, and runbooks, but they should
+serve the mandate layer rather than become the main product claim.
 
 Switchboard should win by making delegated coding-agent work bounded without
 forcing simple users to understand mandates on day one:
@@ -70,14 +76,17 @@ The next roadmap should optimize for:
 
 - repo-aware setup as the obvious first value
 - mandate/audit/policy/approval depth over provider breadth
+- setup helpers that generate transparent plans, not opaque automatic authority
 - profile selection attached to mandate context when mandates are active
 - runtime/tool calls and audit logs carrying mandate id when active
 - repo/worktree/branch-aware local enforcement over cloud gateway breadth
 - reversible client install as distribution plumbing, not the product center
 - scriptable JSON surfaces for external harnesses
+- integrations with existing secrets managers, MCP gateways, skills systems, and
+  harnesses where useful instead of replacing them
 
-Provider presets should wait until mandate-aware approval, audit, and secrets
-gates have enough shape to keep them honest. The better next demo is:
+Provider presets and future `switchboard add` flows should be judged by whether
+they make safe mandates easier to create and reuse. The better next demo is:
 
 ```bash
 switchboard mandate create fix-ci \
@@ -219,6 +228,9 @@ Implemented in the current codebase:
   responses, audit logs, or mandate reports
 - provider safety template foundation with `switchboard presets list` and
   `switchboard presets show <github-ci|vercel-preview>`
+- guided provider setup planner with `switchboard add <github-ci|vercel-preview>`
+- `switchboard add <preset> --write` for repo-local `.switchboard.yaml`
+  updates with backups
 
 Not started:
 
@@ -537,18 +549,26 @@ Shipped foundation:
 - `switchboard presets list`
 - `switchboard presets show <github-ci|vercel-preview>`
 - `switchboard presets check <github-ci|vercel-preview> --profile <profile>`
+- `switchboard add <github-ci|vercel-preview>`
+- `switchboard add <github-ci|vercel-preview> --write`
 - `switchboard.provider-preset.v1` JSON output for scripts/harnesses
 - `switchboard.provider-preset-check.v1` JSON output for provider dogfood
+- `switchboard.provider-add.v1` JSON output for guided setup plans
 - schema-valid, value-free GitHub CI and Vercel Preview profile YAML templates
 - recommended `secretRef` setup commands
 - recommended mandate allow/deny/approval policy for each template
 - observed tool classification against template policy, including
   allowed-sensitive warnings for write-like tools that are not denied or gated
 - docs at `docs/providers/safety-templates.md`
+- `pnpm smoke:provider-add`
+- `pnpm smoke:github-ci-first-loop`
+- live GitHub CI dogfood against the official GitHub MCP Docker server:
+  43 tools discovered, 26 allowed, 15 approval-required, 2 denied,
+  0 allowed-sensitive, 0 not-allowed
 
 Still needed:
 
-- local dogfood with real upstream MCP server commands and least-privilege tokens
+- repeat live dogfood with a least-privilege token dedicated to CI-only use
 - provider-specific doctor checks beyond the current preset check
 - stronger policy defaults informed by real tool names
 - promotion of one dogfooded template into a real preset

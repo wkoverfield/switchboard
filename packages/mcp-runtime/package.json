@@ -16,6 +16,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "smoke:daemon-mcp-list-tools": "node scripts/smoke-daemon-mcp-list-tools.mjs",
+    "smoke:github-ci-first-loop": "node scripts/smoke-github-ci-first-loop.mjs",
     "smoke:mandate-secret-ref": "node scripts/smoke-mandate-secret-ref.mjs",
     "smoke:mandate-walkthrough": "node scripts/smoke-mandate-walkthrough.mjs",
     "smoke:secret-ref-profile": "node scripts/smoke-secret-ref-profile.mjs",

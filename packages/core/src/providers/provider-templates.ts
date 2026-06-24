@@ -101,9 +101,16 @@ export const providerSafetyTemplates: ProviderSafetyTemplate[] = [
     defaultProfileName: "github_ci",
     defaultNamespace: "github_ci",
     defaultSecretRef: "github/example/dev/token",
-    secretEnvName: "GITHUB_TOKEN",
-    defaultCommand: "github-mcp-server",
-    defaultArgs: [],
+    secretEnvName: "GITHUB_PERSONAL_ACCESS_TOKEN",
+    defaultCommand: "docker",
+    defaultArgs: [
+      "run",
+      "-i",
+      "--rm",
+      "-e",
+      "GITHUB_PERSONAL_ACCESS_TOKEN",
+      "ghcr.io/github/github-mcp-server"
+    ],
     environment: "development",
     readOnly: false,
     mode: "guarded",
@@ -115,13 +122,63 @@ export const providerSafetyTemplates: ProviderSafetyTemplate[] = [
       allowedTools: ["{namespace}_*"],
       deniedTools: [
         "{namespace}_deploy_prod",
+        "{namespace}_delete*",
         "{namespace}_delete_*",
-        "{namespace}_admin_*"
+        "{namespace}_admin_*",
+        "{namespace}_create_repository"
       ],
       approvalGates: [
         {
+          toolPattern: "{namespace}_*comment*",
+          reason: "commenting changes GitHub conversation state",
+          risk: "medium",
+          labels: ["github", "write"]
+        },
+        {
+          toolPattern: "{namespace}_add_reply*",
+          reason: "replying changes GitHub conversation state",
+          risk: "medium",
+          labels: ["github", "write"]
+        },
+        {
+          toolPattern: "{namespace}_assign_copilot*",
+          reason: "assigning Copilot starts delegated remote work",
+          risk: "high",
+          labels: ["github", "copilot", "write"]
+        },
+        {
+          toolPattern: "{namespace}_create*",
+          reason: "creating GitHub resources changes repository or account state",
+          risk: "high",
+          labels: ["github", "write"]
+        },
+        {
+          toolPattern: "{namespace}_fork_*",
+          reason: "forking creates a repository under an account or organization",
+          risk: "medium",
+          labels: ["github", "write"]
+        },
+        {
+          toolPattern: "{namespace}_*write*",
+          reason: "write tools change GitHub repository, issue, or pull request state",
+          risk: "medium",
+          labels: ["github", "write"]
+        },
+        {
           toolPattern: "{namespace}_*rerun*",
           reason: "rerunning CI changes remote provider state",
+          risk: "medium",
+          labels: ["github", "write"]
+        },
+        {
+          toolPattern: "{namespace}_push_*",
+          reason: "pushing changes repository contents or refs",
+          risk: "high",
+          labels: ["github", "write"]
+        },
+        {
+          toolPattern: "{namespace}_*update*",
+          reason: "updating GitHub resources changes repository state",
           risk: "medium",
           labels: ["github", "write"]
         },
