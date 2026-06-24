@@ -92,7 +92,7 @@ Default posture:
 - provider: `github`
 - profile: `github_ci`
 - namespace: `github_ci`
-- secret env: `GITHUB_TOKEN`
+- secret env: `GITHUB_PERSONAL_ACCESS_TOKEN`
 - default secretRef: `github/example/dev/token`
 - mode: `guarded`
 - enforcement: `switchboard`
