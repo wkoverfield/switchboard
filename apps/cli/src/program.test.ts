@@ -58,6 +58,83 @@ describe("switchboard CLI program", () => {
     expect(parsed.namespaces[0]?.namespace).toBe("supabase_findu_dev");
   });
 
+  it("prints scan JSON with repo, provider hints, and no raw env values", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "main");
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "https://github.com/wkoverfield/stockr.git"],
+      { cwd: root, stdio: "ignore" }
+    );
+    mkdirSync(join(root, ".vercel"), { recursive: true });
+    writeFileSync(
+      join(root, ".env.local"),
+      [
+        "STRIPE_SECRET_KEY=sk_test_should_not_print",
+        "VERCEL_TOKEN=vercel_should_not_print"
+      ].join("\n")
+    );
+    writeFileSync(
+      join(root, ".vercel", "project.json"),
+      JSON.stringify({ projectId: "prj_should_not_print" })
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "scan", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      schemaVersion: string;
+      repo: { remote: { owner: string; repo: string } };
+      providers: Array<{ provider: string; envVars: string[] }>;
+      nextActions: string[];
+    };
+    const serialized = output.join("\n");
+    expect(parsed.schemaVersion).toBe("switchboard.scan.v1");
+    expect(parsed.repo.remote).toMatchObject({
+      owner: "wkoverfield",
+      repo: "stockr"
+    });
+    expect(parsed.providers.map((provider) => provider.provider)).toContain(
+      "stripe"
+    );
+    expect(parsed.providers.map((provider) => provider.provider)).toContain(
+      "vercel"
+    );
+    expect(parsed.nextActions).toContain("switchboard setup github-ci");
+    expect(serialized).not.toContain("sk_test_should_not_print");
+    expect(serialized).not.toContain("vercel_should_not_print");
+    expect(serialized).not.toContain("prj_should_not_print");
+  });
+
+  it("prints scan human output with high-signal next actions", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "main");
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "git@github.com:wkoverfield/stockr.git"],
+      { cwd: root, stdio: "ignore" }
+    );
+    writeFileSync(join(root, ".env.local"), "STRIPE_SECRET_KEY=secret\n");
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "scan"], {
+      from: "user"
+    });
+
+    const text = output.join("\n");
+    expect(text).toContain("This looks like");
+    expect(text).toContain("GitHub: wkoverfield/stockr");
+    expect(text).toContain("Provider hints:");
+    expect(text).toContain("STRIPE_SECRET_KEY");
+    expect(text).toContain("switchboard setup github-ci");
+    expect(text).toContain("switchboard install codex --write");
+    expect(text).not.toContain("secret\n");
+  });
+
   it("lists provider safety templates as JSON", async () => {
     const output: string[] = [];
     const program = createProgram({ writeOut: (message) => output.push(message) });

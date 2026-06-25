@@ -223,6 +223,9 @@ Implemented in the current codebase:
   storage over the same secretRef primitives
 - `switchboard setup <github-ci|vercel-preview>` guided provider setup that
   writes config and stores the provider token in one happy-path command
+- `switchboard scan` / `switchboard scan --json` read-only first-run repo scan
+  for git, client config, Switchboard config, provider/env hints, warnings, and
+  next actions without network calls or secret values
 - runtime secret injection for configured stdio upstream env
 - missing `secretRef` readiness in doctor, runtime errors, mandate reports, and
   mandate escalations

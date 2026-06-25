@@ -2,11 +2,13 @@
 
 Repo-aware MCP setup and task-scoped authority for agentic software work.
 
-Switchboard gives coding agents the right tools for each repo, environment, and task. The simple entry point is local-first MCP setup for developers using Codex, Claude Code, Cursor, VS Code, and other MCP-compatible agents: project-scoped config, correct accounts/projects per repo, dev/prod separation, fewer duplicate MCP configs, safer defaults, and local auditability. Codex and Claude Code are shipped installer targets today; Cursor and VS Code remain planned surfaces.
+Your agents should know which tools belong to this repo.
+
+Switchboard gives coding agents the right tools for each repo, environment, and task. The simple entry point is local-first MCP setup for developers using Codex, Claude Code, Cursor, VS Code, and other MCP-compatible agents: `switchboard scan` detects repo/account/provider hints without network calls or secret values, guided setup creates project-scoped config, and production-safe defaults keep raw secrets out of config/output while nudging risky provider actions toward non-prod profiles, approval gates, leases, and audit logs. Codex and Claude Code are shipped installer targets today; Cursor and VS Code remain planned surfaces.
 
 The deeper power layer is mandates: temporary, task-scoped authority that lets agents do bounded jobs without inheriting a human's whole tool surface. Mandates stay optional for simple setup, but they give advanced users and external harnesses a way to bind profiles, tools, leases, approvals, and audit logs to a specific task.
 
-This repository is in foundation work for the local mandate layer. It currently ships the TypeScript workspace, CLI shell, config/profile schemas, namespace normalization, collision detection, `switchboard status`, `switchboard doctor` with `ok` / `setup-incomplete` / `failed` readiness, generic stdio MCP upstream mounting, namespaced tool routing, a stdio MCP front door, client config dry-run and write-mode installers for Codex and Claude Code, project client config and existing MCP server detection in doctor, local audit logs, daemon lifecycle commands, daemon-side tool discovery, a daemon-backed MCP adapter for tool listing and routed calls, local mandate creation/status, preset-backed `switchboard mandate create --from <preset>`, mandate-scoped MCP runtime context, mandate allow/deny tool policy, local secret refs backed by a keychain adapter, provider-add structured command JSON, and end-to-end MCP smoke checks.
+This repository is in foundation work for the local mandate layer. It currently ships the TypeScript workspace, CLI shell, local `switchboard scan`, config/profile schemas, namespace normalization, collision detection, `switchboard status`, `switchboard doctor` with `ok` / `setup-incomplete` / `failed` readiness, generic stdio MCP upstream mounting, namespaced tool routing, a stdio MCP front door, client config dry-run and write-mode installers for Codex and Claude Code, project client config and existing MCP server detection in doctor, local audit logs, daemon lifecycle commands, daemon-side tool discovery, a daemon-backed MCP adapter for tool listing and routed calls, local mandate creation/status, preset-backed `switchboard mandate create --from <preset>`, mandate-scoped MCP runtime context, mandate allow/deny tool policy, local secret refs backed by a keychain adapter, provider-add structured command JSON, and end-to-end MCP smoke checks.
 
 ## Install From Source
 
@@ -29,6 +31,7 @@ installed `switchboard` binary:
 
 ```bash
 pnpm switchboard doctor
+pnpm switchboard scan
 pnpm switchboard add github-ci --write
 ```
 
@@ -36,6 +39,8 @@ pnpm switchboard add github-ci --write
 
 ```bash
 switchboard --help
+switchboard scan
+switchboard scan --json
 switchboard init
 switchboard setup <github-ci|vercel-preview>
 switchboard add <github-ci|vercel-preview>
