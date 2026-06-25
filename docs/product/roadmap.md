@@ -253,6 +253,8 @@ Implemented in the current codebase:
   output for advanced users and harnesses
 - provider dogfood runbook for least-privilege GitHub CI and Vercel Preview
   testing
+- provider dogfood report template for recording live run evidence without raw
+  tokens
 - npm-packable alpha package metadata and `pnpm smoke:package-pack` for
   `@switchboard-mcp/core`, `@switchboard-mcp/mcp-runtime`, and
   `@switchboard-mcp/cli`
@@ -284,8 +286,9 @@ Remaining roadmap should be grouped into these buckets:
   now include structured follow-up commands and a policy summary.
 - Real Provider Dogfood: deepen GitHub CI first, then Vercel Preview, using
   least-privilege tokens and real tool names before adding more providers.
-  Credential guidance and the live dogfood runbook are shipped; live
-  least-privilege token runs still need a tester-supplied credential.
+  Credential guidance, the live dogfood runbook, and the report template are
+  shipped; live least-privilege token runs still need a tester-supplied
+  credential.
 - Distribution: npm/package metadata, tarball pack smoke, install docs, and
   client install smokes are shipped for alpha. Demo media, registry assets, and
   more alpha examples remain.
@@ -618,6 +621,7 @@ Shipped foundation:
 - live GitHub CI dogfood against the official GitHub MCP Docker server:
   43 tools discovered, 26 allowed, 15 approval-required, 2 denied,
   0 allowed-sensitive, 0 not-allowed
+- dogfood report template for recording live run evidence and policy changes
 
 Still needed:
 

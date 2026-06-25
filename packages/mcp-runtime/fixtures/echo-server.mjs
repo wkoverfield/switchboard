@@ -8,6 +8,7 @@ import { z } from "zod";
 const label = process.argv[2] ?? "fixture";
 const secretEnvName = process.argv[3];
 const expectedSecretHash = process.argv[4];
+const extraToolNames = process.argv.slice(5);
 
 const server = new McpServer({
   name: `switchboard-${label}-fixture`,
@@ -58,6 +59,26 @@ if (secretEnvName) {
         {
           type: "text",
           text: secretStatus(secretEnvName, expectedSecretHash)
+        }
+      ]
+    })
+  );
+}
+
+for (const toolName of extraToolNames) {
+  server.registerTool(
+    toolName,
+    {
+      description: `Synthetic ${toolName} tool from ${label}.`,
+      inputSchema: z.object({
+        message: z.string().default("")
+      })
+    },
+    async ({ message }) => ({
+      content: [
+        {
+          type: "text",
+          text: `${label}:${toolName}:${message}`
         }
       ]
     })

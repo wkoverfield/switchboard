@@ -145,7 +145,8 @@ Default posture:
 Recommended mandate policy:
 
 - allow namespaced Vercel preview tools for the task
-- deny production deploy, promotion, env, and domain-shaped tools
+- deny production deploy, promotion, env/environment, domain, secret/token,
+  billing, and team-shaped tools
 - require approval for deploy and rollback-shaped tools
 
 Credential guidance:
@@ -168,6 +169,8 @@ keeping claims modest:
 - no automatic provider MCP install
 - no claim that provider-specific permissions are fully enforced
 
-The next step is local dogfood with the official GitHub MCP server and
-least-privilege tokens. Once the template policy holds up against observed tool
-names, Switchboard can promote the most useful provider path into a real preset.
+The first live GitHub MCP server dogfood has held up against observed tool
+names. The remaining provider proof is to repeat GitHub CI with a dedicated
+least-privilege token, then run Vercel Preview against a real project. Once
+those reports stay policy-covered, Switchboard can promote the most useful
+provider path into a real preset.
