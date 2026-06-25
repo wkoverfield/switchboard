@@ -75,6 +75,8 @@ switchboard serve --mandate <id>
 The current working roadmap lives at `docs/product/roadmap.md`. The mandate
 strategy lives at `docs/product/mandate-strategy.md`. Original planning-thread
 source docs are preserved in `docs/product/source/`.
+Alpha packaging and tarball checks live in
+`docs/install/alpha-distribution.md`.
 The accepted local secrets/keychain direction lives at
 `docs/security/secrets-keychain-architecture.md`; provider templates use that
 work through local `secretRef`s. Local secrets use OS-protected keychain

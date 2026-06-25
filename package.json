@@ -21,6 +21,7 @@
     "smoke:mandate-secret-ref": "pnpm --filter @switchboard-mcp/mcp-runtime smoke:mandate-secret-ref",
     "smoke:provider-add": "node scripts/smoke/provider-add.mjs",
     "smoke:provider-presets": "node scripts/smoke/provider-presets.mjs",
+    "smoke:package-pack": "node scripts/smoke/package-pack.mjs",
     "smoke:github-ci-first-loop": "pnpm --filter @switchboard-mcp/mcp-runtime smoke:github-ci-first-loop",
     "smoke:harness-subagent-proof": "node scripts/smoke/harness-subagent-proof.mjs",
     "smoke:vercel-preview-dogfood": "node scripts/smoke/vercel-preview-dogfood.mjs",

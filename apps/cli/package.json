@@ -3,6 +3,16 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Local-first MCP profile router for multiple accounts, projects, environments, and AI coding agents.",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/woverfield/switchboard.git",
+    "directory": "apps/cli"
+  },
+  "homepage": "https://github.com/woverfield/switchboard#readme",
+  "bugs": {
+    "url": "https://github.com/woverfield/switchboard/issues"
+  },
   "bin": {
     "switchboard": "./dist/index.js"
   },
@@ -12,6 +22,7 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "!dist/**/*.test.*",
     "README.md"
   ],
   "keywords": [
