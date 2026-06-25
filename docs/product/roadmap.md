@@ -247,6 +247,10 @@ Implemented in the current codebase:
 - `switchboard.mcp-launch.v1` structured follow-up commands and policy summary
   for harness startup, preflight, approval polling, reporting, logs,
   escalation, and child mandate templates
+- structured credential guidance in provider safety templates and provider-add
+  output for GitHub CI and Vercel Preview dogfood
+- provider dogfood runbook for least-privilege GitHub CI and Vercel Preview
+  testing
 
 Not started:
 
@@ -273,6 +277,8 @@ Remaining roadmap should be grouped into these buckets:
   now include structured follow-up commands and a policy summary.
 - Real Provider Dogfood: deepen GitHub CI first, then Vercel Preview, using
   least-privilege tokens and real tool names before adding more providers.
+  Credential guidance and the live dogfood runbook are shipped; live
+  least-privilege token runs still need a tester-supplied credential.
 - Distribution: polish npm/package metadata, install docs, agent-facing docs,
   demo assets, and client install surfaces for alpha testers.
 

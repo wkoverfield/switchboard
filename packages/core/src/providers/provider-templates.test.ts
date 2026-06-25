@@ -64,6 +64,13 @@ describe("provider safety templates", () => {
       "--require-approval-labels 'github,copilot,write'"
     );
     expect(rendered.mandateCommand).not.toContain("--require-approval-label ");
+    expect(rendered.credentialGuidance.minimumScopes).toContain(
+      "read checks/statuses"
+    );
+    expect(rendered.credentialGuidance.approvalScopes).toContain(
+      "rerun workflow jobs"
+    );
+    expect(rendered.credentialGuidance.avoidScopes).toContain("delete_repo");
     expect(rendered.configYaml).not.toContain("ghp_");
   });
 
@@ -99,6 +106,12 @@ describe("provider safety templates", () => {
     );
     expect(rendered.mandateCommand).toContain(
       "--deny-tool 'vercel_findu_preview_env_*'"
+    );
+    expect(rendered.credentialGuidance.minimumScopes).toContain(
+      "read deployments"
+    );
+    expect(rendered.credentialGuidance.avoidScopes).toContain(
+      "production promotion"
     );
   });
 

@@ -64,12 +64,32 @@ assert(
   github.mandateCommand.includes("--deny-tool github_findu_deploy_prod"),
   "deny prod"
 );
+assert(
+  github.credentialGuidance?.minimumScopes?.includes?.("read checks/statuses"),
+  "github credential minimum scopes"
+);
+assert(
+  github.credentialGuidance?.approvalScopes?.includes?.("rerun workflow jobs"),
+  "github approval-gated credential scopes"
+);
+assert(
+  github.credentialGuidance?.avoidScopes?.includes?.("delete_repo"),
+  "github avoided credential scopes"
+);
 assertNoRawSecret(JSON.stringify(github), "github preset");
 
 const vercel = run(["presets", "show", "vercel-preview", "--json"]);
 assert(
   vercel.mandateCommand.includes("--deny-tool vercel_preview_deploy_prod"),
   "vercel prod denied"
+);
+assert(
+  vercel.credentialGuidance?.minimumScopes?.includes?.("read deployments"),
+  "vercel credential minimum scopes"
+);
+assert(
+  vercel.credentialGuidance?.avoidScopes?.includes?.("production promotion"),
+  "vercel avoided credential scopes"
 );
 assertNoRawSecret(JSON.stringify(vercel), "vercel preset");
 

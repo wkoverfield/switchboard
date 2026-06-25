@@ -87,7 +87,8 @@ envelopes for mandate `--json` commands, are summarized in
 use `docs/use-cases/mandate-demo-runbook.md`. For the alpha GitHub CI path, use
 `docs/use-cases/github-ci-alpha-golden-path.md`. Provider safety templates for
 value-free GitHub/Vercel-style profile setup live in
-`docs/providers/safety-templates.md`.
+`docs/providers/safety-templates.md`; live provider testing should follow
+`docs/use-cases/provider-dogfood-runbook.md`.
 
 ## Config Files
 

@@ -35,6 +35,13 @@ export interface ProviderSafetyTemplate {
       labels: string[];
     }>;
   };
+  credentialGuidance: {
+    posture: string;
+    minimumScopes: string[];
+    approvalScopes: string[];
+    avoidScopes: string[];
+    notes: string[];
+  };
   notes: string[];
 }
 
@@ -58,6 +65,7 @@ export interface RenderedProviderSafetyTemplate {
   secretCommands: string[];
   mandateCommand: string;
   mandateCommandArgs: string[];
+  credentialGuidance: ProviderSafetyTemplate["credentialGuidance"];
   notes: string[];
 }
 
@@ -192,6 +200,31 @@ export const providerSafetyTemplates: ProviderSafetyTemplate[] = [
         }
       ]
     },
+    credentialGuidance: {
+      posture:
+        "Start with a repo-scoped token that can read repository metadata, pull requests, checks, and workflow status. Add write scopes only when the team intends to approve CI reruns or GitHub write actions.",
+      minimumScopes: [
+        "read repository metadata",
+        "read pull requests",
+        "read checks/statuses",
+        "read workflow runs/logs"
+      ],
+      approvalScopes: [
+        "rerun workflow jobs",
+        "write pull request comments or reviews",
+        "push branches or update pull requests"
+      ],
+      avoidScopes: [
+        "admin:org",
+        "delete_repo",
+        "repository creation",
+        "production deployment credentials"
+      ],
+      notes: [
+        "Use the narrowest GitHub token model available for the target repo or org.",
+        "If a needed write action requires broader scopes, keep the matching tool approval-gated and record the reason in the mandate."
+      ]
+    },
     notes: [
       "Use a least-privilege token that can read repo metadata and checks; add write scopes only for the exact CI actions you intend to approve.",
       "Keep production deployment and admin tools outside the mandate allow list unless a human explicitly gates them."
@@ -237,6 +270,29 @@ export const providerSafetyTemplates: ProviderSafetyTemplate[] = [
           risk: "high",
           labels: ["vercel", "write"]
         }
+      ]
+    },
+    credentialGuidance: {
+      posture:
+        "Use a token scoped to the Vercel team and project needed for preview inspection. Prefer read/log access first; add deploy or rollback capability only when those tools remain approval-gated.",
+      minimumScopes: [
+        "read project metadata",
+        "read deployments",
+        "read build/runtime logs"
+      ],
+      approvalScopes: [
+        "create preview deployments",
+        "rollback preview deployments"
+      ],
+      avoidScopes: [
+        "production promotion",
+        "environment variable writes",
+        "domain management",
+        "team or billing administration"
+      ],
+      notes: [
+        "Keep production deploy, promote, env, and domain tools denied unless a specific mandate intentionally changes that posture.",
+        "Use a separate token for preview dogfood instead of a broad personal production token."
       ]
     },
     notes: [
@@ -325,6 +381,7 @@ export function renderProviderSafetyTemplate(
     secretCommands: [`switchboard secrets set ${secretRef} --value-stdin`],
     mandateCommand: mandateCommandArgs.map(shellQuoteIfNeeded).join(" "),
     mandateCommandArgs,
+    credentialGuidance: template.credentialGuidance,
     notes: template.notes
   };
 }

@@ -22,7 +22,8 @@ switchboard presets check github-ci --profile github_findu
 `switchboard add` is the guided setup surface. It prints a transparent plan by
 default and writes `.switchboard.yaml` only with `--write`. The plan includes
 the profile config, `secretRef` setup command, provider check command,
-Codex/Claude install commands, and recommended mandate command.
+Codex/Claude install commands, recommended mandate command, and credential
+guidance for least-privilege dogfood.
 
 Customize rendered names without changing the safety posture:
 
@@ -81,6 +82,10 @@ template's recommended mandate policy. It does not make direct, unmandated use
 of the profile safe. Use the profile through a mandate so Switchboard can apply
 the rendered allow, deny, and approval rules.
 
+For live-provider testing, use `docs/use-cases/provider-dogfood-runbook.md`.
+The runbook keeps GitHub CI as the primary proof and Vercel Preview as the
+second proof before adding more providers.
+
 ## Included Templates
 
 ### `github-ci`
@@ -103,6 +108,15 @@ Recommended mandate policy:
 - deny production deploy, delete, admin-shaped tools, and repository creation
 - require approval for comments/replies, Copilot assignment, create/update/write
   operations, forks, pushes, reruns, and merges
+
+Credential guidance:
+
+- minimum access: repository metadata, pull requests, checks/statuses, and
+  workflow runs/logs
+- add only when approval-gated: workflow reruns, PR comments/reviews, branch
+  pushes, and PR updates
+- avoid: org admin, repository deletion, repository creation, and production
+  deployment credentials
 
 Dogfood result, 2026-06-23: the default template was checked against the
 official GitHub MCP Docker server using a real GitHub token. The server exposed
@@ -132,6 +146,13 @@ Recommended mandate policy:
 - allow namespaced Vercel preview tools for the task
 - deny production deploy, promotion, env, and domain-shaped tools
 - require approval for deploy and rollback-shaped tools
+
+Credential guidance:
+
+- minimum access: project metadata, deployments, and build/runtime logs
+- add only when approval-gated: preview deploy and rollback
+- avoid: production promotion, environment variable writes, domain management,
+  team administration, and billing administration
 
 ## Why This Comes Before Full Presets
 
