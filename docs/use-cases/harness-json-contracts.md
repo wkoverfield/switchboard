@@ -4,11 +4,19 @@ Switchboard's harness-facing JSON surfaces are intentionally small. External
 agent harnesses should use them to request scoped authority, launch agents,
 preflight the available tool surface, and inspect state afterward.
 
+Switchboard is the local authority and control plane, not the orchestrator. A
+harness still decides which task to run, which agent process to spawn, how long
+loops continue, and how agents communicate. Switchboard decides which repo,
+branch, profiles, tools, approvals, secrets, leases, and audit trail the agent
+gets for that task.
+
 ## Versioned Contracts
 
 | Surface | Command | Version marker | Contract status |
 | --- | --- | --- | --- |
+| Provider setup plan | `switchboard add <github-ci\|vercel-preview> --json` | `schemaVersion: "switchboard.provider-add.v1"` | Stable enough for alpha setup automation |
 | MCP launch payload | `switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --json` | `mcpLaunch.schemaVersion: "switchboard.mcp-launch.v1"` | Stable enough for harness startup |
+| Preset-backed MCP launch payload | `switchboard mandate create --from <github-ci\|vercel-preview> --json` | `mcpLaunch.schemaVersion: "switchboard.mcp-launch.v1"` | Stable enough for harness startup |
 | Child MCP launch payload | `switchboard mandate child <task> --parent <id> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --json` | `mcpLaunch.schemaVersion: "switchboard.mcp-launch.v1"` | Stable enough for delegated worker startup |
 | Mandate status | `switchboard mandate status [id] --json` | `schemaVersion: "switchboard.mandate-status.v1"` | Stable enough for harness polling |
 | Mandate report | `switchboard mandate report <id> --json` | `schemaVersion: "switchboard.mandate-report.v1"` | Stable enough for harness handoff inspection |
@@ -25,6 +33,48 @@ work queues, such as mandate escalation `items`, may add new item `type` and
 not understand. A future breaking change should use a new `schemaVersion`.
 
 ## Current Payload Roles
+
+`switchboard.provider-add.v1` tells a harness how Switchboard would prepare a
+repo for a provider template. It keeps the existing human-friendly shell command
+strings and also includes structured `commands` objects. Prefer the structured
+objects for automation:
+
+```json
+{
+  "schemaVersion": "switchboard.provider-add.v1",
+  "presetId": "github-ci",
+  "profileName": "github_ci",
+  "secretRef": "github/example/dev/token",
+  "commands": {
+    "secrets": [
+      {
+        "command": "switchboard",
+        "args": ["secrets", "set", "github/example/dev/token", "--value-stdin"]
+      }
+    ],
+    "presetCheck": {
+      "command": "switchboard",
+      "args": ["presets", "check", "github-ci", "--profile", "github_ci"]
+    },
+    "installs": [
+      { "command": "switchboard", "args": ["install", "codex", "--write"] },
+      { "command": "switchboard", "args": ["install", "claude", "--write"] }
+    ],
+    "mandateCreate": {
+      "command": "switchboard",
+      "args": [
+        "mandate",
+        "create",
+        "fix-ci",
+        "--from",
+        "github-ci",
+        "--profiles",
+        "github_ci"
+      ]
+    }
+  }
+}
+```
 
 `switchboard.mcp-launch.v1` tells a harness how to start a scoped stdio MCP
 server. The payload includes the mandate id, repo cwd, command, args,
@@ -87,6 +137,37 @@ Human mode remains unchanged: without `--json`, the same failure is printed as
 `error: ...` on stderr. Error payloads include `ok: false`, a stable `code`, a
 human-readable `message`, and `nextActions` when Switchboard can suggest a
 local recovery command.
+
+## Parent/Child Authority Proof
+
+`pnpm smoke:harness-subagent-proof` exercises the intended harness shape with a
+fixture MCP server:
+
+```bash
+switchboard add github-ci --write --json
+switchboard secrets set github/example/dev/token --value-stdin --json
+switchboard mandate create --from github-ci --json
+switchboard tools --mandate fix-ci --json
+switchboard mandate child inspect-ci \
+  --parent fix-ci \
+  --agent tester \
+  --profiles github_ci \
+  --branch main \
+  --lease 30m \
+  --allow-tool github_ci_echo \
+  --delegated-by harness-smoke \
+  --json
+switchboard tools --mandate inspect-ci --json
+switchboard mandate report fix-ci --json
+```
+
+The parent mandate receives the template policy and an `mcpLaunch` payload. The
+child mandate must stay within the parent's repo, branch, profiles, lease, and
+tool surface; in the smoke, the child narrows access down to one tool. A harness
+can launch a lead agent from the parent `mcpLaunch`, launch a narrower worker
+from the child `mcpLaunch`, then inspect `mandate report` for the delegation
+chain. Switchboard grants and audits authority; the harness owns the worker
+processes and long-running loop.
 
 ## Not Yet Contracted
 

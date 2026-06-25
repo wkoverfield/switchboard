@@ -6,7 +6,7 @@ Switchboard gives coding agents the right tools for each repo, environment, and 
 
 The deeper power layer is mandates: temporary, task-scoped authority that lets agents do bounded jobs without inheriting a human's whole tool surface. Mandates stay optional for simple setup, but they give advanced users and external harnesses a way to bind profiles, tools, leases, approvals, and audit logs to a specific task.
 
-This repository is in foundation work for the local mandate layer. It currently ships the TypeScript workspace, CLI shell, config/profile schemas, namespace normalization, collision detection, `switchboard status`, `switchboard doctor`, generic stdio MCP upstream mounting, namespaced tool routing, a stdio MCP front door, client config dry-run and write-mode installers for Codex and Claude Code, project client config and existing MCP server detection in doctor, local audit logs, daemon lifecycle commands, daemon-side tool discovery, a daemon-backed MCP adapter for tool listing and routed calls, local mandate creation/status, mandate-scoped MCP runtime context, mandate allow/deny tool policy, local secret refs backed by a keychain adapter, and end-to-end MCP smoke checks.
+This repository is in foundation work for the local mandate layer. It currently ships the TypeScript workspace, CLI shell, config/profile schemas, namespace normalization, collision detection, `switchboard status`, `switchboard doctor` with `ok` / `setup-incomplete` / `failed` readiness, generic stdio MCP upstream mounting, namespaced tool routing, a stdio MCP front door, client config dry-run and write-mode installers for Codex and Claude Code, project client config and existing MCP server detection in doctor, local audit logs, daemon lifecycle commands, daemon-side tool discovery, a daemon-backed MCP adapter for tool listing and routed calls, local mandate creation/status, preset-backed `switchboard mandate create --from <preset>`, mandate-scoped MCP runtime context, mandate allow/deny tool policy, local secret refs backed by a keychain adapter, provider-add structured command JSON, and end-to-end MCP smoke checks.
 
 ## Install From Source
 
@@ -19,6 +19,8 @@ pnpm smoke:secret-ref-profile
 pnpm smoke:mandate-secret-ref
 pnpm smoke:provider-add
 pnpm smoke:github-ci-first-loop
+pnpm smoke:harness-subagent-proof
+pnpm smoke:vercel-preview-dogfood
 pnpm smoke:mcp-serve-session
 ```
 
@@ -36,6 +38,8 @@ switchboard test <profile>
 switchboard install <codex|claude>
 switchboard install <codex|claude> --write
 switchboard install <codex|claude> --rollback <backup>
+switchboard mandate create --from github-ci
+switchboard mandate create --from <github-ci|vercel-preview> --json
 switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration>
 switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --json
 switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --allow-tool <pattern> --deny-tool <pattern>
@@ -72,14 +76,16 @@ The current working roadmap lives at `docs/product/roadmap.md`. The mandate
 strategy lives at `docs/product/mandate-strategy.md`. Original planning-thread
 source docs are preserved in `docs/product/source/`.
 The accepted local secrets/keychain direction lives at
-`docs/security/secrets-keychain-architecture.md`; provider presets remain gated
-behind that work. Local secrets use OS-protected keychain backends by default;
+`docs/security/secrets-keychain-architecture.md`; provider templates use that
+work through local `secretRef`s. Local secrets use OS-protected keychain
+backends by default;
 file/null/CLI fallbacks require an explicit
 `SWITCHBOARD_ALLOW_UNSAFE_SECRET_BACKENDS=1` dev or demo opt-in.
 Harness-facing JSON contracts, including `switchboard.error.v1` failure
 envelopes for mandate `--json` commands, are summarized in
 `docs/use-cases/harness-json-contracts.md`. For a local human dogfood path,
-use `docs/use-cases/mandate-demo-runbook.md`. Provider safety templates for
+use `docs/use-cases/mandate-demo-runbook.md`. For the alpha GitHub CI path, use
+`docs/use-cases/github-ci-alpha-golden-path.md`. Provider safety templates for
 value-free GitHub/Vercel-style profile setup live in
 `docs/providers/safety-templates.md`.
 

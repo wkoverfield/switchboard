@@ -1,6 +1,6 @@
 # Switchboard Roadmap
 
-Last updated: 2026-06-23
+Last updated: 2026-06-24
 
 This is the working roadmap for Switchboard. The source planning documents live in
 `docs/product/source/` and are preserved source material from the original
@@ -231,17 +231,41 @@ Implemented in the current codebase:
 - guided provider setup planner with `switchboard add <github-ci|vercel-preview>`
 - `switchboard add <preset> --write` for repo-local `.switchboard.yaml`
   updates with backups
+- provider-add JSON includes structured `commands` for harnesses in addition to
+  human-readable shell strings
+- `switchboard doctor` emits a top-level readiness status:
+  `ok`, `setup-incomplete`, or `failed`
+- `switchboard mandate create --from <github-ci|vercel-preview>`
+- preset-backed mandate creation uses template defaults, the current git
+  branch, and optional CLI overrides
+- `pnpm smoke:harness-subagent-proof`
+- `pnpm smoke:vercel-preview-dogfood`
 
 Not started:
 
 - richer policy engine and operating modes
 - full approval broker
-- provider presets
-- mandate-aware advanced onboarding
+- alpha first-run packaging and distribution
 - richer mandate tree approval escalation and result aggregation beyond
   visibility/reporting
 - global/user-scope client installers
 - Supabase, Stripe, PostHog, or Sentry integrations
+
+Remaining roadmap should be grouped into these buckets:
+
+- Alpha Golden Path: make GitHub CI the canonical first-run flow, keep
+  quickstart/docs aligned with shipped commands, and prove one non-Wilson
+  developer can reach a ready mandate without help.
+- Approval UX: make pending approval queues, approve/deny actions, stale
+  decisions, and escalation copy easier for humans to operate during real
+  agent work.
+- Harness Contracts: preserve versioned JSON payloads, expand structured
+  command objects where useful, and keep parent/child authority flows
+  scriptable without making Switchboard the orchestrator.
+- Real Provider Dogfood: deepen GitHub CI first, then Vercel Preview, using
+  least-privilege tokens and real tool names before adding more providers.
+- Distribution: polish npm/package metadata, install docs, agent-facing docs,
+  demo assets, and client install surfaces for alpha testers.
 
 ## Milestone Status
 
@@ -516,10 +540,10 @@ Still needed:
 - optional helper for installing a client entry that starts under a selected
   mandate
 
-### Milestone 10: Provider Presets
+### Milestone 10: Provider Safety Templates
 
-Status: safety-template foundation started; full integrations deliberately
-deferred.
+Status: safety-template foundation shipped for alpha; full integrations
+deliberately deferred.
 
 Original order:
 
@@ -551,17 +575,23 @@ Shipped foundation:
 - `switchboard presets check <github-ci|vercel-preview> --profile <profile>`
 - `switchboard add <github-ci|vercel-preview>`
 - `switchboard add <github-ci|vercel-preview> --write`
+- `switchboard mandate create --from <github-ci|vercel-preview>`
 - `switchboard.provider-preset.v1` JSON output for scripts/harnesses
 - `switchboard.provider-preset-check.v1` JSON output for provider dogfood
 - `switchboard.provider-add.v1` JSON output for guided setup plans
+- provider-add JSON structured `commands` objects for scripts and harnesses
 - schema-valid, value-free GitHub CI and Vercel Preview profile YAML templates
 - recommended `secretRef` setup commands
 - recommended mandate allow/deny/approval policy for each template
+- `switchboard doctor` readiness status values:
+  `ok`, `setup-incomplete`, and `failed`
 - observed tool classification against template policy, including
   allowed-sensitive warnings for write-like tools that are not denied or gated
 - docs at `docs/providers/safety-templates.md`
 - `pnpm smoke:provider-add`
 - `pnpm smoke:github-ci-first-loop`
+- `pnpm smoke:harness-subagent-proof`
+- `pnpm smoke:vercel-preview-dogfood`
 - live GitHub CI dogfood against the official GitHub MCP Docker server:
   43 tools discovered, 26 allowed, 15 approval-required, 2 denied,
   0 allowed-sensitive, 0 not-allowed
@@ -571,12 +601,14 @@ Still needed:
 - repeat live dogfood with a least-privilege token dedicated to CI-only use
 - provider-specific doctor checks beyond the current preset check
 - stronger policy defaults informed by real tool names
-- promotion of one dogfooded template into a real preset
+- alpha-ready docs and distribution around the GitHub CI golden path
+- approval UX polish for the GitHub CI mandate loop
+- more real Vercel Preview dogfood against a live project
 - OAuth or provider auth flow, if a provider path needs it
 
 ### Milestone 11: Agent Discovery Kit + Distribution Assets
 
-Status: scaffolded only.
+Status: scaffolded; alpha golden-path docs are now the next useful asset.
 
 Already present:
 
@@ -584,10 +616,11 @@ Already present:
 - `llms-full.txt`
 - agent docs placeholders
 - use-case docs placeholders
+- GitHub CI alpha golden-path doc
 
 Still needed:
 
-- real examples
+- more real examples from alpha testers
 - demo GIF/script
 - npm/package metadata polish
 - MCP directory listing assets
@@ -595,7 +628,7 @@ Still needed:
 
 ### Milestone 12: Alpha Hardening
 
-Status: not started.
+Status: started.
 
 Alpha gate:
 
@@ -605,6 +638,13 @@ Alpha gate:
 - dogfood with a real repo
 - no raw secrets in generated configs
 - at least one non-Wilson developer can install without help
+
+Current alpha focus:
+
+- GitHub CI golden path stays canonical.
+- Vercel Preview stays secondary proof that the model generalizes.
+- Harness/subagent proof stays a JSON contract smoke, not a bundled
+  orchestrator.
 
 ## Recommended Next Sequence
 
