@@ -240,6 +240,10 @@ Implemented in the current codebase:
   branch, and optional CLI overrides
 - `pnpm smoke:harness-subagent-proof`
 - `pnpm smoke:vercel-preview-dogfood`
+- provider-aware `switchboard doctor` next steps for `github-ci` and
+  `vercel-preview`
+- readable human approval queues with exact inspect, approve, deny, and retry
+  commands for gated tool calls
 
 Not started:
 
@@ -258,7 +262,8 @@ Remaining roadmap should be grouped into these buckets:
   developer can reach a ready mandate without help.
 - Approval UX: make pending approval queues, approve/deny actions, stale
   decisions, and escalation copy easier for humans to operate during real
-  agent work.
+  agent work. The first human queue polish is shipped; approval watch mode and
+  richer escalation copy remain.
 - Harness Contracts: preserve versioned JSON payloads, expand structured
   command objects where useful, and keep parent/child authority flows
   scriptable without making Switchboard the orchestrator.

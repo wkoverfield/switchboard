@@ -52,6 +52,7 @@ import {
   starterUpstreamArgPlaceholder,
   type MissingSecretRef,
   type SupportedClient,
+  type SwitchboardConfig,
   type SecretStore,
   updateMandateHandoff,
   validateSecretRef,
@@ -4263,7 +4264,7 @@ async function createApprovalRequestsPayload(options: {
   path: string;
   mandateStorePath: string;
   repoPath?: string;
-  mandateId?: string;
+  mandateId?: string | null;
   includeChildren: boolean;
   status?: ApprovalRequestWithStatus["runtimeStatus"];
 }): Promise<ApprovalRequestsPayload> {
@@ -4564,6 +4565,16 @@ function formatApprovalGates(
 function formatApprovalRequests(result: {
   path: string;
   repoPath: string | null;
+  counts?: {
+    requests: number;
+    pending: number;
+    approved: number;
+    denied: number;
+    stale: number;
+    expired: number;
+  };
+  mandateId?: string | null;
+  includeChildren?: boolean;
   requests: ApprovalRequestWithStatus[];
 }): string {
   const lines = [
@@ -4572,6 +4583,20 @@ function formatApprovalRequests(result: {
     `Repo: ${result.repoPath ?? "all"}`
   ];
 
+  if (result.mandateId) {
+    lines.push(
+      `Scope: mandate ${result.mandateId}${
+        result.includeChildren ? " + children" : ""
+      }`
+    );
+  }
+
+  if (result.counts) {
+    lines.push(
+      `Summary: ${result.counts.pending} pending, ${result.counts.approved} approved, ${result.counts.denied} denied, ${result.counts.expired} expired, ${result.counts.stale} stale`
+    );
+  }
+
   if (result.requests.length === 0) {
     lines.push("", "No approval requests found.");
     return lines.join("\n");
@@ -4579,52 +4604,65 @@ function formatApprovalRequests(result: {
 
   lines.push("");
   for (const request of result.requests) {
-    lines.push(
-      [
-        request.id,
-        request.runtimeStatus,
-        `mandate:${request.mandateId}`,
-        ...(request.parentMandateId ? [`parent:${request.parentMandateId}`] : []),
-        ...(request.delegatedBy ? [`delegated-by:${request.delegatedBy}`] : []),
-        ...(request.delegationPath
-          ? [`path:${request.delegationPath.join(">")}`]
-          : []),
-        `branch:${request.branch}`,
-        `tool:${request.toolName}`,
-        `gate:${request.approvalGateId}:${request.approvalGatePattern}`,
-        ...(request.approvalGateRisk ? [`risk:${request.approvalGateRisk}`] : []),
-        ...(request.approvalGateLabels && request.approvalGateLabels.length > 0
-          ? [`labels:${request.approvalGateLabels.join("+")}`]
-          : []),
-        ...(request.approvalGateReason ? [`reason:${request.approvalGateReason}`] : []),
-        `expires:${request.expiresAt}`
-      ].join(" ")
-    );
-    const nextAction = approvalRequestNextAction(request);
-    if (nextAction) {
-      lines.push(`  next: ${nextAction}`);
+    lines.push(`${request.id} [${request.runtimeStatus}]`);
+    lines.push(`  mandate: ${request.mandateId}`);
+    if (request.parentMandateId) {
+      lines.push(`  parent: ${request.parentMandateId}`);
     }
+    if (request.delegatedBy) {
+      lines.push(`  delegated by: ${request.delegatedBy}`);
+    }
+    if (request.delegationPath) {
+      lines.push(`  delegation path: ${request.delegationPath.join(" > ")}`);
+    }
+    lines.push(`  branch: ${request.branch}`);
+    lines.push(`  tool: ${request.toolName}`);
+    lines.push(
+      `  gate: ${request.approvalGateId} (${request.approvalGatePattern})`
+    );
+    if (request.approvalGateRisk) {
+      lines.push(`  risk: ${request.approvalGateRisk}`);
+    }
+    if (request.approvalGateLabels && request.approvalGateLabels.length > 0) {
+      lines.push(`  labels: ${request.approvalGateLabels.join(", ")}`);
+    }
+    if (request.approvalGateReason) {
+      lines.push(`  reason: ${request.approvalGateReason}`);
+    }
+    lines.push(`  expires: ${request.expiresAt}`);
+    const nextActions = approvalRequestNextActions(request);
+    if (nextActions.length > 0) {
+      lines.push("  next:");
+      for (const action of nextActions) {
+        lines.push(`    ${action}`);
+      }
+    }
+    lines.push("");
   }
 
   return lines.join("\n");
 }
 
-function approvalRequestNextAction(
+function approvalRequestNextActions(
   request: ApprovalRequestWithStatus
-): string | undefined {
+): string[] {
   if (request.runtimeStatus === "pending") {
-    return `switchboard approve ${request.id} or switchboard deny ${request.id}; then retry ${request.toolName}`;
+    return [
+      `switchboard approve ${request.id} --reason "<why this is safe>"`,
+      `switchboard deny ${request.id} --reason "<why this should not run>"`,
+      `retry the original ${request.toolName} tool call after approval`
+    ];
   }
 
   if (request.runtimeStatus === "expired") {
-    return "retry the original gated tool call to create a fresh approval request";
+    return ["retry the original gated tool call to create a fresh approval request"];
   }
 
   if (request.runtimeStatus === "stale") {
-    return "retry the original gated tool call to create a fresh approval request";
+    return ["retry the original gated tool call to create a fresh approval request"];
   }
 
-  return undefined;
+  return [];
 }
 
 function formatApprovalDecision(
@@ -5169,6 +5207,11 @@ function doctorNextSteps(options: {
   );
   if (options.ok && readyProfile) {
     steps.push(`switchboard test ${readyProfile.profileName}`);
+    for (const step of providerTemplateDoctorNextSteps(
+      options.loaded.config.profiles
+    )) {
+      steps.push(step);
+    }
     for (const config of options.clientConfigs) {
       if (config.status === "missing" || config.status === "stale") {
         steps.push(`switchboard install ${config.client} --write`);
@@ -5179,6 +5222,28 @@ function doctorNextSteps(options: {
   }
 
   return [...new Set(steps)];
+}
+
+function providerTemplateDoctorNextSteps(
+  profiles: SwitchboardConfig["profiles"]
+): string[] {
+  const steps: string[] = [];
+
+  for (const [profileName, profile] of Object.entries(profiles)) {
+    if (profile.provider === "github") {
+      steps.push(`switchboard presets check github-ci --profile ${profileName}`);
+      steps.push("switchboard mandate create --from github-ci");
+    }
+
+    if (profile.provider === "vercel") {
+      steps.push(
+        `switchboard presets check vercel-preview --profile ${profileName}`
+      );
+      steps.push("switchboard mandate create --from vercel-preview");
+    }
+  }
+
+  return steps;
 }
 
 function doctorStatus(options: {

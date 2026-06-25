@@ -683,7 +683,12 @@ async function callConfiguredTool(
               }
             : {}),
           error: approvalRequestId
-            ? `${policyDecision.reason}; approval request ${approvalRequestId} is pending. Run "switchboard approvals" and "switchboard approve ${approvalRequestId}", then retry this tool call.`
+            ? approvalRequiredErrorMessage({
+                reason: policyDecision.reason,
+                mandateId: routerResult.mandate.id,
+                toolName: name,
+                approvalRequestId
+              })
             : policyDecision.reason
         };
       }
@@ -738,6 +743,22 @@ function approvalRequiredPayload(options: {
       : {}),
     expiresAt: options.mandate.expiresAt
   };
+}
+
+function approvalRequiredErrorMessage(options: {
+  reason: string;
+  mandateId: string;
+  toolName: string;
+  approvalRequestId: string;
+}): string {
+  return [
+    options.reason,
+    `approval request ${options.approvalRequestId} is pending`,
+    `inspect it with: switchboard approvals --mandate ${options.mandateId}`,
+    `approve it with: switchboard approve ${options.approvalRequestId} --reason "<why this is safe>"`,
+    `or deny it with: switchboard deny ${options.approvalRequestId} --reason "<why this should not run>"`,
+    `then retry the original ${options.toolName} tool call if approved`
+  ].join("; ");
 }
 
 async function waitForApprovalDecision(options: {
