@@ -251,12 +251,16 @@ Implemented in the current codebase:
   output for GitHub CI and Vercel Preview dogfood
 - provider dogfood runbook for least-privilege GitHub CI and Vercel Preview
   testing
+- npm-packable alpha package metadata and `pnpm smoke:package-pack` for
+  `@switchboard-mcp/core`, `@switchboard-mcp/mcp-runtime`, and
+  `@switchboard-mcp/cli`
+- alpha distribution doc with package pack checks, client install smokes, and
+  known limitations
 
 Not started:
 
 - richer policy engine and operating modes
 - full approval broker
-- alpha first-run packaging and distribution
 - richer mandate tree approval escalation and result aggregation beyond
   visibility/reporting
 - global/user-scope client installers
@@ -280,7 +284,9 @@ Remaining roadmap should be grouped into these buckets:
   Credential guidance and the live dogfood runbook are shipped; live
   least-privilege token runs still need a tester-supplied credential.
 - Distribution: polish npm/package metadata, install docs, agent-facing docs,
-  demo assets, and client install surfaces for alpha testers.
+  demo assets, and client install surfaces for alpha testers. Alpha package
+  metadata, tarball pack smoke, and distribution docs are shipped; demo media
+  and registry assets remain.
 
 ## Milestone Status
 

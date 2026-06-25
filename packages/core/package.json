@@ -2,7 +2,17 @@
   "name": "@switchboard-mcp/core",
   "version": "0.1.0",
   "type": "module",
-  "private": true,
+  "description": "Core config, mandate, approval, provider-template, install, audit, and secret primitives for Switchboard.",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/woverfield/switchboard.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/woverfield/switchboard#readme",
+  "bugs": {
+    "url": "https://github.com/woverfield/switchboard/issues"
+  },
   "exports": {
     ".": {
       "source": "./src/index.ts",
@@ -12,6 +22,11 @@
     }
   },
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
