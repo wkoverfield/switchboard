@@ -24,8 +24,8 @@ switchboard mcp --mandate fix-ci
 switchboard mandate report fix-ci --json
 ```
 
-Paste the GitHub token when `auth github-ci` prompts, press Enter, then close
-stdin with your shell's normal EOF key.
+Paste the GitHub token when `auth github-ci` prompts, then press Enter. The
+token value is not printed.
 
 ## Expected Checkpoints
 

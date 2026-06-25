@@ -397,6 +397,7 @@ export interface ProgramIo {
   secretStore?: SecretStore;
   secretIndexPath?: string;
   readSecretFromStdin?: () => Promise<string>;
+  readSecretFromPrompt?: (prompt: string) => Promise<string>;
 }
 
 export function createProgram(io: ProgramIo = {}): Command {
@@ -411,6 +412,7 @@ export function createProgram(io: ProgramIo = {}): Command {
   const auditLogger = io.auditLogger ?? noopAuditLogger;
   const secretStore = io.secretStore ?? createKeychainSecretStore();
   const readSecretFromStdin = io.readSecretFromStdin ?? readAllStdin;
+  const readSecretFromPrompt = io.readSecretFromPrompt ?? readHiddenPrompt;
   const program = new Command();
   let currentParseArgs: string[] = [];
   const writeCommandError = (options: CommandErrorOptions): void => {
@@ -793,17 +795,12 @@ export function createProgram(io: ProgramIo = {}): Command {
           return;
         }
 
-        if (!options.valueStdin && !options.json) {
-          writeErr(
-            [
-              `Paste the ${template.label} token for ${template.secretEnvName}.`,
-              "Press Enter, then Ctrl-D. The token value will not be printed."
-            ].join("\n")
-          );
-        }
-
         try {
-          const value = await readSecretFromStdin();
+          const value = options.valueStdin
+            ? await readSecretFromStdin()
+            : await readSecretFromPrompt(
+                `Paste ${template.label} token for ${template.secretEnvName}: `
+              );
           if (value.length === 0) {
             writeCommandError({
               json: options.json,
@@ -842,10 +839,18 @@ export function createProgram(io: ProgramIo = {}): Command {
               : formatProviderAuth(result)
           );
         } catch (error) {
+          const message = messageFromError(error);
           writeCommandError({
             json: options.json,
             code: "provider_auth_failed",
-            message: messageFromError(error)
+            message,
+            ...(message.includes("--value-stdin")
+              ? {
+                  nextActions: [
+                    `Pipe the token with: pbpaste | ${formatHumanCommand(`switchboard auth ${preset} --value-stdin`)}`
+                  ]
+                }
+              : {})
           });
         }
       }
@@ -5096,6 +5101,60 @@ async function readAllStdin(): Promise<string> {
   }
 
   return Buffer.concat(chunks).toString("utf8").replace(/\r?\n$/, "");
+}
+
+async function readHiddenPrompt(prompt: string): Promise<string> {
+  const input = process.stdin;
+  const output = process.stderr;
+
+  if (!input.isTTY || typeof input.setRawMode !== "function") {
+    throw new Error(
+      "interactive token prompt requires a terminal; use --value-stdin for scripts"
+    );
+  }
+
+  output.write(prompt);
+  input.resume();
+  input.setRawMode(true);
+
+  return new Promise((resolve, reject) => {
+    let value = "";
+
+    const cleanup = (): void => {
+      input.off("data", onData);
+      input.setRawMode(false);
+      input.pause();
+      output.write("\n");
+    };
+
+    const onData = (chunk: Buffer): void => {
+      const text = chunk.toString("utf8");
+      for (const char of text) {
+        if (char === "\u0003") {
+          cleanup();
+          reject(new Error("token entry cancelled"));
+          return;
+        }
+
+        if (char === "\r" || char === "\n") {
+          cleanup();
+          resolve(value);
+          return;
+        }
+
+        if (char === "\u007f" || char === "\b") {
+          value = value.slice(0, -1);
+          continue;
+        }
+
+        if (char >= " ") {
+          value += char;
+        }
+      }
+    };
+
+    input.on("data", onData);
+  });
 }
 
 function configureParserErrorHandling(

@@ -66,9 +66,9 @@ run:
 switchboard auth github-ci
 ```
 
-Paste the GitHub token, press Enter, then press Ctrl-D. The token value is not
-printed. For scripts or custom `--secret-ref` values, use the lower-level
-command printed by `switchboard add`:
+Paste the GitHub token and press Enter. The token value is not printed. For
+scripts or custom `--secret-ref` values, use the lower-level command printed by
+`switchboard add`:
 
 ```bash
 switchboard secrets set <ref> --value-stdin

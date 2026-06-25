@@ -982,20 +982,27 @@ describe("switchboard CLI program", () => {
   it("stores provider preset auth without requiring users to know the secret ref", async () => {
     const root = makeTempProject();
     const output: string[] = [];
-    const errors: string[] = [];
+    const prompts: string[] = [];
     const store = createMemorySecretStore();
     const program = createProgram({
       secretStore: store,
       secretIndexPath: join(root, "state", "secrets", "index.json"),
-      readSecretFromStdin: async () => "ghp_secret",
+      readSecretFromPrompt: async (prompt) => {
+        prompts.push(prompt);
+        return "ghp_secret";
+      },
       writeOut: (message) => output.push(message),
-      writeErr: (message) => errors.push(message)
+      writeErr: () => {
+        throw new Error("human auth should not write manual stdin instructions");
+      }
     });
 
     await program.parseAsync(["auth", "github-ci"], { from: "user" });
 
     expect(await store.get("github/example/dev/token")).toBe("ghp_secret");
-    expect(errors.join("\n")).toContain("Paste the GitHub CI token");
+    expect(prompts).toEqual([
+      "Paste GitHub CI token for GITHUB_PERSONAL_ACCESS_TOKEN: "
+    ]);
     expect(output.join("\n")).toContain("Stored GitHub CI token");
     expect(output.join("\n")).toContain("switchboard doctor");
     expect(output.join("\n")).toContain(
