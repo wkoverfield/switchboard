@@ -7,6 +7,9 @@ and creates mandates for task-scoped authority.
 
 Canonical alpha flow:
 
+From a packaged install, use `switchboard ...`. From a source checkout, run
+`pnpm build` once and use `pnpm switchboard ...` for the same commands.
+
 ```bash
 switchboard add github-ci --write
 switchboard doctor

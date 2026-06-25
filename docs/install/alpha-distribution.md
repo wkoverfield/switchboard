@@ -9,8 +9,11 @@ local CLI before a non-Wilson user test.
 ```bash
 pnpm install
 pnpm build
-pnpm --filter @switchboard-mcp/cli switchboard --help
+pnpm switchboard --help
 ```
+
+From a source checkout, run CLI commands as `pnpm switchboard ...`. A packaged
+install exposes the shorter `switchboard ...` binary.
 
 Then follow the canonical GitHub CI path in `docs/install/quickstart.md`.
 

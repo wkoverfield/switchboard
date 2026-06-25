@@ -13,7 +13,7 @@ This repository is in foundation work for the local mandate layer. It currently 
 ```bash
 pnpm install
 pnpm build
-pnpm --filter @switchboard-mcp/cli switchboard --help
+pnpm switchboard --help
 pnpm smoke:profile-test
 pnpm smoke:secret-ref-profile
 pnpm smoke:mandate-secret-ref
@@ -22,6 +22,14 @@ pnpm smoke:github-ci-first-loop
 pnpm smoke:harness-subagent-proof
 pnpm smoke:vercel-preview-dogfood
 pnpm smoke:mcp-serve-session
+```
+
+From a source checkout, use `pnpm switchboard ...` in place of a globally
+installed `switchboard` binary:
+
+```bash
+pnpm switchboard doctor
+pnpm switchboard add github-ci --write
 ```
 
 ## Current Commands

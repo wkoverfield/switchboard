@@ -2995,7 +2995,7 @@ function formatDoctor(result: {
   if (result.nextSteps.length > 0) {
     lines.push("", "Next steps:");
     for (const step of result.nextSteps) {
-      lines.push(`  ${step}`);
+      lines.push(`  ${formatHumanCommand(step)}`);
     }
   }
 
@@ -3150,10 +3150,10 @@ function formatProviderAdd(
     plan.nextContent.trimEnd(),
     "",
     "Next steps:",
-    ...plan.secretCommands.map((command) => `  ${command}`),
-    `  ${plan.checkCommand}`,
-    ...plan.installCommands.map((command) => `  ${command}`),
-    `  ${plan.mandateCommand}`,
+    ...plan.secretCommands.map((command) => `  ${formatHumanCommand(command)}`),
+    `  ${formatHumanCommand(plan.checkCommand)}`,
+    ...plan.installCommands.map((command) => `  ${formatHumanCommand(command)}`),
+    `  ${formatHumanCommand(plan.mandateCommand)}`,
     "",
     "Notes:",
     ...plan.rendered.notes.map((note) => `  ${note}`),
@@ -3161,6 +3161,27 @@ function formatProviderAdd(
       ? []
       : ["", "Dry run by default. Re-run with --write to apply this plan."])
   ].join("\n");
+}
+
+function formatHumanCommand(command: string): string {
+  if (!isSourceCheckoutEntrypoint()) {
+    return command;
+  }
+
+  if (command === "switchboard") {
+    return "pnpm switchboard";
+  }
+
+  return command.startsWith("switchboard ")
+    ? `pnpm switchboard ${command.slice("switchboard ".length)}`
+    : command;
+}
+
+function isSourceCheckoutEntrypoint(): boolean {
+  return (
+    process.env.npm_package_name === "switchboard" &&
+    process.env.npm_lifecycle_event === "switchboard"
+  );
 }
 
 function formatProviderAddSummary(plan: ProviderAddPlan): string[] {
