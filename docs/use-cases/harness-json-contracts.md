@@ -77,13 +77,21 @@ objects for automation:
 ```
 
 `switchboard.mcp-launch.v1` tells a harness how to start a scoped stdio MCP
-server. The payload includes the mandate id, repo cwd, command, args,
-`commandCandidates`, and an `installHint`. The args include
-`--cwd <repo> mcp --mandate <id>` so the launched MCP endpoint stays
+server and which follow-up commands belong to that authority grant. The payload
+includes the mandate id, repo cwd, command, args, `commandCandidates`,
+structured `commands`, a `policy` snapshot, and an `installHint`. The args
+include `--cwd <repo> mcp --mandate <id>` so the launched MCP endpoint stays
 repo-aware even when the harness runs elsewhere. Harnesses can keep using
 top-level `command` and `args` when `switchboard` is installed on `PATH`, or
 choose a `commandCandidates` entry such as `current-entrypoint` for a built
 package or `source-entrypoint` for a source checkout.
+
+The additive `commands` object gives a harness structured invocations for
+tool-surface preflight, approval polling across a mandate tree, status, report,
+logs, escalation, and a child-mandate template. The additive `policy` object
+summarizes mounted profiles, allowed tool patterns, denied tool patterns, and
+approval gates so a harness can display the authority grant before launching an
+agent without parsing the full persisted mandate.
 
 `switchboard.mandate-status.v1` lets a harness poll mandate state. The payload
 includes the mandate store path, optional repo filter, and matching mandates

@@ -244,6 +244,9 @@ Implemented in the current codebase:
   `vercel-preview`
 - readable human approval queues with exact inspect, approve, deny, and retry
   commands for gated tool calls
+- `switchboard.mcp-launch.v1` structured follow-up commands and policy summary
+  for harness startup, preflight, approval polling, reporting, logs,
+  escalation, and child mandate templates
 
 Not started:
 
@@ -266,7 +269,8 @@ Remaining roadmap should be grouped into these buckets:
   richer escalation copy remain.
 - Harness Contracts: preserve versioned JSON payloads, expand structured
   command objects where useful, and keep parent/child authority flows
-  scriptable without making Switchboard the orchestrator.
+  scriptable without making Switchboard the orchestrator. V0 launch payloads
+  now include structured follow-up commands and a policy summary.
 - Real Provider Dogfood: deepen GitHub CI first, then Vercel Preview, using
   least-privilege tokens and real tool names before adding more providers.
 - Distribution: polish npm/package metadata, install docs, agent-facing docs,

@@ -36,6 +36,66 @@ switchboard mandate create fix-ci \
   "cwd": "/path/to/repo",
   "command": "switchboard",
   "args": ["--cwd", "/path/to/repo", "mcp", "--mandate", "fix-ci"],
+  "commands": {
+    "mcp": {
+      "command": "switchboard",
+      "args": ["--cwd", "/path/to/repo", "mcp", "--mandate", "fix-ci"]
+    },
+    "toolSurface": {
+      "command": "switchboard",
+      "args": ["--cwd", "/path/to/repo", "tools", "--mandate", "fix-ci", "--json"]
+    },
+    "approvals": {
+      "command": "switchboard",
+      "args": [
+        "--cwd",
+        "/path/to/repo",
+        "approvals",
+        "--mandate",
+        "fix-ci",
+        "--include-children",
+        "--json"
+      ]
+    },
+    "report": {
+      "command": "switchboard",
+      "args": [
+        "--cwd",
+        "/path/to/repo",
+        "mandate",
+        "report",
+        "fix-ci",
+        "--json"
+      ]
+    },
+    "childTemplate": {
+      "command": "switchboard",
+      "args": [
+        "--cwd",
+        "/path/to/repo",
+        "mandate",
+        "child",
+        "<child-id>",
+        "--parent",
+        "fix-ci",
+        "--agent",
+        "<role>",
+        "--profiles",
+        "github_findu,vercel_preview",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "<duration>",
+        "--json"
+      ]
+    }
+  },
+  "policy": {
+    "profiles": ["github_findu", "vercel_preview"],
+    "allowedTools": ["github_findu_*"],
+    "deniedTools": ["*_deploy_prod"],
+    "approvalGates": []
+  },
   "commandCandidates": [
     {
       "kind": "path",
@@ -67,6 +127,12 @@ same repo/mandate args. Source checkouts can emit a `source-entrypoint`
 candidate that runs `pnpm --dir <switchboard-cli> exec tsx ...`; built packages
 emit a `current-entrypoint` candidate that runs Node against the built CLI
 entrypoint.
+
+Use `mcpLaunch.commands` for follow-up automation instead of assembling shell
+strings by hand. `toolSurface`, `approvals`, `status`, `report`, `logs`, and
+`escalation` are ready to execute. `childTemplate` is intentionally a template:
+replace `<child-id>`, `<role>`, and `<duration>`, then narrow profiles, tools,
+or approval gates as needed.
 
 3. Optionally inspect the scoped tool surface before launch:
 
