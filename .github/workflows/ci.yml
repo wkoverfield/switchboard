@@ -27,6 +27,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm smoke:cli-help
+      - run: pnpm smoke:source-cli
       - run: pnpm smoke:cli-status
       - run: pnpm smoke:cli-doctor
       - run: pnpm smoke:repo-config
