@@ -12,9 +12,8 @@ switchboard
 Start with the repository quickstart:
 
 ```bash
-switchboard add github-ci --write
+switchboard setup github-ci
 switchboard doctor
-switchboard auth github-ci
 switchboard mandate create --from github-ci
 switchboard mcp --mandate fix-ci
 ```

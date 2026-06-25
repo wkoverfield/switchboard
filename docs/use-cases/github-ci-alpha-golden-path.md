@@ -14,9 +14,8 @@ sensitive actions, and an audit trail.
 Run these from the repo you want the agent to work in:
 
 ```bash
-switchboard add github-ci --write
+switchboard setup github-ci
 switchboard doctor
-switchboard auth github-ci
 switchboard presets check github-ci --profile github_ci
 switchboard install codex --write
 switchboard mandate create --from github-ci
@@ -24,14 +23,19 @@ switchboard mcp --mandate fix-ci
 switchboard mandate report fix-ci --json
 ```
 
-Paste the GitHub token when `auth github-ci` prompts, then press Enter. The
+Paste the GitHub token when `setup github-ci` prompts, then press Enter. The
 token value is not printed.
 
 ## Expected Checkpoints
 
-After `switchboard add github-ci --write`:
+After `switchboard setup github-ci`:
 
 - `.switchboard.yaml` exists or is updated.
+- The GitHub token is stored locally behind `secretRef`.
+- Human output says setup is complete and prints the next commands.
+
+After `switchboard add github-ci --write` in the manual flow:
+
 - Human output summarizes the GitHub CI setup value before the YAML details.
 - JSON output, when run with `--json`, includes `schemaVersion:
   "switchboard.provider-add.v1"` and structured `commands`.
@@ -103,11 +107,12 @@ After `switchboard mandate report fix-ci --json`:
 Missing secret:
 
 ```bash
-switchboard auth github-ci
+switchboard setup github-ci
 ```
 
-Use the exact lower-level `secrets set <ref> --value-stdin` command printed by
-Switchboard if you customized `--secret-ref`.
+Use `switchboard auth github-ci` if the profile already exists and only the
+token is missing. Use the exact lower-level `secrets set <ref> --value-stdin`
+command printed by Switchboard if you customized `--secret-ref`.
 
 Docker is not running:
 

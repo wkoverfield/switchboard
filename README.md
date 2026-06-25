@@ -37,6 +37,7 @@ pnpm switchboard add github-ci --write
 ```bash
 switchboard --help
 switchboard init
+switchboard setup <github-ci|vercel-preview>
 switchboard add <github-ci|vercel-preview>
 switchboard add <github-ci|vercel-preview> --write
 switchboard status

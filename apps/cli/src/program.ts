@@ -954,6 +954,140 @@ export function createProgram(io: ProgramIo = {}): Command {
       }
     );
 
+  program
+    .command("setup <preset>")
+    .description("Guided provider setup: write config and store the provider token.")
+    .option("--json", "print machine-readable JSON; requires --value-stdin")
+    .option("--profile-name <name>", "profile name to render")
+    .option("--namespace <name>", "namespace to render")
+    .option("--secret-ref <ref>", "secretRef to render")
+    .option("--command <command>", "upstream MCP server command to render")
+    .option(
+      "--arg <arg>",
+      "upstream MCP server arg to render (repeatable)",
+      collectOption,
+      [] as string[]
+    )
+    .option(
+      "--value-stdin",
+      "read the token from stdin instead of prompting"
+    )
+    .action(
+      async (
+        preset: string,
+        options: {
+          json?: boolean;
+          profileName?: string;
+          namespace?: string;
+          secretRef?: string;
+          command?: string;
+          arg: string[];
+          valueStdin?: boolean;
+        }
+      ) => {
+        const template = getProviderSafetyTemplate(preset);
+        if (!template) {
+          writeCommandError({
+            json: options.json,
+            code: "unknown_provider_preset",
+            message: `unknown provider safety template "${preset}"`,
+            nextActions: [
+              "Run switchboard presets list to see available templates."
+            ]
+          });
+          return;
+        }
+
+        if (options.json && !options.valueStdin) {
+          writeCommandError({
+            json: options.json,
+            code: "missing_secret_input",
+            message: "--json setup requires --value-stdin",
+            nextActions: [
+              `Pipe the token with: pbpaste | ${formatHumanCommand(`switchboard setup ${preset} --value-stdin --json`)}`
+            ]
+          });
+          return;
+        }
+
+        const cwd = resolve(program.opts<{ cwd?: string }>().cwd ?? process.cwd());
+        const branch = currentGitBranch(cwd);
+        const planOptions = {
+          id: preset,
+          ...(program.opts<{ cwd?: string }>().cwd
+            ? { cwd: program.opts<{ cwd?: string }>().cwd }
+            : {}),
+          ...(branch ? { mandateBranch: branch } : {}),
+          ...(options.profileName ? { profileName: options.profileName } : {}),
+          ...(options.namespace ? { namespace: options.namespace } : {}),
+          ...(options.secretRef ? { secretRef: options.secretRef } : {}),
+          ...(options.command ? { command: options.command } : {}),
+          ...(options.arg.length > 0 ? { args: options.arg } : {})
+        };
+
+        try {
+          const written = await writeProviderAddPlan(planOptions);
+          const value = options.valueStdin
+            ? await readSecretFromStdin()
+            : await readSecretFromPrompt(
+                `Paste ${template.label} token for ${template.secretEnvName}: `
+              );
+          if (value.length === 0) {
+            writeCommandError({
+              json: options.json,
+              code: "empty_secret",
+              message: "token value must not be empty",
+              nextActions: [
+                `Run ${formatHumanCommand(`switchboard setup ${preset}`)} again and paste a non-empty token.`
+              ]
+            });
+            return;
+          }
+
+          await secretStore.set(written.plan.rendered.secretRef, value);
+          await rememberSecretRef(
+            written.plan.rendered.secretRef,
+            secretIndexOptions(io.secretIndexPath)
+          );
+          const result = {
+            ok: true,
+            schemaVersion: providerAddSchemaVersion,
+            action: "setup",
+            presetId: written.plan.id,
+            provider: template.provider,
+            label: template.label,
+            targetPath: written.plan.targetPath,
+            configAction: written.action,
+            backupPath: written.backupPath,
+            profileName: written.plan.rendered.profileName,
+            namespace: written.plan.rendered.namespace,
+            secretRef: written.plan.rendered.secretRef,
+            tokenStored: true,
+            nextSteps: providerSetupNextSteps(written.plan)
+          };
+          writeOut(
+            options.json
+              ? JSON.stringify(result, null, 2)
+              : formatProviderSetup(result)
+          );
+        } catch (error) {
+          const message = messageFromError(error);
+          writeCommandError({
+            json: options.json,
+            code: "provider_setup_failed",
+            message,
+            ...(message.includes("--value-stdin")
+              ? {
+                  nextActions: [
+                    `Pipe the token with: pbpaste | ${formatHumanCommand(`switchboard setup ${preset} --value-stdin`)}`
+                  ]
+                }
+              : {})
+          });
+        }
+      }
+    );
+
   const presets = program
     .command("presets")
     .description("Inspect provider safety templates without installing providers.");
@@ -3161,6 +3295,26 @@ function formatProviderAddPlanJson(plan: ProviderAddPlan): Record<string, unknow
 
 function formatProviderAddCommands(plan: ProviderAddPlan): Record<string, unknown> {
   return {
+    setup: {
+      command: "switchboard",
+      args: [
+        "setup",
+        plan.id,
+        ...(plan.rendered.secretRef === plan.rendered.template.defaultSecretRef
+          ? []
+          : ["--secret-ref", plan.rendered.secretRef])
+      ]
+    },
+    auth: {
+      command: "switchboard",
+      args: [
+        "auth",
+        plan.id,
+        ...(plan.rendered.secretRef === plan.rendered.template.defaultSecretRef
+          ? []
+          : ["--secret-ref", plan.rendered.secretRef])
+      ]
+    },
     secrets: plan.secretCommands.map((command) => ({
       command: "switchboard",
       args: command.split(" ").slice(1)
@@ -3284,6 +3438,38 @@ function formatProviderAuth(result: {
     `Stored ${result.label} token`,
     `For: ${result.secretEnvName}`,
     `Local ref: ${result.ref}`,
+    "",
+    "Next steps:",
+    ...result.nextSteps.map((step) => `  ${formatHumanCommand(step)}`)
+  ].join("\n");
+}
+
+function providerSetupNextSteps(plan: ProviderAddPlan): string[] {
+  return [
+    "switchboard doctor",
+    plan.checkCommand,
+    ...plan.installCommands,
+    plan.mandateCommand
+  ];
+}
+
+function formatProviderSetup(result: {
+  label: string;
+  targetPath: string;
+  configAction: string;
+  backupPath: string | null;
+  profileName: string;
+  namespace: string;
+  secretRef: string;
+  nextSteps: string[];
+}): string {
+  return [
+    `Switchboard ${result.label} setup complete`,
+    `Config: ${result.configAction} ${result.targetPath}`,
+    ...(result.backupPath ? [`Backup: ${result.backupPath}`] : []),
+    `Profile: ${result.profileName}`,
+    `Namespace: ${result.namespace}`,
+    `Token: stored locally (${result.secretRef})`,
     "",
     "Next steps:",
     ...result.nextSteps.map((step) => `  ${formatHumanCommand(step)}`)

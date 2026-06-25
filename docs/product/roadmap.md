@@ -221,6 +221,8 @@ Implemented in the current codebase:
 - `switchboard secrets set/list/remove/doctor`
 - `switchboard auth <github-ci|vercel-preview>` human-friendly provider token
   storage over the same secretRef primitives
+- `switchboard setup <github-ci|vercel-preview>` guided provider setup that
+  writes config and stores the provider token in one happy-path command
 - runtime secret injection for configured stdio upstream env
 - missing `secretRef` readiness in doctor, runtime errors, mandate reports, and
   mandate escalations
@@ -612,6 +614,8 @@ Shipped foundation:
 - recommended `secretRef` setup commands
 - provider-level auth helper that stores the recommended token without requiring
   users to type the internal ref on the happy path
+- guided provider setup command for alpha users who want one command before
+  doctor/check/install/mandate
 - recommended mandate allow/deny/approval policy for each template
 - `switchboard doctor` readiness status values:
   `ok`, `setup-incomplete`, and `failed`

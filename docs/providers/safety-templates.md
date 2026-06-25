@@ -14,6 +14,7 @@ credentials through `switchboard auth <preset>` or the lower-level
 ```bash
 switchboard add github-ci
 switchboard add github-ci --write
+switchboard setup github-ci
 switchboard auth github-ci
 switchboard presets list
 switchboard presets show github-ci
@@ -21,8 +22,10 @@ switchboard presets show vercel-preview --json
 switchboard presets check github-ci --profile github_findu
 ```
 
-`switchboard add` is the guided setup surface. It prints a transparent plan by
-default and writes `.switchboard.yaml` only with `--write`. The plan includes
+`switchboard setup` is the human happy path: it writes `.switchboard.yaml` and
+stores the provider token in one guided flow. `switchboard add` is the
+transparent planning surface. It prints a plan by default and writes only with
+`--write`. The plan includes
 the profile config, provider auth command, lower-level `secretRef` setup
 command, provider check command, Codex/Claude install commands, recommended
 mandate command, and credential guidance for least-privilege dogfood.

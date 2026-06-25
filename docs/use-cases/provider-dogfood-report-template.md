@@ -40,9 +40,8 @@ Do not include the token value or screenshots where the token is visible.
 Record the exact Switchboard commands, with secret values omitted:
 
 ```bash
-switchboard add <preset> --write
+switchboard setup <preset>
 switchboard doctor
-switchboard auth <preset>
 switchboard presets check <preset> --profile <profile> --json
 switchboard mandate create --from <preset> --json
 switchboard mcp --mandate <mandate>
