@@ -17,7 +17,7 @@ Start from the alpha golden path:
 ```bash
 switchboard add github-ci --write
 switchboard doctor
-switchboard secrets set github/example/dev/token --value-stdin
+switchboard auth github-ci
 switchboard presets check github-ci --profile github_ci --json
 switchboard mandate create --from github-ci --json
 switchboard mcp --mandate fix-ci
@@ -60,7 +60,7 @@ Use Vercel Preview as the second provider proof, not a broad expansion:
 ```bash
 switchboard add vercel-preview --write
 switchboard doctor
-switchboard secrets set vercel/example/preview/token --value-stdin
+switchboard auth vercel-preview
 switchboard presets check vercel-preview --profile vercel_preview --json
 switchboard mandate create --from vercel-preview --json
 switchboard mcp --mandate inspect-preview

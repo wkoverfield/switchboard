@@ -219,6 +219,8 @@ Implemented in the current codebase:
   mandate
 - local `secretRef` values backed by the OS keychain adapter
 - `switchboard secrets set/list/remove/doctor`
+- `switchboard auth <github-ci|vercel-preview>` human-friendly provider token
+  storage over the same secretRef primitives
 - runtime secret injection for configured stdio upstream env
 - missing `secretRef` readiness in doctor, runtime errors, mandate reports, and
   mandate escalations
@@ -608,6 +610,8 @@ Shipped foundation:
 - provider-add JSON structured `commands` objects for scripts and harnesses
 - schema-valid, value-free GitHub CI and Vercel Preview profile YAML templates
 - recommended `secretRef` setup commands
+- provider-level auth helper that stores the recommended token without requiring
+  users to type the internal ref on the happy path
 - recommended mandate allow/deny/approval policy for each template
 - `switchboard doctor` readiness status values:
   `ok`, `setup-incomplete`, and `failed`

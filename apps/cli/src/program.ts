@@ -753,6 +753,105 @@ export function createProgram(io: ProgramIo = {}): Command {
     });
 
   program
+    .command("auth <preset>")
+    .description("Store the recommended local token for a provider preset.")
+    .option("--secret-ref <ref>", "override the preset secretRef")
+    .option(
+      "--value-stdin",
+      "read the token from stdin without printing an interactive prompt"
+    )
+    .option("--json", "print machine-readable JSON")
+    .action(
+      async (
+        preset: string,
+        options: { secretRef?: string; valueStdin?: boolean; json?: boolean }
+      ) => {
+        const template = getProviderSafetyTemplate(preset);
+        if (!template) {
+          writeCommandError({
+            json: options.json,
+            code: "unknown_provider_preset",
+            message: `unknown provider safety template "${preset}"`,
+            nextActions: [
+              "Run switchboard presets list to see available templates."
+            ]
+          });
+          return;
+        }
+
+        const secretRef = options.secretRef ?? template.defaultSecretRef;
+        const validation = validateSecretRef(secretRef);
+        if (!validation.ok) {
+          writeCommandError({
+            json: options.json,
+            code: "invalid_secret_ref",
+            message: validation.errors.join("; "),
+            nextActions: [
+              "Use a lowercase path-like ref such as github/findu/dev/token."
+            ]
+          });
+          return;
+        }
+
+        if (!options.valueStdin && !options.json) {
+          writeErr(
+            [
+              `Paste the ${template.label} token for ${template.secretEnvName}.`,
+              "Press Enter, then Ctrl-D. The token value will not be printed."
+            ].join("\n")
+          );
+        }
+
+        try {
+          const value = await readSecretFromStdin();
+          if (value.length === 0) {
+            writeCommandError({
+              json: options.json,
+              code: "empty_secret",
+              message: "token value must not be empty",
+              nextActions: [
+                `Run ${formatHumanCommand(`switchboard auth ${preset}`)} again and paste a non-empty token.`
+              ]
+            });
+            return;
+          }
+
+          await secretStore.set(secretRef, value);
+          await rememberSecretRef(secretRef, secretIndexOptions(io.secretIndexPath));
+          const result = {
+            ok: true,
+            schemaVersion: secretsSchemaVersion,
+            action: "auth",
+            presetId: template.id,
+            provider: template.provider,
+            label: template.label,
+            secretEnvName: template.secretEnvName,
+            ref: secretRef,
+            indexPath: resolveSecretIndexPath(
+              secretIndexOptions(io.secretIndexPath)
+            ),
+            nextSteps: [
+              `switchboard doctor`,
+              `switchboard presets check ${template.id} --profile ${template.defaultProfileName}`,
+              `switchboard mandate create --from ${template.id}`
+            ]
+          };
+          writeOut(
+            options.json
+              ? JSON.stringify(result, null, 2)
+              : formatProviderAuth(result)
+          );
+        } catch (error) {
+          writeCommandError({
+            json: options.json,
+            code: "provider_auth_failed",
+            message: messageFromError(error)
+          });
+        }
+      }
+    );
+
+  program
     .command("add <preset>")
     .description("Plan or write a guided provider setup from a safety template.")
     .option("--json", "print machine-readable JSON")
@@ -3150,7 +3249,7 @@ function formatProviderAdd(
     plan.nextContent.trimEnd(),
     "",
     "Next steps:",
-    ...plan.secretCommands.map((command) => `  ${formatHumanCommand(command)}`),
+    `  ${formatHumanCommand(providerAuthCommand(plan))}`,
     `  ${formatHumanCommand(plan.checkCommand)}`,
     ...plan.installCommands.map((command) => `  ${formatHumanCommand(command)}`),
     `  ${formatHumanCommand(plan.mandateCommand)}`,
@@ -3160,6 +3259,29 @@ function formatProviderAdd(
     ...(options.written
       ? []
       : ["", "Dry run by default. Re-run with --write to apply this plan."])
+  ].join("\n");
+}
+
+function providerAuthCommand(plan: ProviderAddPlan): string {
+  const base = `switchboard auth ${plan.id}`;
+  return plan.rendered.secretRef === plan.rendered.template.defaultSecretRef
+    ? base
+    : `${base} --secret-ref ${shellQuoteCommandArg(plan.rendered.secretRef)}`;
+}
+
+function formatProviderAuth(result: {
+  label: string;
+  secretEnvName: string;
+  ref: string;
+  nextSteps: string[];
+}): string {
+  return [
+    `Stored ${result.label} token`,
+    `For: ${result.secretEnvName}`,
+    `Local ref: ${result.ref}`,
+    "",
+    "Next steps:",
+    ...result.nextSteps.map((step) => `  ${formatHumanCommand(step)}`)
   ].join("\n");
 }
 
@@ -3700,6 +3822,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function shellQuoteCommandArg(value: string): string {
+  return /^[A-Za-z0-9_./:-]+$/.test(value) ? value : shellQuote(value);
 }
 
 function currentGitBranch(cwd: string): string | undefined {
@@ -5379,7 +5505,10 @@ function doctorNextSteps(options: {
   }
 
   for (const missing of options.missingSecrets) {
-    steps.push(`switchboard secrets set ${missing.ref} --value-stdin`);
+    steps.push(
+      providerAuthCommandForMissingSecret(missing, options.loaded.config) ??
+        `switchboard secrets set ${missing.ref} --value-stdin`
+    );
   }
 
   for (const config of options.clientConfigs) {
@@ -5412,6 +5541,32 @@ function doctorNextSteps(options: {
   }
 
   return [...new Set(steps)];
+}
+
+function providerAuthCommandForMissingSecret(
+  missing: MissingSecretRef,
+  config: SwitchboardConfig
+): string | undefined {
+  const usage = missing.usages[0];
+  const profile = usage ? config.profiles[usage.profileName] : undefined;
+  if (!profile) {
+    return undefined;
+  }
+
+  const preset =
+    profile.provider === "github"
+      ? getProviderSafetyTemplate("github-ci")
+      : profile.provider === "vercel"
+        ? getProviderSafetyTemplate("vercel-preview")
+        : undefined;
+  if (!preset) {
+    return undefined;
+  }
+
+  const base = `switchboard auth ${preset.id}`;
+  return missing.ref === preset.defaultSecretRef
+    ? base
+    : `${base} --secret-ref ${shellQuoteCommandArg(missing.ref)}`;
 }
 
 function providerTemplateDoctorNextSteps(

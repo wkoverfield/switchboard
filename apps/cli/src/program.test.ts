@@ -303,8 +303,34 @@ describe("switchboard CLI program", () => {
     expect(text).toContain("Credential guidance:");
     expect(text).toContain("read checks/statuses");
     expect(text).toContain("delete_repo");
+    expect(text).toContain("switchboard auth github-ci");
+    expect(text).not.toContain(
+      "switchboard secrets set github/example/dev/token --value-stdin"
+    );
     expect(text.indexOf("What this prepares:")).toBeLessThan(
       text.indexOf("Config preview:")
+    );
+  });
+
+  it("prints provider auth command with custom secret ref in provider add output", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "add",
+        "github-ci",
+        "--secret-ref",
+        "github/findu/dev/token"
+      ],
+      { from: "user" }
+    );
+
+    expect(output.join("\n")).toContain(
+      "switchboard auth github-ci --secret-ref github/findu/dev/token"
     );
   });
 
@@ -748,6 +774,40 @@ describe("switchboard CLI program", () => {
     expect(JSON.stringify(parsed)).not.toContain("ghp_secret");
   });
 
+  it("suggests provider auth for missing provider preset secrets", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_ci:",
+        "    provider: github",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "      env:",
+        "        GITHUB_PERSONAL_ACCESS_TOKEN:",
+        "          secretRef: github/example/dev/token"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      secretStore: createMemorySecretStore(),
+      writeOut: (message) => output.push(message)
+    });
+    await program.parseAsync(["--cwd", root, "doctor", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      nextSteps: string[];
+    };
+    expect(parsed.nextSteps).toContain("switchboard auth github-ci");
+  });
+
   it("returns JSON error envelopes when runtime commands hit missing secret refs", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
@@ -917,6 +977,71 @@ describe("switchboard CLI program", () => {
     ]);
     expect(removeResult.ref).toBe("github/findu/dev/token");
     expect(output.join("\n")).not.toContain("ghp_secret");
+  });
+
+  it("stores provider preset auth without requiring users to know the secret ref", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const errors: string[] = [];
+    const store = createMemorySecretStore();
+    const program = createProgram({
+      secretStore: store,
+      secretIndexPath: join(root, "state", "secrets", "index.json"),
+      readSecretFromStdin: async () => "ghp_secret",
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message)
+    });
+
+    await program.parseAsync(["auth", "github-ci"], { from: "user" });
+
+    expect(await store.get("github/example/dev/token")).toBe("ghp_secret");
+    expect(errors.join("\n")).toContain("Paste the GitHub CI token");
+    expect(output.join("\n")).toContain("Stored GitHub CI token");
+    expect(output.join("\n")).toContain("switchboard doctor");
+    expect(output.join("\n")).toContain(
+      "switchboard presets check github-ci --profile github_ci"
+    );
+    expect(output.join("\n")).not.toContain("ghp_secret");
+  });
+
+  it("stores provider preset auth as JSON for scripts", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const errors: string[] = [];
+    const store = createMemorySecretStore();
+    const program = createProgram({
+      secretStore: store,
+      secretIndexPath: join(root, "state", "secrets", "index.json"),
+      readSecretFromStdin: async () => "vercel_secret",
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message)
+    });
+
+    await program.parseAsync(
+      [
+        "auth",
+        "vercel-preview",
+        "--secret-ref",
+        "vercel/findu/preview/token",
+        "--value-stdin",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      action: string;
+      presetId: string;
+      ref: string;
+      nextSteps: string[];
+    };
+    expect(parsed.action).toBe("auth");
+    expect(parsed.presetId).toBe("vercel-preview");
+    expect(parsed.ref).toBe("vercel/findu/preview/token");
+    expect(parsed.nextSteps).toContain("switchboard doctor");
+    expect(await store.get("vercel/findu/preview/token")).toBe("vercel_secret");
+    expect(errors).toEqual([]);
+    expect(output.join("\n")).not.toContain("vercel_secret");
   });
 
   it("does not include raw secrets in generated client config", async () => {

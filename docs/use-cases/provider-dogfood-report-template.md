@@ -42,7 +42,7 @@ Record the exact Switchboard commands, with secret values omitted:
 ```bash
 switchboard add <preset> --write
 switchboard doctor
-switchboard secrets set <ref> --value-stdin
+switchboard auth <preset>
 switchboard presets check <preset> --profile <profile> --json
 switchboard mandate create --from <preset> --json
 switchboard mcp --mandate <mandate>
