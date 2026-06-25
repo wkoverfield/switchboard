@@ -36,6 +36,11 @@ jobs:
       - run: pnpm smoke:secret-ref-profile
       - run: pnpm smoke:mandate-secret-ref
       - run: pnpm smoke:provider-presets
+      - run: pnpm smoke:provider-add
+      - run: pnpm smoke:github-ci-first-loop
+      - run: pnpm smoke:harness-subagent-proof
+      - run: pnpm smoke:vercel-preview-dogfood
+      - run: pnpm smoke:package-pack
       - run: pnpm smoke:mandate-lifecycle
       - run: pnpm smoke:mandate-walkthrough
       - run: pnpm smoke:install-codex

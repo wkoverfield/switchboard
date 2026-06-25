@@ -88,36 +88,36 @@ try {
   const create = runCliJson(
     "mandate",
     "create",
-    mandateId,
-    "--agent",
-    "implementer",
-    "--profiles",
-    "github_ci",
-    "--branch",
-    "fix/ci",
-    "--lease",
-    "2h",
-    "--allow-tool",
-    "github_ci_*",
-    "--deny-tool",
-    "github_ci_deploy_prod",
-    "--deny-tool",
-    "github_ci_delete_*",
-    "--deny-tool",
-    "github_ci_admin_*",
-    "--require-approval-tool",
-    "github_ci_*rerun*",
-    "--require-approval-reason",
-    "rerunning CI changes remote provider state",
-    "--require-approval-risk",
-    "medium",
-    "--require-approval-label",
-    "github",
-    "--require-approval-label",
-    "write",
+    "--from",
+    "github-ci",
     "--json"
   );
   assert(create.mandate?.id === mandateId, "expected mandate id");
+  assert(create.mandate?.branch === "fix/ci", "expected template branch");
+  assert(
+    create.mandate?.deniedTools?.includes?.("github_ci_deploy_prod"),
+    "expected template denied production deploy"
+  );
+  assert(
+    create.mandate?.deniedTools?.includes?.("github_ci_create_repository"),
+    "expected template denied repository creation"
+  );
+  assert(
+    create.mandate?.approvalGates?.some?.(
+      (gate) => gate.toolPattern === "github_ci_*comment*"
+    ),
+    "expected comment approval gate from template"
+  );
+  assert(
+    create.mandate?.approvalGates?.some?.(
+      (gate) => gate.toolPattern === "github_ci_*merge*"
+    ),
+    "expected merge approval gate from template"
+  );
+  assert(
+    create.mcpLaunch?.schemaVersion === "switchboard.mcp-launch.v1",
+    "expected mcp launch payload"
+  );
   assertNoSecretText(JSON.stringify(create), "mandate create");
 
   const tools = runCliJson("tools", "--mandate", mandateId, "--json");

@@ -16,6 +16,21 @@ const project = mkdtempSync(join(tmpdir(), "switchboard-vercel-preview-"));
 const secretRef = "vercel/example/preview/token";
 const secretValue = "vercel-preview-secret-do-not-print";
 const secretHash = sha256(secretValue);
+const providerToolNames = [
+  "logs",
+  "deploy_preview",
+  "rollback_preview",
+  "deploy_prod",
+  "deploy_production",
+  "promote_production",
+  "env_list",
+  "create_env",
+  "environment_update",
+  "domains_list",
+  "domain_add",
+  "billing_list",
+  "team_members"
+];
 
 if (!existsSync(cliPath)) {
   throw new Error(
@@ -40,6 +55,7 @@ try {
     "VERCEL_TOKEN",
     "--arg",
     secretHash,
+    ...providerToolNames.flatMap((toolName) => ["--arg", toolName]),
     "--write",
     "--json"
   );
@@ -56,6 +72,36 @@ try {
   );
   assert(setSecret.status === 0, "expected secret set to succeed");
   assertNoSecretLeak(setSecret, "secret set");
+
+  const check = runCliJson(
+    "presets",
+    "check",
+    "vercel-preview",
+    "--profile",
+    "vercel_preview",
+    "--json"
+  );
+  assert(check.ok === true, "expected Vercel preview policy to cover fixture tools");
+  assert(check.policyCovered === true, "expected policy-covered Vercel fixture");
+  assert(check.counts?.allowedSensitive === 0, "expected no allowed-sensitive tools");
+  assert(check.counts?.notAllowed === 0, "expected no not-allowed tools");
+  assert(check.counts?.allowed === 3, "expected echo, whoami, and logs allowed");
+  assert(check.counts?.approvalRequired === 2, "expected deploy/rollback approval gates");
+  assert(check.counts?.denied === 11, "expected production/admin tools denied");
+  assertToolClass(check, "vercel_preview_logs", "allowed");
+  assertToolClass(check, "vercel_preview_deploy_preview", "approval_required");
+  assertToolClass(check, "vercel_preview_rollback_preview", "approval_required");
+  assertToolClass(check, "vercel_preview_deploy_prod", "denied");
+  assertToolClass(check, "vercel_preview_deploy_production", "denied");
+  assertToolClass(check, "vercel_preview_env_list", "denied");
+  assertToolClass(check, "vercel_preview_create_env", "denied");
+  assertToolClass(check, "vercel_preview_environment_update", "denied");
+  assertToolClass(check, "vercel_preview_domains_list", "denied");
+  assertToolClass(check, "vercel_preview_domain_add", "denied");
+  assertToolClass(check, "vercel_preview_secret_status", "denied");
+  assertToolClass(check, "vercel_preview_billing_list", "denied");
+  assertToolClass(check, "vercel_preview_team_members", "denied");
+  assertNoSecretText(JSON.stringify(check), "preset check");
 
   const mandate = runCliJson(
     "mandate",
@@ -145,6 +191,16 @@ function assertNoSecretLeak(result, label) {
 
 function assertNoSecretText(value, label) {
   assert(!value.includes(secretValue), `${label} printed secret value`);
+}
+
+function assertToolClass(check, toolName, classification) {
+  assert(
+    check.tools?.some?.(
+      (tool) =>
+        tool.toolName === toolName && tool.classification === classification
+    ),
+    `expected ${toolName} to be ${classification}`
+  );
 }
 
 function redactSecret(value) {

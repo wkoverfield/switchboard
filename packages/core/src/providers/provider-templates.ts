@@ -253,9 +253,20 @@ export const providerSafetyTemplates: ProviderSafetyTemplate[] = [
       allowedTools: ["{namespace}_*"],
       deniedTools: [
         "{namespace}_deploy_prod",
+        "{namespace}_deploy_production",
+        "{namespace}_*prod*",
+        "{namespace}_*production*",
         "{namespace}_promote_*",
+        "{namespace}_create_env",
+        "{namespace}_*env*",
+        "{namespace}_environment_*",
+        "{namespace}_domain_*",
         "{namespace}_env_*",
-        "{namespace}_domains_*"
+        "{namespace}_domains_*",
+        "{namespace}_*secret*",
+        "{namespace}_*token*",
+        "{namespace}_billing_*",
+        "{namespace}_team_*"
       ],
       approvalGates: [
         {

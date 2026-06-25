@@ -4,6 +4,12 @@ Use this when testing Switchboard against real provider MCP servers and real
 tokens. The goal is to prove the mandate model with least-privilege credentials,
 not to broaden provider coverage.
 
+After each run, copy `docs/use-cases/provider-dogfood-report-template.md` into a
+dated report under `docs/use-cases/provider-dogfood-results/`. Commit only
+redacted evidence: tool counts, policy decisions, approval behavior, and
+token-safety checks. Do not commit raw provider tokens or private provider
+payloads.
+
 ## GitHub CI
 
 Start from the alpha golden path:
@@ -29,8 +35,9 @@ Credential posture:
 Acceptance:
 
 - `presets check` returns `policy-covered`.
-- `allowed_sensitive` is zero or each item is intentionally denied/gated before
-  unattended use.
+- `allowed_sensitive` is zero. If any tool is classified as
+  `allowed_sensitive`, tighten the deny/approval policy and rerun until the
+  check is policy-covered before unattended use.
 - The mandate JSON includes `mcpLaunch`.
 - Approval-required tools create local approval requests before provider writes.
 - `mandate report fix-ci --json` includes useful audit/approval state and no raw
@@ -43,6 +50,8 @@ Record after each run:
 - tools that felt too broad, surprising, or under-gated
 - approval requests created during the run
 - policy changes made afterward
+- a completed provider dogfood report using
+  `docs/use-cases/provider-dogfood-report-template.md`
 
 ## Vercel Preview
 
@@ -69,7 +78,8 @@ Credential posture:
 Acceptance:
 
 - Preview/log inspection works under a mandate.
-- Production deploy/promotion, env, and domain-shaped tools are denied.
+- Production deploy/promotion, env, domain, secret/token, billing, and
+  team-shaped tools are denied.
 - Deploy and rollback-shaped tools are approval-gated.
 - `mandate report inspect-preview --json` is useful after the investigation and
   contains no raw token values.

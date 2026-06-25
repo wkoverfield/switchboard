@@ -105,7 +105,22 @@ describe("provider safety templates", () => {
       "--deny-tool vercel_findu_preview_deploy_prod"
     );
     expect(rendered.mandateCommand).toContain(
+      "--deny-tool 'vercel_findu_preview_*production*'"
+    );
+    expect(rendered.mandateCommand).toContain(
+      "--deny-tool 'vercel_findu_preview_domain_*'"
+    );
+    expect(rendered.mandateCommand).toContain(
+      "--deny-tool 'vercel_findu_preview_billing_*'"
+    );
+    expect(rendered.mandateCommand).toContain(
+      "--deny-tool 'vercel_findu_preview_team_*'"
+    );
+    expect(rendered.mandateCommand).toContain(
       "--deny-tool 'vercel_findu_preview_env_*'"
+    );
+    expect(rendered.mandateCommand).toContain(
+      "--deny-tool 'vercel_findu_preview_*secret*'"
     );
     expect(rendered.credentialGuidance.minimumScopes).toContain(
       "read deployments"
@@ -210,6 +225,71 @@ describe("provider safety templates", () => {
         classification: "approval_required"
       },
       { toolName: "vercel_preview_logs", classification: "not_allowed" }
+    ]);
+  });
+
+  it("classifies Vercel preview production and admin-shaped tools safely", () => {
+    const result = checkProviderSafetyTemplateTools("vercel-preview", {
+      namespace: "vercel_preview",
+      toolNames: [
+        "vercel_preview_logs",
+        "vercel_preview_deploy_preview",
+        "vercel_preview_rollback_preview",
+        "vercel_preview_deploy_prod",
+        "vercel_preview_deploy_production",
+        "vercel_preview_promote_production",
+        "vercel_preview_env_list",
+        "vercel_preview_create_env",
+        "vercel_preview_environment_update",
+        "vercel_preview_domains_list",
+        "vercel_preview_domain_add",
+        "vercel_preview_secret_status",
+        "vercel_preview_token_create",
+        "vercel_preview_billing_list",
+        "vercel_preview_team_members"
+      ]
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.counts).toMatchObject({
+      tools: 15,
+      allowed: 1,
+      approvalRequired: 2,
+      denied: 12,
+      allowedSensitive: 0,
+      notAllowed: 0
+    });
+    expect(result.tools).toMatchObject([
+      { toolName: "vercel_preview_logs", classification: "allowed" },
+      {
+        toolName: "vercel_preview_deploy_preview",
+        classification: "approval_required"
+      },
+      {
+        toolName: "vercel_preview_rollback_preview",
+        classification: "approval_required"
+      },
+      { toolName: "vercel_preview_deploy_prod", classification: "denied" },
+      {
+        toolName: "vercel_preview_deploy_production",
+        classification: "denied"
+      },
+      {
+        toolName: "vercel_preview_promote_production",
+        classification: "denied"
+      },
+      { toolName: "vercel_preview_env_list", classification: "denied" },
+      { toolName: "vercel_preview_create_env", classification: "denied" },
+      {
+        toolName: "vercel_preview_environment_update",
+        classification: "denied"
+      },
+      { toolName: "vercel_preview_domains_list", classification: "denied" },
+      { toolName: "vercel_preview_domain_add", classification: "denied" },
+      { toolName: "vercel_preview_secret_status", classification: "denied" },
+      { toolName: "vercel_preview_token_create", classification: "denied" },
+      { toolName: "vercel_preview_billing_list", classification: "denied" },
+      { toolName: "vercel_preview_team_members", classification: "denied" }
     ]);
   });
 });
