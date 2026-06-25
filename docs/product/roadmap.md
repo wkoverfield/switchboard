@@ -249,6 +249,8 @@ Implemented in the current codebase:
   escalation, and child mandate templates
 - structured credential guidance in provider safety templates and provider-add
   output for GitHub CI and Vercel Preview dogfood
+- rendered `mandatePolicy` JSON in provider safety template and provider-add
+  output for advanced users and harnesses
 - provider dogfood runbook for least-privilege GitHub CI and Vercel Preview
   testing
 - npm-packable alpha package metadata and `pnpm smoke:package-pack` for

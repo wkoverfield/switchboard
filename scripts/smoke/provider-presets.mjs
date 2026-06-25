@@ -61,8 +61,16 @@ assert(github.configYaml.includes("command: npx"), "command");
 assert(github.configYaml.includes("- -y"), "arg");
 assert(github.mandateCommand.includes("--allow-tool 'github_findu_*'"), "allow");
 assert(
+  github.mandatePolicy?.allowedTools?.includes?.("github_findu_*"),
+  "rendered policy allow"
+);
+assert(
   github.mandateCommand.includes("--deny-tool github_findu_deploy_prod"),
   "deny prod"
+);
+assert(
+  github.mandatePolicy?.deniedTools?.includes?.("github_findu_deploy_prod"),
+  "rendered policy deny"
 );
 assert(
   github.credentialGuidance?.minimumScopes?.includes?.("read checks/statuses"),
@@ -82,6 +90,10 @@ const vercel = run(["presets", "show", "vercel-preview", "--json"]);
 assert(
   vercel.mandateCommand.includes("--deny-tool vercel_preview_deploy_prod"),
   "vercel prod denied"
+);
+assert(
+  vercel.mandatePolicy?.deniedTools?.includes?.("vercel_preview_deploy_prod"),
+  "vercel rendered policy deny"
 );
 assert(
   vercel.credentialGuidance?.minimumScopes?.includes?.("read deployments"),

@@ -113,6 +113,11 @@ describe("switchboard CLI program", () => {
       configYaml: string;
       secretCommands: string[];
       mandateCommand: string;
+      mandatePolicy: {
+        allowedTools: string[];
+        deniedTools: string[];
+        approvalGates: Array<{ toolPattern: string; risk?: string }>;
+      };
       credentialGuidance: {
         minimumScopes: string[];
         approvalScopes: string[];
@@ -135,6 +140,16 @@ describe("switchboard CLI program", () => {
       "--deny-tool github_findu_deploy_prod"
     );
     expect(parsed.mandateCommand).toContain("--require-approval-risk medium");
+    expect(parsed.mandatePolicy.allowedTools).toEqual(["github_findu_*"]);
+    expect(parsed.mandatePolicy.deniedTools).toContain(
+      "github_findu_deploy_prod"
+    );
+    expect(parsed.mandatePolicy.approvalGates).toContainEqual(
+      expect.objectContaining({
+        toolPattern: "github_findu_*rerun*",
+        risk: "medium"
+      })
+    );
     expect(parsed.credentialGuidance.minimumScopes).toContain(
       "read checks/statuses"
     );
@@ -156,6 +171,8 @@ describe("switchboard CLI program", () => {
       "Switchboard provider safety template: Vercel Preview"
     );
     expect(output.join("\n")).toContain("Config YAML:");
+    expect(output.join("\n")).toContain("Rendered mandate policy:");
+    expect(output.join("\n")).toContain("vercel_preview_deploy_prod");
     expect(output.join("\n")).toContain("Credential guidance:");
     expect(output.join("\n")).toContain("read deployments");
     expect(output.join("\n")).toContain("production promotion");
@@ -229,6 +246,10 @@ describe("switchboard CLI program", () => {
       schemaVersion: string;
       action: string;
       targetPath: string;
+      mandatePolicy: {
+        allowedTools: string[];
+        deniedTools: string[];
+      };
       credentialGuidance: {
         minimumScopes: string[];
         approvalScopes: string[];
@@ -251,6 +272,8 @@ describe("switchboard CLI program", () => {
         "github-ci"
       ])
     });
+    expect(parsed.mandatePolicy.allowedTools).toEqual(["github_ci_*"]);
+    expect(parsed.mandatePolicy.deniedTools).toContain("github_ci_deploy_prod");
     expect(parsed.credentialGuidance.minimumScopes).toContain(
       "read checks/statuses"
     );
