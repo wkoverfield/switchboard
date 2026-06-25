@@ -46,6 +46,8 @@ import {
   resolveSecretIndexPath,
   resolveGlobalConfigPath,
   resolveRepoConfigPaths,
+  scanSwitchboardProject,
+  type SwitchboardScanResult,
   type RenderedProviderSafetyTemplate,
   type ProviderAddPlan,
   type WrittenProviderAddPlan,
@@ -480,6 +482,21 @@ export function createProgram(io: ProgramIo = {}): Command {
     )
     .version(version)
     .option("--cwd <path>", "resolve repo config from this directory");
+
+  program
+    .command("scan")
+    .description("Inspect this repo and suggest production-safe agent setup.")
+    .option("--json", "print machine-readable JSON")
+    .action(async (options: { json?: boolean }) => {
+      const globalOptions = program.opts<{ cwd?: string }>();
+      const result = await scanSwitchboardProject({
+        ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
+      });
+
+      writeOut(
+        options.json ? JSON.stringify(result, null, 2) : formatScan(result)
+      );
+    });
 
   program
     .command("status")
@@ -3181,6 +3198,115 @@ function formatStatus(status: {
   return lines.join("\n");
 }
 
+function formatScan(result: SwitchboardScanResult): string {
+  const lines = [`This looks like ${result.repo.name}.`, "", "Repo:"];
+  const remoteLabel =
+    result.repo.remote.provider === "github" &&
+    result.repo.remote.owner &&
+    result.repo.remote.repo
+      ? `GitHub: ${result.repo.remote.owner}/${result.repo.remote.repo}`
+      : result.repo.remote.url
+        ? `remote: ${result.repo.remote.url}`
+        : "remote: not detected";
+  lines.push(`- ${remoteLabel}`);
+  lines.push(`- branch: ${result.repo.branch ?? "unknown"}`);
+  lines.push(`- runtime: ${formatScanRuntime(result)}`);
+
+  const detected = formatScanDetected(result);
+  if (detected.length > 0) {
+    lines.push("", "Detected:", ...detected.map((line) => `- ${line}`));
+  }
+
+  if (result.providers.length > 0) {
+    lines.push(
+      "",
+      "Provider hints:",
+      ...result.providers.map((provider) => {
+        const env =
+          provider.environment === "unknown"
+            ? ""
+            : `, ${provider.environment}`;
+        const vars =
+          provider.envVars.length > 0
+            ? `: ${provider.envVars.join(", ")}`
+            : "";
+        return `- ${provider.provider}${env}${vars}`;
+      })
+    );
+  }
+
+  const providerSuggestions = result.suggestions.filter(
+    (suggestion) => suggestion.kind === "provider-profile"
+  );
+  if (providerSuggestions.length > 0) {
+    lines.push(
+      "",
+      "Suggested setup:",
+      ...providerSuggestions.map((suggestion) => {
+        const name = suggestion.profileName ?? suggestion.provider ?? "profile";
+        return `- ${name}: ${formatHumanCommand(suggestion.command)}`;
+      })
+    );
+  }
+
+  if (result.warnings.length > 0) {
+    lines.push("", "Warnings:", ...result.warnings.map((warning) => `- ${warning}`));
+  }
+
+  if (result.nextActions.length > 0) {
+    lines.push(
+      "",
+      "Next:",
+      ...result.nextActions.map((action) => `- ${formatHumanCommand(action)}`)
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function formatScanRuntime(result: SwitchboardScanResult): string {
+  const labels: string[] = [result.runtime.kind];
+  if (result.runtime.devcontainerPresent) {
+    labels.push("devcontainer present");
+  }
+  if (result.runtime.vercelProjectPresent) {
+    labels.push("Vercel project linked");
+  }
+  return labels.join(", ");
+}
+
+function formatScanDetected(result: SwitchboardScanResult): string[] {
+  const lines: string[] = [];
+  for (const client of result.clients) {
+    lines.push(`${capitalize(client.client)} project MCP config ${client.status}`);
+    for (const name of client.otherServerNames) {
+      lines.push(`${capitalize(client.client)} also has MCP server "${name}"`);
+    }
+  }
+  if (result.switchboard.profileNames.length > 0) {
+    lines.push(
+      `Switchboard profiles: ${result.switchboard.profileNames.join(", ")}`
+    );
+  }
+  if (result.switchboard.workspaceNames.length > 0) {
+    lines.push(
+      `Switchboard workspaces: ${result.switchboard.workspaceNames.join(", ")}`
+    );
+  }
+  for (const provider of result.providers) {
+    for (const source of provider.sources) {
+      if (source.kind === "env-file") {
+        lines.push(
+          `${shortPath(source.path)} mentions ${provider.provider.toUpperCase()} env names`
+        );
+      } else if (source.detail) {
+        lines.push(source.detail);
+      }
+    }
+  }
+  return [...new Set(lines)];
+}
+
 function formatDoctor(result: {
   ok: boolean;
   status: "ok" | "setup-incomplete" | "failed";
@@ -4017,6 +4143,22 @@ function shellQuote(value: string): string {
 
 function shellQuoteCommandArg(value: string): string {
   return /^[A-Za-z0-9_./:-]+$/.test(value) ? value : shellQuote(value);
+}
+
+function capitalize(value: string): string {
+  return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`;
+}
+
+function shortPath(path: string): string {
+  const cwd = resolve(process.cwd());
+  const absolute = resolve(path);
+  if (absolute === cwd) {
+    return ".";
+  }
+  if (absolute.startsWith(`${cwd}${sep}`)) {
+    return absolute.slice(cwd.length + 1);
+  }
+  return path;
 }
 
 function currentGitBranch(cwd: string): string | undefined {

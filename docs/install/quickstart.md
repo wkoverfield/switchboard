@@ -1,18 +1,21 @@
 # Quickstart
 
 Use this path to make one repo ready for a bounded GitHub CI agent task. The
-flow is local-first: Switchboard writes repo config, stores provider tokens
-behind `secretRef`s, installs a single local MCP endpoint into agent clients,
-and creates mandates for task-scoped authority.
+flow is local-first: Switchboard scans the repo for local tool/account hints,
+writes repo config, stores provider tokens behind `secretRef`s, installs a
+single local MCP endpoint into agent clients, and creates mandates for
+task-scoped authority.
 
 Canonical alpha flow:
 
 From a packaged install, use `switchboard ...`. From a source checkout, run
 `pnpm build` once and use `pnpm switchboard ...` for the same commands.
 
-The friendliest path is one guided setup command:
+Start by scanning the repo. This is read-only and local: it reports repo,
+client, provider, and environment hints by name without printing secret values.
 
 ```bash
+switchboard scan
 switchboard setup github-ci
 switchboard doctor
 switchboard presets check github-ci --profile github_ci
@@ -21,6 +24,12 @@ switchboard mandate create --from github-ci
 switchboard mcp --mandate fix-ci
 switchboard mandate report fix-ci --json
 ```
+
+Production-safe defaults here mean concrete local guardrails: repo-correct
+profiles, token values hidden behind `secretRef`s, non-prod/preview posture where
+the template can express it, risky provider tools denied or approval-gated under
+a mandate, and a local audit trail. Switchboard is runtime-aware, not a sandbox
+guarantee.
 
 If you want to inspect each step before writing, use the manual flow:
 

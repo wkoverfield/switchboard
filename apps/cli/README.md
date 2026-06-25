@@ -12,6 +12,7 @@ switchboard
 Start with the repository quickstart:
 
 ```bash
+switchboard scan
 switchboard setup github-ci
 switchboard doctor
 switchboard mandate create --from github-ci
