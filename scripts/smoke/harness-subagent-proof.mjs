@@ -61,6 +61,26 @@ try {
       `--cwd ${project} mcp --mandate fix-ci`,
     "expected harness mcpLaunch args"
   );
+  assert(
+    parent.mcpLaunch?.commands?.toolSurface?.args?.join(" ") ===
+      `--cwd ${project} tools --mandate fix-ci --json`,
+    "expected structured tool-surface command"
+  );
+  assert(
+    parent.mcpLaunch?.commands?.approvals?.args?.includes?.(
+      "--include-children"
+    ),
+    "expected tree-aware approval command"
+  );
+  assert(
+    parent.mcpLaunch?.commands?.childTemplate?.args?.includes?.("--parent") &&
+      parent.mcpLaunch.commands.childTemplate.args.includes("fix-ci"),
+    "expected child mandate command template"
+  );
+  assert(
+    parent.mcpLaunch?.policy?.allowedTools?.includes?.("github_ci_*"),
+    "expected launch policy summary"
+  );
   assertNoSecretText(JSON.stringify(parent), "parent mandate");
 
   const parentTools = runCliJson("tools", "--mandate", "fix-ci", "--json");

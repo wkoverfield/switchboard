@@ -3029,6 +3029,65 @@ describe("switchboard CLI program", () => {
         cwd: root,
         command: "switchboard",
         args: ["--cwd", root, "mcp", "--mandate", "fix-ci"],
+        commands: {
+          mcp: {
+            command: "switchboard",
+            args: ["--cwd", root, "mcp", "--mandate", "fix-ci"]
+          },
+          toolSurface: {
+            command: "switchboard",
+            args: ["--cwd", root, "tools", "--mandate", "fix-ci", "--json"]
+          },
+          approvals: {
+            command: "switchboard",
+            args: [
+              "--cwd",
+              root,
+              "approvals",
+              "--mandate",
+              "fix-ci",
+              "--include-children",
+              "--json"
+            ]
+          },
+          report: {
+            command: "switchboard",
+            args: [
+              "--cwd",
+              root,
+              "mandate",
+              "report",
+              "fix-ci",
+              "--json"
+            ]
+          },
+          childTemplate: {
+            command: "switchboard",
+            args: expect.arrayContaining([
+              "--cwd",
+              root,
+              "mandate",
+              "child",
+              "<child-id>",
+              "--parent",
+              "fix-ci"
+            ])
+          }
+        },
+        policy: {
+          profiles: ["github_findu", "vercel_preview"],
+          allowedTools: ["github_findu_*"],
+          deniedTools: ["*_deploy_prod"],
+          approvalGates: [
+            {
+              id: "gate-1",
+              toolPattern: "github_findu_checks_rerun",
+              reason: "rerunning CI changes remote state",
+              risk: "high",
+              labels: ["remote-state", "ci"]
+            }
+          ]
+        },
         commandCandidates: [
           {
             kind: "path",
@@ -3341,6 +3400,45 @@ describe("switchboard CLI program", () => {
         mandateId: "rerun-checks",
         cwd: root,
         args: ["--cwd", root, "mcp", "--mandate", "rerun-checks"],
+        commands: {
+          toolSurface: {
+            command: "switchboard",
+            args: [
+              "--cwd",
+              root,
+              "tools",
+              "--mandate",
+              "rerun-checks",
+              "--json"
+            ]
+          },
+          report: {
+            command: "switchboard",
+            args: [
+              "--cwd",
+              root,
+              "mandate",
+              "report",
+              "rerun-checks",
+              "--json"
+            ]
+          },
+          childTemplate: {
+            command: "switchboard",
+            args: expect.arrayContaining(["--parent", "rerun-checks"])
+          }
+        },
+        policy: {
+          profiles: ["github_findu"],
+          allowedTools: ["github_findu_checks_*"],
+          deniedTools: ["*_deploy_prod", "github_findu_checks_cancel"],
+          approvalGates: [
+            {
+              id: "gate-1",
+              toolPattern: "github_findu_checks_rerun"
+            }
+          ]
+        },
         commandCandidates: [
           expect.objectContaining({
             kind: "path",

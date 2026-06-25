@@ -124,7 +124,38 @@ interface MandateMcpLaunchPayload {
   command: "switchboard";
   args: string[];
   commandCandidates: MandateMcpLaunchCommandCandidate[];
+  commands: MandateMcpLaunchCommands;
+  policy: MandateMcpLaunchPolicy;
   installHint: string;
+}
+
+interface MandateMcpLaunchCommand {
+  command: "switchboard";
+  args: string[];
+}
+
+interface MandateMcpLaunchCommands {
+  mcp: MandateMcpLaunchCommand;
+  toolSurface: MandateMcpLaunchCommand;
+  approvals: MandateMcpLaunchCommand;
+  status: MandateMcpLaunchCommand;
+  report: MandateMcpLaunchCommand;
+  logs: MandateMcpLaunchCommand;
+  escalation: MandateMcpLaunchCommand;
+  childTemplate: MandateMcpLaunchCommand;
+}
+
+interface MandateMcpLaunchPolicy {
+  profiles: string[];
+  allowedTools: string[];
+  deniedTools: string[];
+  approvalGates: Array<{
+    id: string;
+    toolPattern: string;
+    reason?: string;
+    risk?: string;
+    labels?: string[];
+  }>;
 }
 
 interface MandateMcpLaunchCommandCandidate {
@@ -3647,8 +3678,84 @@ function createMandateMcpLaunchPayload(
     command: "switchboard",
     args,
     commandCandidates: createMandateMcpLaunchCommandCandidates(args),
+    commands: createMandateMcpLaunchCommands(mandate),
+    policy: {
+      profiles: mandate.profiles,
+      allowedTools: mandate.allowedTools,
+      deniedTools: mandate.deniedTools,
+      approvalGates: mandate.approvalGates.map((gate) => ({
+        id: gate.id,
+        toolPattern: gate.toolPattern,
+        ...(gate.reason ? { reason: gate.reason } : {}),
+        ...(gate.risk ? { risk: gate.risk } : {}),
+        ...(gate.labels && gate.labels.length > 0 ? { labels: gate.labels } : {})
+      }))
+    },
     installHint:
       "Use command/args when the switchboard binary is on PATH. If it is not, use a commandCandidates entry such as current-entrypoint."
+  };
+}
+
+function createMandateMcpLaunchCommands(
+  mandate: MandateWithStatus
+): MandateMcpLaunchCommands {
+  const cwdArgs = ["--cwd", mandate.repoPath];
+  return {
+    mcp: {
+      command: "switchboard",
+      args: [...cwdArgs, "mcp", "--mandate", mandate.id]
+    },
+    toolSurface: {
+      command: "switchboard",
+      args: [...cwdArgs, "tools", "--mandate", mandate.id, "--json"]
+    },
+    approvals: {
+      command: "switchboard",
+      args: [
+        ...cwdArgs,
+        "approvals",
+        "--mandate",
+        mandate.id,
+        "--include-children",
+        "--json"
+      ]
+    },
+    status: {
+      command: "switchboard",
+      args: [...cwdArgs, "mandate", "status", mandate.id, "--json"]
+    },
+    report: {
+      command: "switchboard",
+      args: [...cwdArgs, "mandate", "report", mandate.id, "--json"]
+    },
+    logs: {
+      command: "switchboard",
+      args: [...cwdArgs, "logs", "--mandate", mandate.id, "--json"]
+    },
+    escalation: {
+      command: "switchboard",
+      args: [...cwdArgs, "mandate", "escalate", mandate.id, "--json"]
+    },
+    childTemplate: {
+      command: "switchboard",
+      args: [
+        ...cwdArgs,
+        "mandate",
+        "child",
+        "<child-id>",
+        "--parent",
+        mandate.id,
+        "--agent",
+        "<role>",
+        "--profiles",
+        mandate.profiles.join(","),
+        "--branch",
+        mandate.branch,
+        "--lease",
+        "<duration>",
+        "--json"
+      ]
+    }
   };
 }
 
