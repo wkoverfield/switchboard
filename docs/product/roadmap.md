@@ -1,6 +1,6 @@
 # Switchboard Roadmap
 
-Last updated: 2026-06-24
+Last updated: 2026-06-25
 
 This is the working roadmap for Switchboard. The source planning documents live in
 `docs/product/source/` and are preserved source material from the original
@@ -270,9 +270,10 @@ Not started:
 
 Remaining roadmap should be grouped into these buckets:
 
-- Alpha Golden Path: make GitHub CI the canonical first-run flow, keep
-  quickstart/docs aligned with shipped commands, and prove one non-Wilson
-  developer can reach a ready mandate without help.
+- Alpha Golden Path: GitHub CI is now the canonical first-run flow, with
+  quickstart and alpha golden-path docs aligned to shipped commands. The
+  remaining proof is that one non-Wilson developer can reach a ready mandate
+  without help.
 - Approval UX: make pending approval queues, approve/deny actions, stale
   decisions, and escalation copy easier for humans to operate during real
   agent work. The first human queue polish is shipped; approval watch mode and
@@ -285,10 +286,9 @@ Remaining roadmap should be grouped into these buckets:
   least-privilege tokens and real tool names before adding more providers.
   Credential guidance and the live dogfood runbook are shipped; live
   least-privilege token runs still need a tester-supplied credential.
-- Distribution: polish npm/package metadata, install docs, agent-facing docs,
-  demo assets, and client install surfaces for alpha testers. Alpha package
-  metadata, tarball pack smoke, and distribution docs are shipped; demo media
-  and registry assets remain.
+- Distribution: npm/package metadata, tarball pack smoke, install docs, and
+  client install smokes are shipped for alpha. Demo media, registry assets, and
+  more alpha examples remain.
 
 ## Milestone Status
 
@@ -624,14 +624,13 @@ Still needed:
 - repeat live dogfood with a least-privilege token dedicated to CI-only use
 - provider-specific doctor checks beyond the current preset check
 - stronger policy defaults informed by real tool names
-- alpha-ready docs and distribution around the GitHub CI golden path
-- approval UX polish for the GitHub CI mandate loop
 - more real Vercel Preview dogfood against a live project
 - OAuth or provider auth flow, if a provider path needs it
 
 ### Milestone 11: Agent Discovery Kit + Distribution Assets
 
-Status: scaffolded; alpha golden-path docs are now the next useful asset.
+Status: alpha-ready distribution assets shipped; broader discovery assets remain
+planned.
 
 Already present:
 
@@ -640,12 +639,15 @@ Already present:
 - agent docs placeholders
 - use-case docs placeholders
 - GitHub CI alpha golden-path doc
+- alpha distribution doc
+- npm package metadata polish
+- tarball pack smoke
+- Codex and Claude install smokes
 
 Still needed:
 
 - more real examples from alpha testers
 - demo GIF/script
-- npm/package metadata polish
 - MCP directory listing assets
 - agent recommendation docs updated from shipped behavior
 
