@@ -43,6 +43,18 @@ try {
     plan.mandateCommand.includes("--profiles github_findu"),
     "expected mandate command"
   );
+  assert(
+    plan.credentialGuidance?.minimumScopes?.includes?.("read checks/statuses"),
+    "expected credential guidance minimum scopes"
+  );
+  assert(
+    plan.credentialGuidance?.approvalScopes?.includes?.("rerun workflow jobs"),
+    "expected approval-gated credential guidance"
+  );
+  assert(
+    plan.credentialGuidance?.avoidScopes?.includes?.("delete_repo"),
+    "expected avoided credential guidance"
+  );
   assert(!existsSync(configPath), "dry-run must not write .switchboard.yaml");
   assertNoRawSecret(JSON.stringify(plan), "dry-run plan");
 

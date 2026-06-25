@@ -113,6 +113,11 @@ describe("switchboard CLI program", () => {
       configYaml: string;
       secretCommands: string[];
       mandateCommand: string;
+      credentialGuidance: {
+        minimumScopes: string[];
+        approvalScopes: string[];
+        avoidScopes: string[];
+      };
     };
     expect(parsed.schemaVersion).toBe("switchboard.provider-preset.v1");
     expect(parsed.profileName).toBe("github_findu");
@@ -130,6 +135,13 @@ describe("switchboard CLI program", () => {
       "--deny-tool github_findu_deploy_prod"
     );
     expect(parsed.mandateCommand).toContain("--require-approval-risk medium");
+    expect(parsed.credentialGuidance.minimumScopes).toContain(
+      "read checks/statuses"
+    );
+    expect(parsed.credentialGuidance.approvalScopes).toContain(
+      "rerun workflow jobs"
+    );
+    expect(parsed.credentialGuidance.avoidScopes).toContain("delete_repo");
   });
 
   it("prints human provider preset output without claiming installation", async () => {
@@ -144,6 +156,9 @@ describe("switchboard CLI program", () => {
       "Switchboard provider safety template: Vercel Preview"
     );
     expect(output.join("\n")).toContain("Config YAML:");
+    expect(output.join("\n")).toContain("Credential guidance:");
+    expect(output.join("\n")).toContain("read deployments");
+    expect(output.join("\n")).toContain("production promotion");
     expect(output.join("\n")).toContain(
       "This template does not install, authenticate, or vendor a provider MCP server."
     );
@@ -214,6 +229,11 @@ describe("switchboard CLI program", () => {
       schemaVersion: string;
       action: string;
       targetPath: string;
+      credentialGuidance: {
+        minimumScopes: string[];
+        approvalScopes: string[];
+        avoidScopes: string[];
+      };
       commands: {
         mandateCreate: { command: string; args: string[] };
       };
@@ -231,6 +251,13 @@ describe("switchboard CLI program", () => {
         "github-ci"
       ])
     });
+    expect(parsed.credentialGuidance.minimumScopes).toContain(
+      "read checks/statuses"
+    );
+    expect(parsed.credentialGuidance.approvalScopes).toContain(
+      "rerun workflow jobs"
+    );
+    expect(parsed.credentialGuidance.avoidScopes).toContain("delete_repo");
     expect(existsSync(join(root, ".switchboard.yaml"))).toBe(false);
   });
 
@@ -250,6 +277,9 @@ describe("switchboard CLI program", () => {
     expect(text).toContain(
       "mandate policy: 1 allow pattern(s), 10 approval gate(s), 5 deny pattern(s)"
     );
+    expect(text).toContain("Credential guidance:");
+    expect(text).toContain("read checks/statuses");
+    expect(text).toContain("delete_repo");
     expect(text.indexOf("What this prepares:")).toBeLessThan(
       text.indexOf("Config preview:")
     );

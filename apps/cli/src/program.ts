@@ -945,6 +945,7 @@ export function createProgram(io: ProgramIo = {}): Command {
             configYaml: rendered.configYaml,
             secretCommands: rendered.secretCommands,
             mandateCommand: rendered.mandateCommand,
+            credentialGuidance: rendered.credentialGuidance,
             notes: rendered.notes
           };
           writeOut(
@@ -3047,6 +3048,7 @@ function formatProviderAddPlanJson(plan: ProviderAddPlan): Record<string, unknow
     installCommands: plan.installCommands,
     mandateCommand: plan.mandateCommand,
     commands: formatProviderAddCommands(plan),
+    credentialGuidance: plan.rendered.credentialGuidance,
     notes: plan.rendered.notes
   };
 }
@@ -3140,6 +3142,8 @@ function formatProviderAdd(
     "What this prepares:",
     ...formatProviderAddSummary(plan).map((line) => `  ${line}`),
     "",
+    ...formatCredentialGuidance(plan.rendered.credentialGuidance),
+    "",
     "Config preview:",
     plan.nextContent.trimEnd(),
     "",
@@ -3227,11 +3231,30 @@ function formatProviderPresetShow(
     "Recommended mandate:",
     `  ${rendered.mandateCommand}`,
     "",
+    ...formatCredentialGuidance(rendered.credentialGuidance),
+    "",
     "Notes:",
     ...rendered.notes.map((note) => `  ${note}`),
     "",
     "This template does not install, authenticate, or vendor a provider MCP server."
   ].join("\n");
+}
+
+function formatCredentialGuidance(
+  guidance: RenderedProviderSafetyTemplate["credentialGuidance"]
+): string[] {
+  return [
+    "Credential guidance:",
+    `  Posture: ${guidance.posture}`,
+    "  Minimum access:",
+    ...guidance.minimumScopes.map((scope) => `    - ${scope}`),
+    "  Add only when approval-gated:",
+    ...guidance.approvalScopes.map((scope) => `    - ${scope}`),
+    "  Avoid:",
+    ...guidance.avoidScopes.map((scope) => `    - ${scope}`),
+    "  Notes:",
+    ...guidance.notes.map((note) => `    - ${note}`)
+  ];
 }
 
 function formatProviderPresetCheck(result: {
