@@ -167,6 +167,34 @@ try {
         "expected approval request reason"
       );
 
+      const approvalsText = runCliText("approvals", "--mandate", "fix-ci");
+      assert(
+        approvalsText.includes("Summary: 1 pending"),
+        "expected approval summary"
+      );
+      assert(
+        approvalsText.includes(`${pendingRequest.id} [pending]`),
+        "expected readable pending request"
+      );
+      assert(
+        approvalsText.includes(
+          `switchboard approve ${pendingRequest.id} --reason "<why this is safe>"`
+        ),
+        "expected approve next command"
+      );
+      assert(
+        approvalsText.includes(
+          `switchboard deny ${pendingRequest.id} --reason "<why this should not run>"`
+        ),
+        "expected deny next command"
+      );
+      assert(
+        approvalsText.includes(
+          "retry the original demo_echo_echo tool call after approval"
+        ),
+        "expected retry guidance"
+      );
+
       const approved = runCliJson(
         "approve",
         pendingRequest.id,

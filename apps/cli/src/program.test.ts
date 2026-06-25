@@ -609,6 +609,45 @@ describe("switchboard CLI program", () => {
     ]);
   });
 
+  it("prints provider template next steps for a ready GitHub profile", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_ci:",
+        "    provider: github",
+        "    namespace: github_ci",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "      args:",
+        "        - fixture.mjs"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "doctor", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      status: string;
+      nextSteps: string[];
+    };
+    expect(parsed.status).toBe("setup-incomplete");
+    expect(parsed.nextSteps).toContain(
+      "switchboard presets check github-ci --profile github_ci"
+    );
+    expect(parsed.nextSteps).toContain("switchboard mandate create --from github-ci");
+    expect(parsed.nextSteps.indexOf("switchboard test github_ci")).toBeLessThan(
+      parsed.nextSteps.indexOf("switchboard mandate create --from github-ci")
+    );
+  });
+
   it("reports missing secret refs in doctor without printing values", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
@@ -5122,14 +5161,21 @@ describe("switchboard CLI program", () => {
     await program.parseAsync(["--cwd", root, "approvals"], {
       from: "user"
     });
+    expect(output[1]).toContain("Summary: 2 pending, 0 approved, 0 denied, 1 expired, 1 stale");
+    expect(output[1]).toContain("approval-1 [pending]");
+    expect(output[1]).toContain("tool: github_findu_deploy");
     expect(output[1]).toContain(
-      "next: switchboard approve approval-1 or switchboard deny approval-1; then retry github_findu_deploy"
+      'switchboard approve approval-1 --reason "<why this is safe>"'
     );
-    expect(output[1]).toContain("reason:preview deploy touches remote state");
-    expect(output[1]).toContain("risk:high");
-    expect(output[1]).toContain("labels:remote-state+deploy");
     expect(output[1]).toContain(
-      "next: retry the original gated tool call to create a fresh approval request"
+      'switchboard deny approval-1 --reason "<why this should not run>"'
+    );
+    expect(output[1]).toContain("retry the original github_findu_deploy tool call after approval");
+    expect(output[1]).toContain("reason: preview deploy touches remote state");
+    expect(output[1]).toContain("risk: high");
+    expect(output[1]).toContain("labels: remote-state, deploy");
+    expect(output[1]).toContain(
+      "retry the original gated tool call to create a fresh approval request"
     );
 
     await program.parseAsync(
@@ -5154,14 +5200,14 @@ describe("switchboard CLI program", () => {
       ["--cwd", root, "approvals", "--status", "approved"],
       { from: "user" }
     );
-    expect(output[3]).toContain("approval-1 approved");
+    expect(output[3]).toContain("approval-1 [approved]");
     expect(output[3]).not.toContain("approval-2");
 
     await program.parseAsync(
       ["--cwd", root, "approvals", "--status", "expired"],
       { from: "user" }
     );
-    expect(output[4]).toContain("approval-3 expired");
+    expect(output[4]).toContain("approval-3 [expired]");
     expect(output[4]).not.toContain("approval-1");
 
     await program.parseAsync(["deny", "approval-2"], { from: "user" });
@@ -5170,7 +5216,7 @@ describe("switchboard CLI program", () => {
     await program.parseAsync(["--cwd", root, "approvals", "--status", "stale"], {
       from: "user"
     });
-    expect(output[6]).toContain("approval-4 stale");
+    expect(output[6]).toContain("approval-4 [stale]");
     expect(output[6]).not.toContain("approval-1");
 
     await program.parseAsync(["--cwd", root, "approvals", "--status", "weird"], {

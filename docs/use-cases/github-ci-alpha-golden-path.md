@@ -66,6 +66,31 @@ After `switchboard mcp --mandate fix-ci`:
 - Only the mandate-mounted profiles and policy-filtered tools are exposed.
 - Approval-required tools remain visible, but execution is gated.
 
+When an agent tries an approval-required tool:
+
+- The call is blocked before the upstream provider runs.
+- Switchboard creates a local approval request.
+- The error points to the approval queue, exact approve/deny commands, and the
+  original tool call to retry after approval.
+
+Inspect the queue:
+
+```bash
+switchboard approvals --mandate fix-ci
+```
+
+Expected human output is a readable queue with the request id, status, mandate,
+branch, tool, gate, risk, labels, reason, expiry, and next commands:
+
+```bash
+switchboard approve <approval-id> --reason "<why this is safe>"
+switchboard deny <approval-id> --reason "<why this should not run>"
+```
+
+After approval, retry the original gated tool call from the agent. If the
+request is expired or stale, retry the original gated call to create a fresh
+approval request.
+
 After `switchboard mandate report fix-ci --json`:
 
 - The report uses `schemaVersion: "switchboard.mandate-report.v1"`.
