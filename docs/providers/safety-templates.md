@@ -4,15 +4,17 @@ Switchboard provider presets start as safety templates, not full vendor
 integrations. A template prints value-free profile YAML, the local `secretRef`
 setup command, and a recommended mandate policy for that provider shape.
 
-Templates intentionally do not install, authenticate, or vendor a provider MCP
-server. They assume the developer chooses the upstream MCP server command and
-stores credentials through `switchboard secrets`.
+Templates intentionally do not install or vendor a provider MCP server. They
+assume the developer chooses the upstream MCP server command and stores
+credentials through `switchboard auth <preset>` or the lower-level
+`switchboard secrets` primitives.
 
 ## Commands
 
 ```bash
 switchboard add github-ci
 switchboard add github-ci --write
+switchboard auth github-ci
 switchboard presets list
 switchboard presets show github-ci
 switchboard presets show vercel-preview --json
@@ -21,9 +23,9 @@ switchboard presets check github-ci --profile github_findu
 
 `switchboard add` is the guided setup surface. It prints a transparent plan by
 default and writes `.switchboard.yaml` only with `--write`. The plan includes
-the profile config, `secretRef` setup command, provider check command,
-Codex/Claude install commands, recommended mandate command, and credential
-guidance for least-privilege dogfood.
+the profile config, provider auth command, lower-level `secretRef` setup
+command, provider check command, Codex/Claude install commands, recommended
+mandate command, and credential guidance for least-privilege dogfood.
 
 Customize rendered names without changing the safety posture:
 
@@ -48,7 +50,13 @@ allow/deny/approval-gate policy for the selected namespace:
 switchboard presets show github-ci --json
 ```
 
-Then store the secret value locally:
+Then store the token value locally:
+
+```bash
+switchboard auth github-ci
+```
+
+For custom refs or scripts, keep using the lower-level primitive:
 
 ```bash
 pbpaste | switchboard secrets set github/findu/dev/token --value-stdin

@@ -13,7 +13,7 @@ From a packaged install, use `switchboard ...`. From a source checkout, run
 ```bash
 switchboard add github-ci --write
 switchboard doctor
-switchboard secrets set github/example/dev/token --value-stdin
+switchboard auth github-ci
 switchboard presets check github-ci --profile github_ci
 switchboard install codex --write
 switchboard mandate create --from github-ci
@@ -56,17 +56,23 @@ switchboard add github-ci \
   --write
 ```
 
-## 2. Store The Token
+## 2. Connect GitHub
 
 Switchboard config stores only a printable `secretRef`; the token value goes
-into the local keychain-backed secret store:
+into the local keychain-backed secret store. For the default GitHub CI preset,
+run:
 
 ```bash
-pbpaste | switchboard secrets set github/example/dev/token --value-stdin
+switchboard auth github-ci
 ```
 
-Use the exact command printed by `switchboard add` if you customized
-`--secret-ref`.
+Paste the GitHub token, press Enter, then press Ctrl-D. The token value is not
+printed. For scripts or custom `--secret-ref` values, use the lower-level
+command printed by `switchboard add`:
+
+```bash
+switchboard secrets set <ref> --value-stdin
+```
 
 ## 3. Check The Repo
 

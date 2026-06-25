@@ -16,7 +16,7 @@ Run these from the repo you want the agent to work in:
 ```bash
 switchboard add github-ci --write
 switchboard doctor
-switchboard secrets set github/example/dev/token --value-stdin
+switchboard auth github-ci
 switchboard presets check github-ci --profile github_ci
 switchboard install codex --write
 switchboard mandate create --from github-ci
@@ -24,7 +24,7 @@ switchboard mcp --mandate fix-ci
 switchboard mandate report fix-ci --json
 ```
 
-Paste the GitHub token into stdin for `secrets set`, then press enter and close
+Paste the GitHub token when `auth github-ci` prompts, press Enter, then close
 stdin with your shell's normal EOF key.
 
 ## Expected Checkpoints
@@ -43,7 +43,8 @@ After `switchboard doctor`:
   needed.
 - `failed` means a blocking issue must be fixed first.
 - If a secret is missing, the next action points to
-  `switchboard secrets set <ref> --value-stdin`.
+  `switchboard auth github-ci` for the default preset or
+  `switchboard secrets set <ref> --value-stdin` for custom refs.
 
 After `switchboard presets check github-ci --profile github_ci`:
 
@@ -102,10 +103,11 @@ After `switchboard mandate report fix-ci --json`:
 Missing secret:
 
 ```bash
-switchboard secrets set github/example/dev/token --value-stdin
+switchboard auth github-ci
 ```
 
-Use the exact ref printed by Switchboard if you customized `--secret-ref`.
+Use the exact lower-level `secrets set <ref> --value-stdin` command printed by
+Switchboard if you customized `--secret-ref`.
 
 Docker is not running:
 
