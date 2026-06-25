@@ -44,6 +44,14 @@ try {
     "expected mandate command"
   );
   assert(
+    plan.mandatePolicy?.allowedTools?.includes?.("github_findu_*"),
+    "expected rendered mandate policy allow"
+  );
+  assert(
+    plan.mandatePolicy?.deniedTools?.includes?.("github_findu_deploy_prod"),
+    "expected rendered mandate policy deny"
+  );
+  assert(
     plan.credentialGuidance?.minimumScopes?.includes?.("read checks/statuses"),
     "expected credential guidance minimum scopes"
   );

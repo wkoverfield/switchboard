@@ -41,7 +41,8 @@ the example above renders policy for `github_findu_*` tools. Use repeatable
 command string into `--command`.
 
 `presets show` remains available when you only want value-free YAML without
-writing anything:
+writing anything. JSON output also includes `mandatePolicy`, the rendered
+allow/deny/approval-gate policy for the selected namespace:
 
 ```bash
 switchboard presets show github-ci --json

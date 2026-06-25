@@ -945,6 +945,7 @@ export function createProgram(io: ProgramIo = {}): Command {
             configYaml: rendered.configYaml,
             secretCommands: rendered.secretCommands,
             mandateCommand: rendered.mandateCommand,
+            mandatePolicy: renderedProviderMandatePolicy(rendered),
             credentialGuidance: rendered.credentialGuidance,
             notes: rendered.notes
           };
@@ -3047,6 +3048,7 @@ function formatProviderAddPlanJson(plan: ProviderAddPlan): Record<string, unknow
     checkCommand: plan.checkCommand,
     installCommands: plan.installCommands,
     mandateCommand: plan.mandateCommand,
+    mandatePolicy: renderedProviderMandatePolicy(plan.rendered),
     commands: formatProviderAddCommands(plan),
     credentialGuidance: plan.rendered.credentialGuidance,
     notes: plan.rendered.notes
@@ -3231,6 +3233,8 @@ function formatProviderPresetShow(
     "Recommended mandate:",
     `  ${rendered.mandateCommand}`,
     "",
+    ...formatRenderedProviderMandatePolicy(rendered),
+    "",
     ...formatCredentialGuidance(rendered.credentialGuidance),
     "",
     "Notes:",
@@ -3238,6 +3242,41 @@ function formatProviderPresetShow(
     "",
     "This template does not install, authenticate, or vendor a provider MCP server."
   ].join("\n");
+}
+
+function renderedProviderMandatePolicy(
+  rendered: RenderedProviderSafetyTemplate
+): MandateToolPolicy {
+  return providerSafetyTemplatePolicy(
+    rendered.template.id,
+    rendered.namespace
+  );
+}
+
+function formatRenderedProviderMandatePolicy(
+  rendered: RenderedProviderSafetyTemplate
+): string[] {
+  const policy = renderedProviderMandatePolicy(rendered);
+  return [
+    "Rendered mandate policy:",
+    `  Allowed tools: ${policy.allowedTools?.join(", ") ?? "all"}`,
+    `  Denied tools: ${policy.deniedTools?.join(", ") ?? "none"}`,
+    "  Approval gates:",
+    ...(policy.approvalGates && policy.approvalGates.length > 0
+      ? policy.approvalGates.map(
+          (gate) =>
+            `    - ${gate.toolPattern} (${[
+              gate.risk ? `risk:${gate.risk}` : undefined,
+              gate.labels && gate.labels.length > 0
+                ? `labels:${gate.labels.join("+")}`
+                : undefined,
+              gate.reason ? `reason:${gate.reason}` : undefined
+            ]
+              .filter(Boolean)
+              .join(" ")})`
+        )
+      : ["    - none"])
+  ];
 }
 
 function formatCredentialGuidance(
