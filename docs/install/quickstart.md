@@ -5,6 +5,19 @@ flow is local-first: Switchboard writes repo config, stores provider tokens
 behind `secretRef`s, installs a single local MCP endpoint into agent clients,
 and creates mandates for task-scoped authority.
 
+Canonical alpha flow:
+
+```bash
+switchboard add github-ci --write
+switchboard doctor
+switchboard secrets set github/example/dev/token --value-stdin
+switchboard presets check github-ci --profile github_ci
+switchboard install codex --write
+switchboard mandate create --from github-ci
+switchboard mcp --mandate fix-ci
+switchboard mandate report fix-ci --json
+```
+
 ## 1. Add GitHub CI
 
 Preview the setup plan:
@@ -60,10 +73,23 @@ switchboard secrets doctor
 switchboard presets check github-ci --profile github_ci
 ```
 
+`switchboard doctor` reports one top-level readiness status:
+
+- `ok`: ready enough to use
+- `setup-incomplete`: config is valid, but setup still needs action
+- `failed`: a blocking issue must be fixed before use
+
 The preset check starts the configured GitHub MCP server, discovers its
 namespaced tools, and classifies them against the template's recommended
 mandate policy. Treat `allowed_sensitive` as a signal to tighten the policy
 before unattended work.
+
+If a runtime command reports a missing `secretRef`, run the exact command it
+prints:
+
+```bash
+switchboard secrets set <ref> --value-stdin
+```
 
 ## 4. Connect A Client
 
@@ -99,7 +125,7 @@ template's allow, deny, and approval policy, uses your current git branch, and
 keeps the full policy inspectable in the created mandate.
 
 ```bash
-switchboard mandate create fix-ci --from github-ci --profiles github_ci
+switchboard mandate create --from github-ci
 ```
 
 Then inspect the scoped tool surface:
