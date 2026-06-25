@@ -10,6 +10,20 @@ Canonical alpha flow:
 From a packaged install, use `switchboard ...`. From a source checkout, run
 `pnpm build` once and use `pnpm switchboard ...` for the same commands.
 
+The friendliest path is one guided setup command:
+
+```bash
+switchboard setup github-ci
+switchboard doctor
+switchboard presets check github-ci --profile github_ci
+switchboard install codex --write
+switchboard mandate create --from github-ci
+switchboard mcp --mandate fix-ci
+switchboard mandate report fix-ci --json
+```
+
+If you want to inspect each step before writing, use the manual flow:
+
 ```bash
 switchboard add github-ci --write
 switchboard doctor
@@ -23,7 +37,16 @@ switchboard mandate report fix-ci --json
 
 ## 1. Add GitHub CI
 
-Preview the setup plan:
+Guided setup writes the GitHub CI profile and stores the token in one flow:
+
+```bash
+switchboard setup github-ci
+```
+
+Paste the GitHub token when prompted and press Enter. The token value is not
+printed.
+
+For a transparent plan before writing, preview the setup:
 
 ```bash
 switchboard add github-ci

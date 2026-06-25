@@ -15,9 +15,8 @@ payloads.
 Start from the alpha golden path:
 
 ```bash
-switchboard add github-ci --write
+switchboard setup github-ci
 switchboard doctor
-switchboard auth github-ci
 switchboard presets check github-ci --profile github_ci --json
 switchboard mandate create --from github-ci --json
 switchboard mcp --mandate fix-ci
@@ -58,9 +57,8 @@ Record after each run:
 Use Vercel Preview as the second provider proof, not a broad expansion:
 
 ```bash
-switchboard add vercel-preview --write
+switchboard setup vercel-preview
 switchboard doctor
-switchboard auth vercel-preview
 switchboard presets check vercel-preview --profile vercel_preview --json
 switchboard mandate create --from vercel-preview --json
 switchboard mcp --mandate inspect-preview

@@ -256,6 +256,8 @@ describe("switchboard CLI program", () => {
         avoidScopes: string[];
       };
       commands: {
+        setup: { command: string; args: string[] };
+        auth: { command: string; args: string[] };
         mandateCreate: { command: string; args: string[] };
       };
     };
@@ -271,6 +273,14 @@ describe("switchboard CLI program", () => {
         "--from",
         "github-ci"
       ])
+    });
+    expect(parsed.commands.setup).toEqual({
+      command: "switchboard",
+      args: ["setup", "github-ci"]
+    });
+    expect(parsed.commands.auth).toEqual({
+      command: "switchboard",
+      args: ["auth", "github-ci"]
     });
     expect(parsed.mandatePolicy.allowedTools).toEqual(["github_ci_*"]);
     expect(parsed.mandatePolicy.deniedTools).toContain("github_ci_deploy_prod");
@@ -1048,6 +1058,71 @@ describe("switchboard CLI program", () => {
     expect(parsed.nextSteps).toContain("switchboard doctor");
     expect(await store.get("vercel/findu/preview/token")).toBe("vercel_secret");
     expect(errors).toEqual([]);
+    expect(output.join("\n")).not.toContain("vercel_secret");
+  });
+
+  it("runs guided provider setup without exposing the token", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    const output: string[] = [];
+    const prompts: string[] = [];
+    const store = createMemorySecretStore();
+    const program = createProgram({
+      secretStore: store,
+      secretIndexPath: join(root, "state", "secrets", "index.json"),
+      readSecretFromPrompt: async (prompt) => {
+        prompts.push(prompt);
+        return "ghp_secret";
+      },
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(["--cwd", root, "setup", "github-ci"], {
+      from: "user"
+    });
+
+    expect(existsSync(join(root, ".switchboard.yaml"))).toBe(true);
+    expect(await store.get("github/example/dev/token")).toBe("ghp_secret");
+    expect(prompts).toEqual([
+      "Paste GitHub CI token for GITHUB_PERSONAL_ACCESS_TOKEN: "
+    ]);
+    const text = output.join("\n");
+    expect(text).toContain("Switchboard GitHub CI setup complete");
+    expect(text).toContain("Token: stored locally");
+    expect(text).toContain("switchboard doctor");
+    expect(text).toContain("switchboard presets check github-ci --profile github_ci");
+    expect(text).toContain("switchboard mandate create fix-ci --from github-ci");
+    expect(text).not.toContain("ghp_secret");
+  });
+
+  it("runs guided provider setup as JSON for scripts", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    const output: string[] = [];
+    const store = createMemorySecretStore();
+    const program = createProgram({
+      secretStore: store,
+      secretIndexPath: join(root, "state", "secrets", "index.json"),
+      readSecretFromStdin: async () => "vercel_secret",
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "setup", "vercel-preview", "--value-stdin", "--json"],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      action: string;
+      presetId: string;
+      tokenStored: boolean;
+      nextSteps: string[];
+    };
+    expect(parsed.action).toBe("setup");
+    expect(parsed.presetId).toBe("vercel-preview");
+    expect(parsed.tokenStored).toBe(true);
+    expect(parsed.nextSteps).toContain("switchboard doctor");
+    expect(await store.get("vercel/example/preview/token")).toBe("vercel_secret");
     expect(output.join("\n")).not.toContain("vercel_secret");
   });
 
