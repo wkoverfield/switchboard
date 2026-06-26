@@ -385,6 +385,10 @@ describe("switchboard CLI program", () => {
     const text = output.join("\n");
     expect(text).toContain("What this prepares:");
     expect(text).toContain("one github MCP profile: github_ci");
+    expect(text).toContain("Token storage: local token alias github/example/dev/token");
+    expect(text).toContain(
+      "one local token alias for GITHUB_PERSONAL_ACCESS_TOKEN: github/example/dev/token"
+    );
     expect(text).toContain(
       "mandate policy: 1 allow pattern(s), 10 approval gate(s), 5 deny pattern(s)"
     );
@@ -1166,7 +1170,9 @@ describe("switchboard CLI program", () => {
     ]);
     const text = output.join("\n");
     expect(text).toContain("Switchboard GitHub CI setup complete");
-    expect(text).toContain("Token: stored locally");
+    expect(text).toContain("Ready: profile created and provider token stored locally.");
+    expect(text).toContain("Token: stored locally for GitHub CI");
+    expect(text).toContain("Token alias: github/example/dev/token");
     expect(text).toContain("switchboard doctor");
     expect(text).toContain("switchboard presets check github-ci --profile github_ci");
     expect(text).toContain("switchboard mandate create fix-ci --from github-ci");
@@ -1281,6 +1287,50 @@ describe("switchboard CLI program", () => {
     ]);
     expect(parsed.nextSteps).toEqual(["switchboard test local_echo"]);
     process.env.PATH = originalPath;
+  });
+
+  it("prints a human doctor readiness summary without leading with internal refs", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_ci:",
+        "    provider: github",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "      env:",
+        "        GITHUB_PERSONAL_ACCESS_TOKEN:",
+        "          secretRef: github/example/dev/token"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      secretStore: createMemorySecretStore({
+        "github/example/dev/token": "ghp_secret"
+      }),
+      writeOut: (message) => output.push(message)
+    });
+    await program.parseAsync(["--cwd", root, "doctor"], {
+      from: "user"
+    });
+
+    const text = output.join("\n");
+    expect(text).toContain("Switchboard doctor:");
+    expect(text).toContain("Almost ready: config is valid");
+    expect(text).toContain("Agent clients:");
+    expect(text).toContain("Local tokens:");
+    expect(text).toContain(
+      "github_ci.GITHUB_PERSONAL_ACCESS_TOKEN: set (stored as github/example/dev/token)"
+    );
+    expect(text).toContain("Configured local tokens are available.");
+    expect(text).not.toContain("Secret refs:");
+    expect(text).not.toContain("Configured secretRefs are available.");
+    expect(text).not.toContain("ghp_secret");
   });
 
   it("reports stale project client configs in doctor JSON", async () => {

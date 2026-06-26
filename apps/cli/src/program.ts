@@ -3404,6 +3404,7 @@ function formatDoctor(result: {
   nextSteps: string[];
 }): string {
   const lines = [`Switchboard doctor: ${formatDoctorStatus(result.status)}`];
+  lines.push(formatDoctorReadinessLine(result.status));
 
   for (const check of result.checks) {
     lines.push(`${check.ok ? "ok" : "fail"} ${check.name} - ${check.message}`);
@@ -3414,20 +3415,20 @@ function formatDoctor(result: {
   }
 
   if (result.clientConfigs && result.clientConfigs.length > 0) {
-    lines.push("", "Client configs:");
+    lines.push("", "Agent clients:");
     for (const config of result.clientConfigs) {
       const otherServers =
         config.otherServerNames.length > 0
           ? `; other MCP servers: ${config.otherServerNames.join(", ")}`
           : "";
       lines.push(
-        `  ${config.client}: ${config.status} - ${config.message}${otherServers} (${config.targetPath})`
+        `  ${config.client}: ${formatClientConfigStatus(config.status)} - ${config.message}${otherServers} (${config.targetPath})`
       );
     }
   }
 
   if (result.clientLaunches && result.clientLaunches.length > 0) {
-    lines.push("", "Client launch:");
+    lines.push("", "Agent launch:");
     for (const launch of result.clientLaunches) {
       lines.push(
         `  ${launch.ok ? "ok" : "fail"} ${launch.client}: ${launch.message}`
@@ -3436,7 +3437,7 @@ function formatDoctor(result: {
   }
 
   if (result.secrets && result.secrets.usages.length > 0) {
-    lines.push("", "Secret refs:");
+    lines.push("", "Local tokens:");
     for (const usage of result.secrets.usages) {
       const missing = result.secrets.missing.some(
         (item) => item.ref === usage.ref
@@ -3444,7 +3445,7 @@ function formatDoctor(result: {
         ? "missing"
         : "set";
       lines.push(
-        `  ${usage.ref} (${missing}) - ${usage.profileName}.${usage.envName}`
+        `  ${usage.profileName}.${usage.envName}: ${missing} (stored as ${usage.ref})`
       );
     }
   }
@@ -3468,6 +3469,34 @@ function formatDoctorStatus(
   return status === "ok" ? "OK" : "failed";
 }
 
+function formatDoctorReadinessLine(
+  status: "ok" | "setup-incomplete" | "failed"
+): string {
+  if (status === "ok") {
+    return "Ready: config, local tokens, and installed agent clients look usable.";
+  }
+
+  if (status === "setup-incomplete") {
+    return "Almost ready: config is valid, but one or more setup steps remain.";
+  }
+
+  return "Blocked: fix the failing checks below before giving an agent this repo.";
+}
+
+function formatClientConfigStatus(
+  status: ProjectClientConfigInspection["status"]
+): string {
+  if (status === "installed") {
+    return "installed";
+  }
+
+  if (status === "missing") {
+    return "not installed";
+  }
+
+  return status;
+}
+
 function clientConfigSummary(configs: ProjectClientConfigInspection[]): string {
   const installed = configs.filter((item) => item.status === "installed").length;
   const invalid = configs.filter((item) => item.status === "invalid").length;
@@ -3481,10 +3510,10 @@ function clientConfigSummary(configs: ProjectClientConfigInspection[]): string {
 
 function secretCheckSummary(missingSecrets: MissingSecretRef[]): string {
   if (missingSecrets.length === 0) {
-    return "Configured secretRefs are available.";
+    return "Configured local tokens are available.";
   }
 
-  return `${missingSecrets.length} configured secretRef(s) are missing or unavailable.`;
+  return `${missingSecrets.length} configured local token(s) are missing or unavailable.`;
 }
 
 function formatProviderAddPlanJson(plan: ProviderAddPlan): Record<string, unknown> {
@@ -3612,7 +3641,7 @@ function formatProviderAdd(
     ...(options.backupPath ? [`Backup: ${options.backupPath}`] : []),
     `Profile: ${plan.rendered.profileName}`,
     `Namespace: ${plan.rendered.namespace}`,
-    `secretRef: ${plan.rendered.secretRef}`,
+    `Token storage: local token alias ${plan.rendered.secretRef}`,
     `Command: ${plan.rendered.command}`,
     ...(plan.rendered.args.length > 0
       ? [`Args: ${plan.rendered.args.join(" ")}`]
@@ -3656,7 +3685,7 @@ function formatProviderAuth(result: {
   return [
     `Stored ${result.label} token`,
     `For: ${result.secretEnvName}`,
-    `Local ref: ${result.ref}`,
+    `Stored locally as: ${result.ref}`,
     "",
     "Next steps:",
     ...result.nextSteps.map((step) => `  ${formatHumanCommand(step)}`)
@@ -3684,11 +3713,13 @@ function formatProviderSetup(result: {
 }): string {
   return [
     `Switchboard ${result.label} setup complete`,
+    "Ready: profile created and provider token stored locally.",
     `Config: ${result.configAction} ${result.targetPath}`,
     ...(result.backupPath ? [`Backup: ${result.backupPath}`] : []),
     `Profile: ${result.profileName}`,
     `Namespace: ${result.namespace}`,
-    `Token: stored locally (${result.secretRef})`,
+    `Token: stored locally for ${result.label}`,
+    `Token alias: ${result.secretRef}`,
     "",
     "Next steps:",
     ...result.nextSteps.map((step) => `  ${formatHumanCommand(step)}`)
@@ -3723,7 +3754,7 @@ function formatProviderAddSummary(plan: ProviderAddPlan): string[] {
   );
   return [
     `one ${plan.rendered.template.provider} MCP profile: ${plan.rendered.profileName}`,
-    `one local secretRef for ${plan.rendered.template.secretEnvName}: ${plan.rendered.secretRef}`,
+    `one local token alias for ${plan.rendered.template.secretEnvName}: ${plan.rendered.secretRef}`,
     `agent clients route through Switchboard after install`,
     `mandate policy: ${policy.allowedTools?.length ?? 0} allow pattern(s), ${policy.approvalGates?.length ?? 0} approval gate(s), ${policy.deniedTools?.length ?? 0} deny pattern(s)`,
     `mandate command binds authority to the current repo, branch, and ${plan.rendered.template.recommendedMandate.lease} lease`
