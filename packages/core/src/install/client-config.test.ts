@@ -57,6 +57,7 @@ describe("renderSwitchboardClientConfig", () => {
       client: "codex",
       serverName: 'switch"board\\local',
       command: "/usr/local/bin/switchboard",
+      commandArgs: ["/repo/switchboard/apps/cli/dist/index.js"],
       cwd: "/repo/with spaces"
     });
 
@@ -65,7 +66,7 @@ describe("renderSwitchboardClientConfig", () => {
       'command = "/usr/local/bin/switchboard"'
     );
     expect(rendered.content).toContain(
-      'args = ["--cwd", "/repo/with spaces", "mcp"]'
+      'args = ["/repo/switchboard/apps/cli/dist/index.js", "--cwd", "/repo/with spaces", "mcp"]'
     );
   });
 
@@ -279,7 +280,8 @@ describe("inspectProjectClientConfig", () => {
         targetPath: join(root, ".codex", "config.toml"),
         status: "missing",
         message: "Project client config file was not found.",
-        otherServerNames: []
+        otherServerNames: [],
+        launch: null
       },
       {
         client: "claude",
@@ -287,7 +289,8 @@ describe("inspectProjectClientConfig", () => {
         targetPath: join(root, ".mcp.json"),
         status: "missing",
         message: "Project client config file was not found.",
-        otherServerNames: []
+        otherServerNames: [],
+        launch: null
       }
     ]);
   });
@@ -304,7 +307,11 @@ describe("inspectProjectClientConfig", () => {
         targetPath: join(root, ".codex", "config.toml"),
         status: "installed",
         message: "Codex project config routes through switchboard mcp.",
-        otherServerNames: []
+        otherServerNames: [],
+        launch: {
+          command: "switchboard",
+          args: ["--cwd", root, "mcp"]
+        }
       },
       {
         client: "claude",
@@ -312,7 +319,11 @@ describe("inspectProjectClientConfig", () => {
         targetPath: join(root, ".mcp.json"),
         status: "installed",
         message: "Claude project config routes through switchboard mcp.",
-        otherServerNames: []
+        otherServerNames: [],
+        launch: {
+          command: "switchboard",
+          args: ["--cwd", root, "mcp"]
+        }
       }
     ]);
   });

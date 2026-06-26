@@ -31,6 +31,8 @@ export interface SwitchboardScanOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
+  command?: string;
+  commandArgs?: string[];
 }
 
 export interface SwitchboardScanResult {
@@ -146,7 +148,11 @@ export async function scanSwitchboardProject(
   });
   const profileNames = Object.keys(loaded.config.profiles);
   const workspaceNames = Object.keys(loaded.config.workspaces ?? {});
-  const clients = await inspectProjectClientConfigs({ cwd: root });
+  const clients = await inspectProjectClientConfigs({
+    cwd: root,
+    ...(options.command ? { command: options.command } : {}),
+    ...(options.commandArgs ? { commandArgs: options.commandArgs } : {})
+  });
   const envFiles = scanEnvFiles(root);
   const providers = collectProviderHints({
     root,

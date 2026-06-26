@@ -8,6 +8,7 @@ import {
   type AuditLogger,
   type ApprovalRequestWithStatus,
   checkLocalConfigIgnored,
+  checkInstalledClientLaunches,
   createChildMandate,
   createMandate,
   decideApprovalRequest,
@@ -55,6 +56,7 @@ import {
   type MissingSecretRef,
   type SupportedClient,
   type SwitchboardConfig,
+  type ClientLaunchCheck,
   type SecretStore,
   updateMandateHandoff,
   validateSecretRef,
@@ -489,12 +491,18 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--json", "print machine-readable JSON")
     .action(async (options: { json?: boolean }) => {
       const globalOptions = program.opts<{ cwd?: string }>();
+      const launch = resolveInstallLaunch({ commandArgs: [] });
       const result = await scanSwitchboardProject({
-        ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
+        ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+        command: launch.command,
+        commandArgs: launch.commandArgs
       });
+      const displayResult = rewriteScanCommandsForCurrentInvocation(result);
 
       writeOut(
-        options.json ? JSON.stringify(result, null, 2) : formatScan(result)
+        options.json
+          ? JSON.stringify(displayResult, null, 2)
+          : formatScan(displayResult)
       );
     });
 
@@ -536,7 +544,13 @@ export function createProgram(io: ProgramIo = {}): Command {
       const loaded = loadSwitchboardConfig(configOptions);
       const localIgnore = checkLocalConfigIgnored(globalOptions.cwd);
       const cwd = configCwdBase(loaded, globalOptions.cwd);
-      const clientConfigs = await inspectProjectClientConfigs({ cwd });
+      const launch = resolveInstallLaunch({ commandArgs: [] });
+      const clientConfigs = await inspectProjectClientConfigs({
+        cwd,
+        command: launch.command,
+        commandArgs: launch.commandArgs
+      });
+      const clientLaunches = await checkInstalledClientLaunches(clientConfigs);
       const missingSecrets = await findMissingSecretRefs(
         loaded.config,
         secretStore
@@ -563,6 +577,11 @@ export function createProgram(io: ProgramIo = {}): Command {
           message: clientConfigSummary(clientConfigs)
         },
         {
+          name: "client-launch",
+          ok: clientLaunches.every((item) => item.ok),
+          message: clientLaunchSummary(clientLaunches)
+        },
+        {
           name: "secrets",
           ok: missingSecrets.length === 0,
           message: secretCheckSummary(missingSecrets)
@@ -575,9 +594,12 @@ export function createProgram(io: ProgramIo = {}): Command {
         loaded,
         localIgnoreOk: localIgnore.ok,
         clientConfigs,
+        clientLaunches,
         missingSecrets,
         cwd: globalOptions.cwd
-      });
+      }).map((step) =>
+        rewriteSwitchboardCommand(step, switchboardCommandPrefixForRepo(cwd))
+      );
       const status = doctorStatus({ ok, nextSteps });
       const result = {
         ok,
@@ -586,6 +608,7 @@ export function createProgram(io: ProgramIo = {}): Command {
         diagnostics: loaded.diagnostics,
         namespaceCollisions: loaded.namespaceCollisions,
         clientConfigs,
+        clientLaunches,
         secrets: {
           usages: collectSecretRefUsages(loaded.config),
           missing: missingSecrets
@@ -1021,7 +1044,7 @@ export function createProgram(io: ProgramIo = {}): Command {
             code: "missing_secret_input",
             message: "--json setup requires --value-stdin",
             nextActions: [
-              `Pipe the token with: pbpaste | ${formatHumanCommand(`switchboard setup ${preset} --value-stdin --json`)}`
+              `Pipe the token with: pbpaste | ${formatHumanCommand(rewriteSwitchboardCommand(`switchboard setup ${preset} --value-stdin --json`, switchboardCommandPrefixForRepo(resolve(program.opts<{ cwd?: string }>().cwd ?? process.cwd()))))}`
             ]
           });
           return;
@@ -1080,7 +1103,9 @@ export function createProgram(io: ProgramIo = {}): Command {
             namespace: written.plan.rendered.namespace,
             secretRef: written.plan.rendered.secretRef,
             tokenStored: true,
-            nextSteps: providerSetupNextSteps(written.plan)
+            nextSteps: providerSetupNextSteps(written.plan).map((step) =>
+              rewriteSwitchboardCommand(step, switchboardCommandPrefixForRepo(cwd))
+            )
           };
           writeOut(
             options.json
@@ -1095,8 +1120,8 @@ export function createProgram(io: ProgramIo = {}): Command {
             message,
             ...(message.includes("--value-stdin")
               ? {
-                  nextActions: [
-                    `Pipe the token with: pbpaste | ${formatHumanCommand(`switchboard setup ${preset} --value-stdin`)}`
+                nextActions: [
+                    `Pipe the token with: pbpaste | ${formatHumanCommand(rewriteSwitchboardCommand(`switchboard setup ${preset} --value-stdin`, switchboardCommandPrefixForRepo(cwd)))}`
                   ]
                 }
               : {})
@@ -3046,7 +3071,13 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--write", "write project-scoped client config")
     .option("--rollback <backup>", "restore project-scoped client config backup")
     .option("--server-name <name>", "MCP server name to register", "switchboard")
-    .option("--command <command>", "Switchboard executable command", "switchboard")
+    .option("--command <command>", "Switchboard executable command")
+    .option(
+      "--command-arg <arg>",
+      "argument to place before Switchboard's --cwd/mcp args; repeatable",
+      collectOption,
+      []
+    )
     .action(
       async (
         client: string,
@@ -3055,7 +3086,8 @@ export function createProgram(io: ProgramIo = {}): Command {
           write?: boolean;
           rollback?: string;
           serverName: string;
-          command: string;
+          command?: string;
+          commandArg: string[];
         }
       ) => {
         const globalOptions = program.opts<{ cwd?: string }>();
@@ -3110,10 +3142,15 @@ export function createProgram(io: ProgramIo = {}): Command {
           return;
         }
 
+        const launch = resolveInstallLaunch({
+          ...(options.command !== undefined ? { command: options.command } : {}),
+          commandArgs: options.commandArg
+        });
         const clientConfigOptions = {
           client: supportedClient,
           serverName: options.serverName,
-          command: options.command,
+          command: launch.command,
+          commandArgs: launch.commandArgs,
           cwd
         };
         const installValidation =
@@ -3264,6 +3301,52 @@ function formatScan(result: SwitchboardScanResult): string {
   return lines.join("\n");
 }
 
+function rewriteScanCommandsForCurrentInvocation(
+  result: SwitchboardScanResult
+): SwitchboardScanResult {
+  const prefix = switchboardCommandPrefixForRepo(
+    result.repo.gitRoot ?? result.repo.cwd
+  );
+  if (prefix === "switchboard") {
+    return result;
+  }
+
+  return {
+    ...result,
+    suggestions: result.suggestions.map((suggestion) => ({
+      ...suggestion,
+      command: rewriteSwitchboardCommand(suggestion.command, prefix)
+    })),
+    nextActions: result.nextActions.map((action) =>
+      rewriteSwitchboardCommand(action, prefix)
+    )
+  };
+}
+
+function rewriteSwitchboardCommand(command: string, prefix: string): string {
+  return command === "switchboard"
+    ? prefix
+    : command.startsWith("switchboard ")
+      ? `${prefix}${command.slice("switchboard".length)}`
+      : command;
+}
+
+function switchboardCommandPrefixForRepo(repoPath: string): string {
+  const sourceRoot = sourceCheckoutRoot();
+  if (!sourceRoot) {
+    return "switchboard";
+  }
+
+  return [
+    "pnpm",
+    "--dir",
+    shellQuoteCommandArg(sourceRoot),
+    "switchboard",
+    "--cwd",
+    shellQuoteCommandArg(repoPath)
+  ].join(" ");
+}
+
 function formatScanRuntime(result: SwitchboardScanResult): string {
   const labels: string[] = [result.runtime.kind];
   if (result.runtime.devcontainerPresent) {
@@ -3313,6 +3396,7 @@ function formatDoctor(result: {
   checks: Array<{ name: string; ok: boolean; message: string }>;
   diagnostics: Array<{ level: string; message: string }>;
   clientConfigs?: ProjectClientConfigInspection[];
+  clientLaunches?: ClientLaunchCheck[];
   secrets?: {
     usages: ReturnType<typeof collectSecretRefUsages>;
     missing: MissingSecretRef[];
@@ -3338,6 +3422,15 @@ function formatDoctor(result: {
           : "";
       lines.push(
         `  ${config.client}: ${config.status} - ${config.message}${otherServers} (${config.targetPath})`
+      );
+    }
+  }
+
+  if (result.clientLaunches && result.clientLaunches.length > 0) {
+    lines.push("", "Client launch:");
+    for (const launch of result.clientLaunches) {
+      lines.push(
+        `  ${launch.ok ? "ok" : "fail"} ${launch.client}: ${launch.message}`
       );
     }
   }
@@ -5860,6 +5953,7 @@ function doctorNextSteps(options: {
   loaded: ReturnType<typeof loadSwitchboardConfig>;
   localIgnoreOk: boolean;
   clientConfigs: ProjectClientConfigInspection[];
+  clientLaunches: ClientLaunchCheck[];
   missingSecrets: MissingSecretRef[];
   cwd: string | undefined;
 }): string[] {
@@ -5901,6 +5995,14 @@ function doctorNextSteps(options: {
   for (const config of options.clientConfigs) {
     if (config.status === "invalid") {
       steps.push(`fix ${config.targetPath}, then rerun switchboard doctor`);
+    }
+  }
+
+  for (const launch of options.clientLaunches) {
+    if (!launch.ok) {
+      steps.push(
+        `install or link ${launch.command}, then rerun switchboard install ${launch.client} --write`
+      );
     }
   }
 
@@ -5978,6 +6080,19 @@ function providerTemplateDoctorNextSteps(
   return steps;
 }
 
+function clientLaunchSummary(launches: ClientLaunchCheck[]): string {
+  if (launches.length === 0) {
+    return "No installed project client configs to launch yet.";
+  }
+
+  const ready = launches.filter((launch) => launch.ok).length;
+  if (ready === launches.length) {
+    return `${ready}/${launches.length} installed client launch command(s) are available.`;
+  }
+
+  return `${ready}/${launches.length} installed client launch command(s) are available.`;
+}
+
 function doctorStatus(options: {
   ok: boolean;
   nextSteps: string[];
@@ -5986,10 +6101,87 @@ function doctorStatus(options: {
     return "failed";
   }
 
-  const setupSteps = options.nextSteps.filter(
-    (step) => !step.startsWith("switchboard test ")
-  );
+  const setupSteps = options.nextSteps.filter(isSetupIncompleteStep);
   return setupSteps.length > 0 ? "setup-incomplete" : "ok";
+}
+
+function isSetupIncompleteStep(step: string): boolean {
+  const switchboardIndex = step.indexOf(" switchboard ");
+  const command =
+    step.startsWith("pnpm ") && switchboardIndex !== -1
+      ? step.slice(switchboardIndex + " switchboard ".length)
+      : step.startsWith("switchboard ")
+        ? step.slice("switchboard ".length)
+        : step;
+  const subcommand = command.replace(/^--cwd\s+\S+\s+/, "");
+
+  return !(
+    subcommand.startsWith("test ") ||
+    subcommand.startsWith("presets check ") ||
+    subcommand.startsWith("mandate create ")
+  );
+}
+
+function resolveInstallLaunch(options: {
+  command?: string;
+  commandArgs: string[];
+}): { command: string; commandArgs: string[] } {
+  if (options.command !== undefined) {
+    return {
+      command: options.command,
+      commandArgs: options.commandArgs
+    };
+  }
+
+  if (options.commandArgs.length > 0) {
+    return {
+      command: "switchboard",
+      commandArgs: options.commandArgs
+    };
+  }
+
+  const sourceEntrypoint = sourceCheckoutEntrypoint();
+  if (sourceEntrypoint) {
+    return {
+      command: process.execPath,
+      commandArgs: [sourceEntrypoint]
+    };
+  }
+
+  return {
+    command: "switchboard",
+    commandArgs: []
+  };
+}
+
+function sourceCheckoutEntrypoint(): string | null {
+  const sourceRoot = sourceCheckoutRoot();
+  if (!sourceRoot) {
+    return null;
+  }
+
+  return resolve(sourceRoot, "apps", "cli", "dist", "index.js");
+}
+
+function sourceCheckoutRoot(): string | null {
+  if (
+    process.env.npm_lifecycle_event !== "switchboard" ||
+    process.env.npm_package_name !== "switchboard"
+  ) {
+    return null;
+  }
+
+  const entrypoint = process.argv[1];
+  if (!entrypoint || !entrypoint.endsWith(`${sep}apps${sep}cli${sep}dist${sep}index.js`)) {
+    return null;
+  }
+
+  return resolve(
+    entrypoint.slice(
+      0,
+      -`${sep}apps${sep}cli${sep}dist${sep}index.js`.length
+    )
+  );
 }
 
 function parseTimeoutMs(value: string): number | undefined {

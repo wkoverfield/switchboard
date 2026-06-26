@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -1240,6 +1241,12 @@ describe("switchboard CLI program", () => {
   it("reports installed project client configs in doctor JSON", async () => {
     const root = makeTempProject();
     writeStdioConfig(root);
+    const binDir = join(root, "bin");
+    mkdirSync(binDir);
+    writeFileSync(join(binDir, "switchboard"), "#!/bin/sh\nexit 0\n");
+    chmodSync(join(binDir, "switchboard"), 0o755);
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${binDir}${process.platform === "win32" ? ";" : ":"}${originalPath ?? ""}`;
 
     await createProgram().parseAsync(
       ["--cwd", root, "install", "codex", "--write"],
@@ -1273,6 +1280,7 @@ describe("switchboard CLI program", () => {
       expect.objectContaining({ client: "claude", status: "installed" })
     ]);
     expect(parsed.nextSteps).toEqual(["switchboard test local_echo"]);
+    process.env.PATH = originalPath;
   });
 
   it("reports stale project client configs in doctor JSON", async () => {
@@ -1303,6 +1311,59 @@ describe("switchboard CLI program", () => {
       status: "stale"
     });
     expect(parsed.nextSteps).toContain("switchboard install codex --write");
+  });
+
+  it("reports installed client configs with missing launch commands", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    await createProgram().parseAsync(
+      [
+        "--cwd",
+        root,
+        "install",
+        "claude",
+        "--write",
+        "--command",
+        join(root, "missing-switchboard")
+      ],
+      {
+        from: "user"
+      }
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "doctor", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      status: string;
+      checks: Array<{ name: string; ok: boolean }>;
+      clientConfigs: Array<{ client: string; status: string }>;
+      clientLaunches: Array<{ client: string; ok: boolean; command: string }>;
+      nextSteps: string[];
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.status).toBe("failed");
+    expect(parsed.checks).toContainEqual(
+      expect.objectContaining({ name: "client-launch", ok: false })
+    );
+    expect(parsed.clientConfigs).toContainEqual(
+      expect.objectContaining({ client: "claude", status: "installed" })
+    );
+    expect(parsed.clientLaunches).toContainEqual(
+      expect.objectContaining({
+        client: "claude",
+        ok: false,
+        command: join(root, "missing-switchboard")
+      })
+    );
+    expect(parsed.nextSteps).toContain(
+      `install or link ${join(root, "missing-switchboard")}, then rerun switchboard install claude --write`
+    );
   });
 
   it("prints other project MCP server names in human doctor output", async () => {
@@ -3007,6 +3068,56 @@ describe("switchboard CLI program", () => {
         }
       }
     });
+  });
+
+  it("uses the source checkout entrypoint for install snippets run through pnpm switchboard", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+    const originalLifecycle = process.env.npm_lifecycle_event;
+    const originalPackageName = process.env.npm_package_name;
+    const originalArgv1 = process.argv[1];
+    const sourceEntrypoint = join(
+      root,
+      "switchboard",
+      "apps",
+      "cli",
+      "dist",
+      "index.js"
+    );
+    process.env.npm_lifecycle_event = "switchboard";
+    process.env.npm_package_name = "switchboard";
+    process.argv[1] = sourceEntrypoint;
+
+    try {
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message)
+      });
+      await program.parseAsync(["--cwd", root, "install", "claude", "--json"], {
+        from: "user"
+      });
+
+      const parsed = JSON.parse(output[0] ?? "{}") as {
+        content: string;
+      };
+      expect(JSON.parse(parsed.content)).toEqual({
+        mcpServers: {
+          switchboard: {
+            command: process.execPath,
+            args: [sourceEntrypoint, "--cwd", root, "mcp"],
+            env: {}
+          }
+        }
+      });
+    } finally {
+      restoreEnvValue("npm_lifecycle_event", originalLifecycle);
+      restoreEnvValue("npm_package_name", originalPackageName);
+      if (originalArgv1 === undefined) {
+        process.argv.splice(1, 1);
+      } else {
+        process.argv[1] = originalArgv1;
+      }
+    }
   });
 
   it("writes project-scoped Codex install config as JSON", async () => {
@@ -6310,4 +6421,12 @@ function writeMandateSecretConfig(root: string): void {
       "          secretRef: vercel/preview/token"
     ].join("\n")
   );
+}
+
+function restoreEnvValue(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
 }

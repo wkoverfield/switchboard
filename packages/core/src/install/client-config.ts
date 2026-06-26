@@ -1,11 +1,12 @@
 import { constants } from "node:fs";
 import {
+  access,
   copyFile,
   mkdir,
   readFile,
   writeFile
 } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
 
 export type SupportedClient = "codex" | "claude";
 
@@ -13,6 +14,7 @@ export interface SwitchboardClientConfigOptions {
   client: SupportedClient;
   serverName?: string;
   command?: string;
+  commandArgs?: string[];
   cwd: string;
 }
 
@@ -56,6 +58,19 @@ export interface ProjectClientConfigInspection {
   status: ProjectClientConfigStatus;
   message: string;
   otherServerNames: string[];
+  launch: {
+    command: string;
+    args: string[];
+  } | null;
+}
+
+export interface ClientLaunchCheck {
+  client: SupportedClient;
+  serverName: string;
+  command: string;
+  args: string[];
+  ok: boolean;
+  message: string;
 }
 
 const defaultServerName = "switchboard";
@@ -66,11 +81,13 @@ export function renderSwitchboardClientConfig(
 ): RenderedClientConfig {
   const serverName = options.serverName ?? defaultServerName;
   const command = options.command ?? defaultCommand;
-  const args = ["--cwd", options.cwd, "mcp"];
+  const commandArgs = options.commandArgs ?? [];
+  const args = [...commandArgs, "--cwd", options.cwd, "mcp"];
   const validation = validateSwitchboardClientConfigOptions({
     ...options,
     serverName,
-    command
+    command,
+    commandArgs
   });
 
   if (!validation.ok) {
@@ -184,7 +201,8 @@ export async function inspectProjectClientConfig(
       targetPath,
       status: "missing",
       message: "Project client config file was not found.",
-      otherServerNames: []
+      otherServerNames: [],
+      launch: null
     };
   }
 
@@ -203,6 +221,7 @@ export async function inspectProjectClientConfig(
       targetPath,
       serverName: rendered.serverName,
       command: options.command ?? defaultCommand,
+      commandArgs: options.commandArgs ?? [],
       cwd: options.cwd
     });
   } catch (error) {
@@ -212,7 +231,8 @@ export async function inspectProjectClientConfig(
       targetPath,
       status: "invalid",
       message: messageFromError(error),
-      otherServerNames: []
+      otherServerNames: [],
+      launch: null
     };
   }
 }
@@ -221,6 +241,7 @@ export async function inspectProjectClientConfigs(options: {
   cwd: string;
   serverName?: string;
   command?: string;
+  commandArgs?: string[];
 }): Promise<ProjectClientConfigInspection[]> {
   return Promise.all([
     inspectProjectClientConfig({ ...options, client: "codex" }),
@@ -233,6 +254,7 @@ export function validateSwitchboardClientConfigOptions(
 ): ClientConfigValidationResult {
   const serverName = options.serverName ?? defaultServerName;
   const command = options.command ?? defaultCommand;
+  const commandArgs = options.commandArgs ?? [];
   const errors: string[] = [];
 
   if (serverName.trim().length === 0) {
@@ -251,7 +273,49 @@ export function validateSwitchboardClientConfigOptions(
     errors.push("command must not contain control characters");
   }
 
+  for (const [index, arg] of commandArgs.entries()) {
+    if (containsControlCharacter(arg)) {
+      errors.push(`command arg ${index + 1} must not contain control characters`);
+    }
+  }
+
   return { ok: errors.length === 0, errors };
+}
+
+export async function checkInstalledClientLaunches(
+  inspections: ProjectClientConfigInspection[],
+  env: NodeJS.ProcessEnv = process.env
+): Promise<ClientLaunchCheck[]> {
+  return Promise.all(
+    inspections
+      .filter((inspection) => inspection.status === "installed")
+      .map(async (inspection) => {
+        const launch = inspection.launch;
+        if (!launch) {
+          return {
+            client: inspection.client,
+            serverName: inspection.serverName,
+            command: "",
+            args: [],
+            ok: false,
+            message: `${inspection.client} config is installed, but the launch command could not be read.`
+          };
+        }
+
+        const resolved = await resolveExecutable(launch.command, env);
+        return {
+          client: inspection.client,
+          serverName: inspection.serverName,
+          command: launch.command,
+          args: launch.args,
+          ok: resolved !== null,
+          message:
+            resolved === null
+              ? `${inspection.client} config points to "${launch.command}", but that executable is not available on PATH.`
+              : `${inspection.client} launch command is available: ${launch.command}`
+        };
+      })
+  );
 }
 
 function containsControlCharacter(value: string): boolean {
@@ -407,7 +471,8 @@ function inspectClaudeProjectConfig(options: {
       targetPath: options.targetPath,
       status: "missing",
       message: "Claude project config does not include the Switchboard MCP server.",
-      otherServerNames
+      otherServerNames,
+      launch: null
     };
   }
 
@@ -418,7 +483,8 @@ function inspectClaudeProjectConfig(options: {
       targetPath: options.targetPath,
       status: "stale",
       message: "Claude project config has a different Switchboard MCP server entry.",
-      otherServerNames
+      otherServerNames,
+      launch: clientServerEntryLaunch(actual)
     };
   }
 
@@ -428,7 +494,8 @@ function inspectClaudeProjectConfig(options: {
     targetPath: options.targetPath,
     status: "installed",
     message: "Claude project config routes through switchboard mcp.",
-    otherServerNames
+    otherServerNames,
+    launch: clientServerEntryLaunch(actual)
   };
 }
 
@@ -437,6 +504,7 @@ function inspectCodexProjectConfig(options: {
   targetPath: string;
   serverName: string;
   command: string;
+  commandArgs: string[];
   cwd: string;
 }): ProjectClientConfigInspection {
   const section = codexMcpServerSection(options.existing, options.serverName);
@@ -451,7 +519,8 @@ function inspectCodexProjectConfig(options: {
       targetPath: options.targetPath,
       status: "missing",
       message: "Codex project config does not include the Switchboard MCP server.",
-      otherServerNames
+      otherServerNames,
+      launch: null
     };
   }
 
@@ -459,15 +528,13 @@ function inspectCodexProjectConfig(options: {
   const command = parseTomlString(values.command);
   const args = parseTomlStringArray(values.args);
   const cwd = parseTomlString(values.cwd);
+  const expectedArgs = [...options.commandArgs, "--cwd", options.cwd, "mcp"];
 
   if (
-    command !== options.command ||
+    !command ||
     (cwd !== undefined && cwd !== options.cwd) ||
     !args ||
-    args.length !== 3 ||
-    args[0] !== "--cwd" ||
-    args[1] !== options.cwd ||
-    args[2] !== "mcp"
+    !launchArgsRouteThroughSwitchboard(args, expectedArgs)
   ) {
     return {
       client: "codex",
@@ -475,7 +542,8 @@ function inspectCodexProjectConfig(options: {
       targetPath: options.targetPath,
       status: "stale",
       message: "Codex project config has a different Switchboard MCP server entry.",
-      otherServerNames
+      otherServerNames,
+      launch: command && args ? { command, args } : null
     };
   }
 
@@ -485,7 +553,8 @@ function inspectCodexProjectConfig(options: {
     targetPath: options.targetPath,
     status: "installed",
     message: "Codex project config routes through switchboard mcp.",
-    otherServerNames
+    otherServerNames,
+    launch: { command, args }
   };
 }
 
@@ -504,10 +573,57 @@ function clientServerEntryRoutesThroughSwitchboard(
     return false;
   }
 
+  if (typeof actual.command !== "string" || actual.command.trim().length === 0) {
+    return false;
+  }
+
+  if (!Array.isArray(actual.args) || !Array.isArray(expected.args)) {
+    return false;
+  }
+
   return (
-    actual.command === expected.command &&
-    JSON.stringify(actual.args) === JSON.stringify(expected.args)
+    actual.args.every((arg) => typeof arg === "string") &&
+    expected.args.every((arg) => typeof arg === "string") &&
+    launchArgsRouteThroughSwitchboard(actual.args, expected.args)
   );
+}
+
+function launchArgsRouteThroughSwitchboard(
+  actual: string[],
+  expected: string[]
+): boolean {
+  const expectedPrefixLength = Math.max(0, expected.length - 3);
+  if (expectedPrefixLength > 0) {
+    return JSON.stringify(actual) === JSON.stringify(expected);
+  }
+
+  if (actual.length < 3) {
+    return false;
+  }
+
+  const suffix = actual.slice(-3);
+  return JSON.stringify(suffix) === JSON.stringify(expected.slice(-3));
+}
+
+function clientServerEntryLaunch(
+  entry: unknown
+): ProjectClientConfigInspection["launch"] {
+  if (!isRecord(entry) || typeof entry.command !== "string") {
+    return null;
+  }
+
+  if (
+    entry.args !== undefined &&
+    (!Array.isArray(entry.args) ||
+      !entry.args.every((arg) => typeof arg === "string"))
+  ) {
+    return null;
+  }
+
+  return {
+    command: entry.command,
+    args: Array.isArray(entry.args) ? entry.args : []
+  };
 }
 
 function codexMcpServerSection(
@@ -620,4 +736,36 @@ function tomlKey(value: string): string {
 
 function tomlString(value: string): string {
   return JSON.stringify(value);
+}
+
+async function resolveExecutable(
+  command: string,
+  env: NodeJS.ProcessEnv
+): Promise<string | null> {
+  if (isAbsolute(command)) {
+    return (await isExecutable(command)) ? command : null;
+  }
+
+  const path = env.PATH ?? "";
+  for (const directory of path.split(delimiter)) {
+    if (directory.length === 0) {
+      continue;
+    }
+
+    const candidate = join(directory, command);
+    if (await isExecutable(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function isExecutable(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
