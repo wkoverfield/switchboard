@@ -17,9 +17,14 @@ const secretRef = "vercel/example/preview/token";
 const secretValue = "vercel-preview-secret-do-not-print";
 const secretHash = sha256(secretValue);
 const providerToolNames = [
-  "logs",
-  "deploy_preview",
-  "rollback_preview",
+  "list_deployments",
+  "get_deployment",
+  "get_deployment_events",
+  "get_runtime_logs",
+  "create_deployment",
+  "cancel_deployment",
+  "delete_deployment",
+  "rollback_deployment",
   "deploy_prod",
   "deploy_production",
   "promote_production",
@@ -28,6 +33,7 @@ const providerToolNames = [
   "environment_update",
   "domains_list",
   "domain_add",
+  "token_create",
   "billing_list",
   "team_members"
 ];
@@ -85,12 +91,17 @@ try {
   assert(check.policyCovered === true, "expected policy-covered Vercel fixture");
   assert(check.counts?.allowedSensitive === 0, "expected no allowed-sensitive tools");
   assert(check.counts?.notAllowed === 0, "expected no not-allowed tools");
-  assert(check.counts?.allowed === 3, "expected echo, whoami, and logs allowed");
-  assert(check.counts?.approvalRequired === 2, "expected deploy/rollback approval gates");
-  assert(check.counts?.denied === 11, "expected production/admin tools denied");
-  assertToolClass(check, "vercel_preview_logs", "allowed");
-  assertToolClass(check, "vercel_preview_deploy_preview", "approval_required");
-  assertToolClass(check, "vercel_preview_rollback_preview", "approval_required");
+  assert(check.counts?.allowed === 6, "expected echo, whoami, and read/log tools allowed");
+  assert(check.counts?.approvalRequired === 4, "expected deployment write/rollback approval gates");
+  assert(check.counts?.denied === 12, "expected production/admin tools denied");
+  assertToolClass(check, "vercel_preview_list_deployments", "allowed");
+  assertToolClass(check, "vercel_preview_get_deployment", "allowed");
+  assertToolClass(check, "vercel_preview_get_deployment_events", "allowed");
+  assertToolClass(check, "vercel_preview_get_runtime_logs", "allowed");
+  assertToolClass(check, "vercel_preview_create_deployment", "approval_required");
+  assertToolClass(check, "vercel_preview_cancel_deployment", "approval_required");
+  assertToolClass(check, "vercel_preview_delete_deployment", "approval_required");
+  assertToolClass(check, "vercel_preview_rollback_deployment", "approval_required");
   assertToolClass(check, "vercel_preview_deploy_prod", "denied");
   assertToolClass(check, "vercel_preview_deploy_production", "denied");
   assertToolClass(check, "vercel_preview_env_list", "denied");
@@ -118,9 +129,9 @@ try {
   );
   assert(
     mandate.mandate?.approvalGates?.some?.(
-      (gate) => gate.toolPattern === "vercel_preview_*deploy*"
+      (gate) => gate.toolPattern === "vercel_preview_create_deployment"
     ),
-    "expected deploy approval gate"
+    "expected create deployment approval gate"
   );
   assertNoSecretText(JSON.stringify(mandate), "mandate create");
 

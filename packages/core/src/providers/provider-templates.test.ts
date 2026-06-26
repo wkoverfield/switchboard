@@ -94,7 +94,10 @@ describe("provider safety templates", () => {
       provider: "vercel",
       environment: "staging",
       upstream: {
+        command: "npx",
+        args: ["-y", "vercel-platform-mcp-server"],
         env: {
+          VERCEL_ENABLED_TOOLGROUPS: "readonly",
           VERCEL_TOKEN: {
             secretRef: "vercel/findu/preview/token"
           }
@@ -232,9 +235,14 @@ describe("provider safety templates", () => {
     const result = checkProviderSafetyTemplateTools("vercel-preview", {
       namespace: "vercel_preview",
       toolNames: [
-        "vercel_preview_logs",
-        "vercel_preview_deploy_preview",
-        "vercel_preview_rollback_preview",
+        "vercel_preview_list_deployments",
+        "vercel_preview_get_deployment",
+        "vercel_preview_get_deployment_events",
+        "vercel_preview_get_runtime_logs",
+        "vercel_preview_create_deployment",
+        "vercel_preview_cancel_deployment",
+        "vercel_preview_delete_deployment",
+        "vercel_preview_rollback_deployment",
         "vercel_preview_deploy_prod",
         "vercel_preview_deploy_production",
         "vercel_preview_promote_production",
@@ -252,21 +260,35 @@ describe("provider safety templates", () => {
 
     expect(result.ok).toBe(true);
     expect(result.counts).toMatchObject({
-      tools: 15,
-      allowed: 1,
-      approvalRequired: 2,
+      tools: 20,
+      allowed: 4,
+      approvalRequired: 4,
       denied: 12,
       allowedSensitive: 0,
       notAllowed: 0
     });
     expect(result.tools).toMatchObject([
-      { toolName: "vercel_preview_logs", classification: "allowed" },
+      { toolName: "vercel_preview_list_deployments", classification: "allowed" },
+      { toolName: "vercel_preview_get_deployment", classification: "allowed" },
       {
-        toolName: "vercel_preview_deploy_preview",
+        toolName: "vercel_preview_get_deployment_events",
+        classification: "allowed"
+      },
+      { toolName: "vercel_preview_get_runtime_logs", classification: "allowed" },
+      {
+        toolName: "vercel_preview_create_deployment",
         classification: "approval_required"
       },
       {
-        toolName: "vercel_preview_rollback_preview",
+        toolName: "vercel_preview_cancel_deployment",
+        classification: "approval_required"
+      },
+      {
+        toolName: "vercel_preview_delete_deployment",
+        classification: "approval_required"
+      },
+      {
+        toolName: "vercel_preview_rollback_deployment",
         classification: "approval_required"
       },
       { toolName: "vercel_preview_deploy_prod", classification: "denied" },

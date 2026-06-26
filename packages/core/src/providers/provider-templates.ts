@@ -18,6 +18,7 @@ export interface ProviderSafetyTemplate {
   secretEnvName: string;
   defaultCommand: string;
   defaultArgs: string[];
+  defaultEnv?: Record<string, string>;
   environment: string;
   readOnly: boolean;
   mode: "inspect" | "guarded" | "autopilot" | "unrestricted";
@@ -240,8 +241,11 @@ export const providerSafetyTemplates: ProviderSafetyTemplate[] = [
     defaultNamespace: "vercel_preview",
     defaultSecretRef: "vercel/example/preview/token",
     secretEnvName: "VERCEL_TOKEN",
-    defaultCommand: "vercel-mcp-server",
-    defaultArgs: [],
+    defaultCommand: "npx",
+    defaultArgs: ["-y", "vercel-platform-mcp-server"],
+    defaultEnv: {
+      VERCEL_ENABLED_TOOLGROUPS: "readonly"
+    },
     environment: "staging",
     readOnly: false,
     mode: "guarded",
@@ -270,9 +274,21 @@ export const providerSafetyTemplates: ProviderSafetyTemplate[] = [
       ],
       approvalGates: [
         {
-          toolPattern: "{namespace}_*deploy*",
-          reason: "deploying previews changes remote provider state",
+          toolPattern: "{namespace}_create_deployment",
+          reason: "creating deployments changes remote provider state",
           risk: "medium",
+          labels: ["vercel", "write"]
+        },
+        {
+          toolPattern: "{namespace}_cancel_deployment",
+          reason: "cancelling deployments changes remote provider state",
+          risk: "medium",
+          labels: ["vercel", "write"]
+        },
+        {
+          toolPattern: "{namespace}_delete_deployment",
+          reason: "deleting deployments changes remote provider state",
+          risk: "high",
           labels: ["vercel", "write"]
         },
         {
@@ -353,6 +369,7 @@ export function renderProviderSafetyTemplate(
           command,
           ...(args.length > 0 ? { args } : {}),
           env: {
+            ...(template.defaultEnv ?? {}),
             [template.secretEnvName]: {
               secretRef
             }
