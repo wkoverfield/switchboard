@@ -150,6 +150,8 @@ Default posture:
 - namespace: `vercel_preview`
 - secret env: `VERCEL_TOKEN`
 - default secretRef: `vercel/example/preview/token`
+- default command: `npx -y vercel-platform-mcp-server`
+- default extra env: `VERCEL_ENABLED_TOOLGROUPS=readonly`
 - mode: `guarded`
 - enforcement: `switchboard`
 
@@ -158,7 +160,7 @@ Recommended mandate policy:
 - allow namespaced Vercel preview tools for the task
 - deny production deploy, promotion, env/environment, domain, secret/token,
   billing, and team-shaped tools
-- require approval for deploy and rollback-shaped tools
+- require approval for deployment write and rollback-shaped tools
 
 Credential guidance:
 
@@ -166,6 +168,14 @@ Credential guidance:
 - add only when approval-gated: preview deploy and rollback
 - avoid: production promotion, environment variable writes, domain management,
   team administration, and billing administration
+
+Dogfood result, 2026-06-25: the default template was checked against
+`vercel-platform-mcp-server` using a real Vercel CLI token copied into a
+Switchboard `secretRef`. With `VERCEL_ENABLED_TOOLGROUPS=readonly`, the server
+exposed 5 namespaced tools. The template classified all 5 as allowed, with 0
+allowed-sensitive, 0 approval-required, 0 denied, and 0 not-allowed. A
+mandate-scoped MCP session successfully called `vercel_preview_list_projects`
+without printing token values.
 
 ## Why This Comes Before Full Presets
 
@@ -177,11 +187,13 @@ keeping claims modest:
 - no OAuth
 - no hosted broker
 - no raw provider tokens in config
-- no automatic provider MCP install
+- no vendored provider MCP server
 - no claim that provider-specific permissions are fully enforced
 
 The first live GitHub MCP server dogfood has held up against observed tool
-names. The remaining provider proof is to repeat GitHub CI with a dedicated
-least-privilege token, then run Vercel Preview against a real project. Once
+names. The first live Vercel Preview dogfood has held up for readonly project
+and deployment/log inspection. The remaining provider proof is to repeat GitHub
+CI with a dedicated least-privilege token and deepen Vercel Preview with a
+project-scoped token/report. Once
 those reports stay policy-covered, Switchboard can promote the most useful
 provider path into a real preset.
