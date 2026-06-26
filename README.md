@@ -10,6 +10,31 @@ The deeper power layer is mandates: temporary, task-scoped authority that lets a
 
 This repository is in foundation work for the local mandate layer. It currently ships the TypeScript workspace, CLI shell, local `switchboard scan`, config/profile schemas, namespace normalization, collision detection, `switchboard status`, `switchboard doctor` with `ok` / `setup-incomplete` / `failed` readiness, generic stdio MCP upstream mounting, namespaced tool routing, a stdio MCP front door, client config dry-run and write-mode installers for Codex and Claude Code, project client config and existing MCP server detection in doctor, local audit logs, daemon lifecycle commands, daemon-side tool discovery, a daemon-backed MCP adapter for tool listing and routed calls, local mandate creation/status, preset-backed `switchboard mandate create --from <preset>`, mandate-scoped MCP runtime context, mandate allow/deny tool policy, local secret refs backed by a keychain adapter, provider-add structured command JSON, and end-to-end MCP smoke checks.
 
+## Install
+
+Alpha package install:
+
+```bash
+npm install -g @switchboard-mcp/cli
+switchboard --help
+```
+
+For one-off or harness use without a global install:
+
+```bash
+npx -y @switchboard-mcp/cli@latest --help
+```
+
+Then run the repo setup flow from the project you want agents to work in:
+
+```bash
+switchboard scan
+switchboard setup github-ci
+switchboard doctor
+switchboard install codex --write
+switchboard mandate create --from github-ci
+```
+
 ## Install From Source
 
 ```bash

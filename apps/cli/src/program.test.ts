@@ -1362,8 +1362,53 @@ describe("switchboard CLI program", () => {
       })
     );
     expect(parsed.nextSteps).toContain(
-      `install or link ${join(root, "missing-switchboard")}, then rerun switchboard install claude --write`
+      `make ${join(root, "missing-switchboard")} executable, then rerun switchboard install claude --write`
     );
+  });
+
+  it("points missing packaged launch commands to the npm install", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      join(root, ".codex", "config.toml"),
+      [
+        '[mcp_servers."switchboard"]',
+        'command = "switchboard"',
+        `args = ["--cwd", "${root}", "mcp"]`
+      ].join("\n")
+    );
+
+    const originalPath = process.env.PATH;
+    process.env.PATH = "";
+    try {
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message)
+      });
+      await program.parseAsync(["--cwd", root, "doctor", "--json"], {
+        from: "user"
+      });
+
+      const parsed = JSON.parse(output[0] ?? "{}") as {
+        ok: boolean;
+        clientLaunches: Array<{ client: string; ok: boolean; command: string }>;
+        nextSteps: string[];
+      };
+      expect(parsed.ok).toBe(false);
+      expect(parsed.clientLaunches).toContainEqual(
+        expect.objectContaining({
+          client: "codex",
+          ok: false,
+          command: "switchboard"
+        })
+      );
+      expect(parsed.nextSteps).toContain(
+        "install Switchboard with npm install -g @switchboard-mcp/cli, then rerun switchboard install codex --write"
+      );
+    } finally {
+      restoreEnvValue("PATH", originalPath);
+    }
   });
 
   it("prints other project MCP server names in human doctor output", async () => {

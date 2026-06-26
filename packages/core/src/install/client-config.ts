@@ -311,11 +311,22 @@ export async function checkInstalledClientLaunches(
           ok: resolved !== null,
           message:
             resolved === null
-              ? `${inspection.client} config points to "${launch.command}", but that executable is not available on PATH.`
+              ? launchCommandMissingMessage(inspection.client, launch.command)
               : `${inspection.client} launch command is available: ${launch.command}`
         };
       })
   );
+}
+
+function launchCommandMissingMessage(
+  client: SupportedClient,
+  command: string
+): string {
+  if (isAbsolute(command)) {
+    return `${client} config points to "${command}", but that executable is missing or not executable.`;
+  }
+
+  return `${client} config points to "${command}", but that executable is not available on PATH.`;
 }
 
 function containsControlCharacter(value: string): boolean {
