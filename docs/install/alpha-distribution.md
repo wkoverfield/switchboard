@@ -4,6 +4,24 @@ This page is for pre-public alpha packaging checks. It does not publish
 Switchboard. It verifies that a fresh developer can build, pack, and run the
 local CLI before a non-Wilson user test.
 
+## Packaged Alpha Install
+
+Once the alpha package is published, a normal tester should start with:
+
+```bash
+npm install -g @switchboard-mcp/cli
+switchboard --help
+```
+
+For one-off or harness usage:
+
+```bash
+npx -y @switchboard-mcp/cli@latest --help
+```
+
+The package name is `@switchboard-mcp/cli`; the binary it exposes is always
+`switchboard`.
+
 ## Source Install
 
 ```bash
@@ -22,6 +40,7 @@ Then follow the canonical GitHub CI path in `docs/install/quickstart.md`.
 ```bash
 pnpm build
 pnpm smoke:package-pack
+pnpm smoke:package-install
 ```
 
 The smoke packs:
@@ -32,7 +51,9 @@ The smoke packs:
 
 It verifies package metadata, README inclusion, built `dist/index.js`, the
 `switchboard` binary entrypoint, publishable internal dependency versions, and
-that compiled test files are not included in tarballs.
+that compiled test files are not included in tarballs. The package-install
+smoke installs the packed tarballs into a fresh temp project and proves the
+installed `node_modules/.bin/switchboard` binary can run `--help` and `doctor`.
 
 ## Client Install Checks
 

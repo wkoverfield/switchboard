@@ -6001,7 +6001,7 @@ function doctorNextSteps(options: {
   for (const launch of options.clientLaunches) {
     if (!launch.ok) {
       steps.push(
-        `install or link ${launch.command}, then rerun switchboard install ${launch.client} --write`
+        `${clientLaunchInstallHint(launch.command)}, then rerun switchboard install ${launch.client} --write`
       );
     }
   }
@@ -6091,6 +6091,18 @@ function clientLaunchSummary(launches: ClientLaunchCheck[]): string {
   }
 
   return `${ready}/${launches.length} installed client launch command(s) are available.`;
+}
+
+function clientLaunchInstallHint(command: string): string {
+  if (command === "switchboard") {
+    return "install Switchboard with npm install -g @switchboard-mcp/cli";
+  }
+
+  if (isAbsolute(command)) {
+    return `make ${command} executable`;
+  }
+
+  return `install or link ${command}`;
 }
 
 function doctorStatus(options: {
