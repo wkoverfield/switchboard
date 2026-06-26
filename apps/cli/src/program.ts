@@ -3656,10 +3656,9 @@ function formatProviderAdd(
     plan.nextContent.trimEnd(),
     "",
     "Next steps:",
-    `  ${formatHumanCommand(providerAuthCommand(plan))}`,
-    `  ${formatHumanCommand(plan.checkCommand)}`,
-    ...plan.installCommands.map((command) => `  ${formatHumanCommand(command)}`),
-    `  ${formatHumanCommand(plan.mandateCommand)}`,
+    ...formatProviderAddNextSteps(plan).map(
+      (command) => `  ${formatHumanCommand(command)}`
+    ),
     "",
     "Notes:",
     ...plan.rendered.notes.map((note) => `  ${note}`),
@@ -3667,6 +3666,16 @@ function formatProviderAdd(
       ? []
       : ["", "Dry run by default. Re-run with --write to apply this plan."])
   ].join("\n");
+}
+
+function formatProviderAddNextSteps(plan: ProviderAddPlan): string[] {
+  const prefix = switchboardCommandPrefixForRepo(dirname(plan.targetPath));
+  return [
+    providerAuthCommand(plan),
+    plan.checkCommand,
+    ...plan.installCommands,
+    plan.mandateCommand
+  ].map((command) => rewriteSwitchboardCommand(command, prefix));
 }
 
 function providerAuthCommand(plan: ProviderAddPlan): string {
