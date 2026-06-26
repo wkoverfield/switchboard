@@ -404,6 +404,51 @@ describe("switchboard CLI program", () => {
     );
   });
 
+  it("prints source-checkout provider add next steps with the target repo cwd", async () => {
+    const root = makeTempProject();
+    const sourceRoot = join(root, "switchboard-source");
+    const sourceEntrypoint = join(
+      sourceRoot,
+      "apps",
+      "cli",
+      "dist",
+      "index.js"
+    );
+    const originalLifecycle = process.env.npm_lifecycle_event;
+    const originalPackageName = process.env.npm_package_name;
+    const originalArgv1 = process.argv[1];
+    process.env.npm_lifecycle_event = "switchboard";
+    process.env.npm_package_name = "switchboard";
+    process.argv[1] = sourceEntrypoint;
+
+    try {
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message)
+      });
+      await program.parseAsync(["--cwd", root, "add", "vercel-preview", "--write"], {
+        from: "user"
+      });
+
+      const text = output.join("\n");
+      expect(text).toContain(
+        `pnpm --dir ${sourceRoot} switchboard --cwd ${root} auth vercel-preview`
+      );
+      expect(text).toContain(
+        `pnpm --dir ${sourceRoot} switchboard --cwd ${root} presets check vercel-preview --profile vercel_preview`
+      );
+      expect(text).not.toContain("  pnpm switchboard auth vercel-preview");
+    } finally {
+      restoreEnvValue("npm_lifecycle_event", originalLifecycle);
+      restoreEnvValue("npm_package_name", originalPackageName);
+      if (originalArgv1 === undefined) {
+        process.argv.splice(1, 1);
+      } else {
+        process.argv[1] = originalArgv1;
+      }
+    }
+  });
+
   it("prints provider auth command with custom secret ref in provider add output", async () => {
     const root = makeTempProject();
     const output: string[] = [];
