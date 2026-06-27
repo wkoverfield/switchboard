@@ -3710,6 +3710,38 @@ describe("switchboard CLI program", () => {
           }
         ],
         installHint: expect.stringContaining("switchboard binary is on PATH")
+      },
+      workspaceLease: {
+        schemaVersion: "switchboard.workspace-lease.v1",
+        mandateId: "fix-ci",
+        repo: {
+          path: root,
+          worktreePath: root,
+          branch: "fix/ci"
+        },
+        runtime: {
+          kind: "local",
+          transport: "stdio"
+        },
+        envClass: "unknown",
+        authority: {
+          agentRole: "implementer",
+          profiles: ["github_findu", "vercel_preview"],
+          allowedTools: ["github_findu_*"],
+          deniedTools: ["*_deploy_prod"]
+        },
+        mcpLaunch: {
+          schemaVersion: "switchboard.mcp-launch.v1",
+          mandateId: "fix-ci"
+        },
+        commands: {
+          mcp: {
+            args: ["--cwd", root, "mcp", "--mandate", "fix-ci"]
+          }
+        },
+        limits: expect.arrayContaining([
+          "local authority contract only; this is not a sandbox"
+        ])
       }
     });
 
@@ -4058,6 +4090,23 @@ describe("switchboard CLI program", () => {
             ]
           })
         ]
+      },
+      workspaceLease: {
+        schemaVersion: "switchboard.workspace-lease.v1",
+        mandateId: "rerun-checks",
+        repo: {
+          path: root,
+          worktreePath: root,
+          branch: "fix/ci"
+        },
+        authority: {
+          parentMandateId: "fix-ci",
+          agentRole: "worker",
+          profiles: ["github_findu"]
+        },
+        mcpLaunch: {
+          mandateId: "rerun-checks"
+        }
       }
     });
   });
