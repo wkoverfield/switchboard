@@ -82,6 +82,43 @@ Acceptance:
 - `mandate report inspect-preview --json` is useful after the investigation and
   contains no raw token values.
 
+## Stripe Test
+
+Start with the deterministic policy proof:
+
+```bash
+pnpm smoke:stripe-test-dogfood
+```
+
+Then run real Stripe test-mode dogfood only with a restricted test key:
+
+```bash
+switchboard setup stripe-test
+switchboard doctor
+switchboard presets check stripe-test --profile stripe_test --json
+switchboard mandate create --from stripe-test --json
+switchboard mcp --mandate inspect-test-payments
+```
+
+Credential posture:
+
+- Use a restricted test-mode secret key.
+- Never use live-mode secret keys with `stripe-test`.
+- Start with read access for test customers, charges, payment intents, and
+  subscriptions.
+- Add test-mode write/refund capability only when those tools remain
+  approval-gated.
+
+Acceptance:
+
+- `presets check` returns `policy-covered`.
+- `allowed_sensitive` is zero.
+- Live/prod/account/payout/transfer/webhook-secret/token-shaped tools are
+  denied.
+- Test-mode create/update/refund/cancel/capture/confirm-shaped tools are
+  approval-gated.
+- `mandate report inspect-test-payments --json` contains no raw token values.
+
 ## Rules
 
 - Do not store raw provider tokens in `.switchboard.yaml`, `.mcp.json`,

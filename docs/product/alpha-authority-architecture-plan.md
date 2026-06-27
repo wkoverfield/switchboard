@@ -435,6 +435,9 @@ the risk before they learn Switchboard vocabulary.
 
 ## Phase 6: Provider Proof, Not Provider Breadth
 
+Status: deterministic Stripe test-mode fixture proof shipped in PR TBD; real
+Stripe test-mode MCP dogfood with an observed live tool surface remains.
+
 **Why later:** provider breadth is only useful after the authority boundary is
 credible.
 

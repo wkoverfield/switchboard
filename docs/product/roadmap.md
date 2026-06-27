@@ -273,6 +273,9 @@ Implemented in the current codebase:
   testing
 - provider dogfood report template for recording live run evidence without raw
   tokens
+- deterministic `pnpm smoke:stripe-test-dogfood` fixture proof for Stripe
+  test-mode policy coverage, approval gates, denied live/admin tools, mandate
+  creation, reports, and token redaction
 - npm-packable alpha package metadata and `pnpm smoke:package-pack` for
   `@switchboard-mcp/core`, `@switchboard-mcp/mcp-runtime`, and
   `@switchboard-mcp/cli`
@@ -309,8 +312,8 @@ Not started:
   visibility/reporting
 - global/user-scope client installers
 - Supabase, PostHog, or Sentry integrations
-- real Stripe test-mode MCP dogfood beyond the shipped `stripe-test` safety
-  template
+- real Stripe test-mode MCP dogfood against an observed live `@stripe/mcp` tool
+  surface beyond the fixture-backed `stripe-test` safety proof
 
 Remaining roadmap should be grouped into these buckets:
 
