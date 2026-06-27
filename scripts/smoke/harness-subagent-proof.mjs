@@ -85,6 +85,21 @@ try {
     "expected workspace lease authority profiles"
   );
   assert(
+    parent.workspaceLease?.mcpLaunch?.env?.XDG_STATE_HOME ===
+      join(project, "xdg-state"),
+    "expected workspace lease mcp launch env context"
+  );
+  assert(
+    parent.workspaceLease?.runLaunch?.args?.join(" ") ===
+      `--cwd ${project} run --mandate fix-ci --`,
+    "expected workspace lease run launch"
+  );
+  assert(
+    parent.workspaceLease?.capabilities?.runLaunch === true &&
+      parent.workspaceLease?.capabilities?.structuredMcpErrors === true,
+    "expected workspace lease launch capabilities"
+  );
+  assert(
     parent.mcpLaunch?.commands?.toolSurface?.args?.join(" ") ===
       `--cwd ${project} tools --mandate fix-ci --json`,
     "expected structured tool-surface command"

@@ -52,6 +52,7 @@ export interface StopDaemonResult {
 }
 
 const daemonProtocolVersion = "0.1.0";
+const mcpErrorSchemaVersion = "switchboard.mcp-error.v1";
 const maxApprovalWaitMs = 600_000;
 const approvalWaitPollIntervalMs = 250;
 const secretStore = createKeychainSecretStore();
@@ -321,6 +322,7 @@ export async function handleDaemonRequest(
   result?: unknown;
   error?: string;
   nextActions?: string[];
+  mcpError?: StructuredMcpError;
   approvalRequired?: DaemonApprovalRequired;
 }> {
   try {
@@ -437,6 +439,7 @@ async function listConfiguredTools(
   tools?: NamespacedTool[];
   error?: string;
   nextActions?: string[];
+  mcpError?: StructuredMcpError;
 }> {
   const routerResult = await routerForConfiguredProfiles(context, mandateId);
   if (!routerResult.ok) {
@@ -444,7 +447,12 @@ async function listConfiguredTools(
       id,
       ok: false,
       error: routerResult.error,
-      nextActions: routerResult.nextActions ?? []
+      nextActions: routerResult.nextActions ?? [],
+      mcpError: createStructuredMcpError({
+        message: routerResult.error,
+        nextActions: routerResult.nextActions ?? [],
+        mandateId
+      })
     };
   }
 
@@ -463,7 +471,12 @@ async function listConfiguredTools(
       id,
       ok: false,
       error: message,
-      nextActions: daemonRecoveryNextActions(message)
+      nextActions: daemonRecoveryNextActions(message),
+      mcpError: createStructuredMcpError({
+        message,
+        nextActions: daemonRecoveryNextActions(message),
+        mandateId
+      })
     };
   } finally {
     await router.close().catch(() => undefined);
@@ -486,6 +499,7 @@ async function callConfiguredTool(
   result?: unknown;
   error?: string;
   nextActions?: string[];
+  mcpError?: StructuredMcpError;
   approvalRequired?: DaemonApprovalRequired;
 }> {
   const routerResult = await routerForConfiguredProfiles(context, mandateId);
@@ -494,7 +508,13 @@ async function callConfiguredTool(
       id,
       ok: false,
       error: routerResult.error,
-      nextActions: routerResult.nextActions ?? []
+      nextActions: routerResult.nextActions ?? [],
+      mcpError: createStructuredMcpError({
+        message: routerResult.error,
+        nextActions: routerResult.nextActions ?? [],
+        mandateId,
+        toolName: name
+      })
     };
   }
 
@@ -598,7 +618,17 @@ async function callConfiguredTool(
                 error:
                   staleRequest.runtimeStatus === "stale"
                     ? error
-                    : `${policyDecision.reason}; approval request ${request.id} is ${staleRequest.runtimeStatus}.`
+                    : `${policyDecision.reason}; approval request ${request.id} is ${staleRequest.runtimeStatus}.`,
+                mcpError: createStructuredMcpError({
+                  code: "approval_required",
+                  message:
+                    staleRequest.runtimeStatus === "stale"
+                      ? error
+                      : `${policyDecision.reason}; approval request ${request.id} is ${staleRequest.runtimeStatus}.`,
+                  mandateId: routerResult.mandate.id,
+                  toolName: name,
+                  approvalRequestId: request.id
+                })
               };
             }
             if (decision?.runtimeStatus === "approved") {
@@ -618,7 +648,14 @@ async function callConfiguredTool(
               return {
                 id,
                 ok: false,
-                error
+                error,
+                mcpError: createStructuredMcpError({
+                  code: "approval_denied",
+                  message: error,
+                  mandateId: routerResult.mandate.id,
+                  toolName: name,
+                  approvalRequestId: request.id
+                })
               };
             }
             if (decision?.runtimeStatus === "expired") {
@@ -634,7 +671,14 @@ async function callConfiguredTool(
               return {
                 id,
                 ok: false,
-                error
+                error,
+                mcpError: createStructuredMcpError({
+                  code: "approval_required",
+                  message: error,
+                  mandateId: routerResult.mandate.id,
+                  toolName: name,
+                  approvalRequestId: request.id
+                })
               };
             }
             if (decision?.runtimeStatus === "stale") {
@@ -650,7 +694,14 @@ async function callConfiguredTool(
               return {
                 id,
                 ok: false,
-                error
+                error,
+                mcpError: createStructuredMcpError({
+                  code: "approval_required",
+                  message: error,
+                  mandateId: routerResult.mandate.id,
+                  toolName: name,
+                  approvalRequestId: request.id
+                })
               };
             }
           }
@@ -696,7 +747,28 @@ async function callConfiguredTool(
                 toolName: name,
                 approvalRequestId
               })
-            : policyDecision.reason
+            : policyDecision.reason,
+          mcpError: createStructuredMcpError({
+            code: approvalRequestId ? "approval_required" : "denied",
+            message: approvalRequestId
+              ? approvalRequiredErrorMessage({
+                  reason: policyDecision.reason,
+                  mandateId: routerResult.mandate.id,
+                  toolName: name,
+                  approvalRequestId
+                })
+              : policyDecision.reason,
+            nextActions: approvalRequestId
+              ? [
+                  `switchboard approvals --mandate ${routerResult.mandate.id}`,
+                  `switchboard approve ${approvalRequestId} --reason "<why this is safe>"`,
+                  `switchboard deny ${approvalRequestId} --reason "<why this should not run>"`
+                ]
+              : [],
+            mandateId: routerResult.mandate.id,
+            toolName: name,
+            approvalRequestId
+          })
         };
       }
     }
@@ -710,14 +782,82 @@ async function callConfiguredTool(
       result: await router.callTool(name, args)
     };
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     return {
       id,
       ok: false,
-      error: error instanceof Error ? error.message : String(error)
+      error: message,
+      mcpError: createStructuredMcpError({
+        message,
+        nextActions: daemonRecoveryNextActions(message),
+        mandateId,
+        toolName: name
+      })
     };
   } finally {
     await router.close().catch(() => undefined);
   }
+}
+
+interface StructuredMcpError {
+  schemaVersion: typeof mcpErrorSchemaVersion;
+  code:
+    | "denied"
+    | "approval_required"
+    | "approval_denied"
+    | "expired"
+    | "branch_mismatch"
+    | "missing_secret"
+    | "invalid_request"
+    | "runtime_error";
+  message: string;
+  nextActions: string[];
+  mandateId?: string;
+  toolName?: string;
+  approvalRequestId?: string;
+}
+
+function createStructuredMcpError(options: {
+  message: string;
+  code?: StructuredMcpError["code"];
+  nextActions?: string[];
+  mandateId?: string | undefined;
+  toolName?: string | undefined;
+  approvalRequestId?: string | undefined;
+}): StructuredMcpError {
+  return {
+    schemaVersion: mcpErrorSchemaVersion,
+    code: options.code ?? inferMcpErrorCode(options.message),
+    message: options.message,
+    nextActions: options.nextActions ?? daemonRecoveryNextActions(options.message),
+    ...(options.mandateId ? { mandateId: options.mandateId } : {}),
+    ...(options.toolName ? { toolName: options.toolName } : {}),
+    ...(options.approvalRequestId
+      ? { approvalRequestId: options.approvalRequestId }
+      : {})
+  };
+}
+
+function inferMcpErrorCode(message: string): StructuredMcpError["code"] {
+  if (/^mandate "[^"]+" is expired$/.test(message)) {
+    return "expired";
+  }
+  if (/current git branch is/.test(message)) {
+    return "branch_mismatch";
+  }
+  if (/secretRef "[^"]+"/.test(message)) {
+    return "missing_secret";
+  }
+  if (/requires approval by mandate gate/.test(message)) {
+    return "approval_required";
+  }
+  if (/not allowed by mandate policy|denied by mandate policy/.test(message)) {
+    return "denied";
+  }
+  if (/Daemon .* request|Invalid daemon request/.test(message)) {
+    return "invalid_request";
+  }
+  return "runtime_error";
 }
 
 function approvalRequiredPayload(options: {

@@ -257,6 +257,9 @@ Implemented in the current codebase:
 - `switchboard.mcp-launch.v1` structured follow-up commands and policy summary
   for harness startup, preflight, approval polling, reporting, logs,
   escalation, and child mandate templates
+- `workspaceLease` launch hardening with `mcpLaunch.env`, runtime context,
+  `runLaunch`, capability flags, and `switchboard.mcp-error.v1` runtime
+  failures for harnesses
 - structured credential guidance in provider safety templates and provider-add
   output for GitHub CI and Vercel Preview dogfood
 - rendered `mandatePolicy` JSON in provider safety template and provider-add

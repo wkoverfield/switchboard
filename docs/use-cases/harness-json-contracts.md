@@ -81,12 +81,23 @@ objects for automation:
 `switchboard.mcp-launch.v1` tells a harness how to start a scoped stdio MCP
 server and which follow-up commands belong to that authority grant. The payload
 includes the mandate id, repo cwd, command, args, `commandCandidates`,
-structured `commands`, a `policy` snapshot, and an `installHint`. The args
-include `--cwd <repo> mcp --mandate <id>` so the launched MCP endpoint stays
-repo-aware even when the harness runs elsewhere. Harnesses can keep using
-top-level `command` and `args` when `switchboard` is installed on `PATH`, or
-choose a `commandCandidates` entry such as `current-entrypoint` for a built
-package or `source-entrypoint` for a source checkout.
+structured `commands`, a `policy` snapshot, runtime launch context, and an
+`installHint`. The args include `--cwd <repo> mcp --mandate <id>` so the
+launched MCP endpoint stays repo-aware even when the harness runs elsewhere.
+Harnesses can keep using top-level `command` and `args` when `switchboard` is
+installed on `PATH`, or choose a `commandCandidates` entry such as
+`current-entrypoint` for a built package or `source-entrypoint` for a source
+checkout.
+
+The launch payload also includes additive fields for control loops:
+
+- `runtimeDir`: the active `SWITCHBOARD_RUNTIME_DIR` when one is already set,
+  otherwise `null`
+- `env`: non-secret launch environment keys such as `SWITCHBOARD_RUNTIME_DIR`,
+  `XDG_STATE_HOME`, and `XDG_CONFIG_HOME` when present
+- `approvalWaitMs`: the default MCP approval wait behavior for the launch
+- `daemonIsolation`: whether the launch is using an explicit repo runtime dir
+  or the default daemon state
 
 The additive `commands` object gives a harness structured invocations for
 tool-surface preflight, approval polling across a mandate tree, status, report,
@@ -98,9 +109,20 @@ agent without parsing the full persisted mandate.
 `switchboard.workspace-lease.v1` wraps the mandate authority into a single
 harness-friendly contract. It includes repo path, worktree path, branch,
 runtime transport, coarse environment class, profiles, policy summary, lease
-timestamps, `mcpLaunch`, follow-up commands, and explicit limits. The mandate
-record remains the local source of truth; `workspaceLease` is the portable
-handoff object an orchestrator can pass to a worker agent.
+timestamps, `mcpLaunch`, `runLaunch`, follow-up commands, capability flags, and
+explicit limits. The mandate record remains the local source of truth;
+`workspaceLease` is the portable handoff object an orchestrator can pass to a
+worker agent.
+
+`runLaunch` is the CLI alternative for harnesses or Code Mode-style agents that
+need scoped provider credentials without an MCP client. It points at:
+
+```bash
+switchboard --cwd <repo> run --mandate <id> -- <provider command>
+```
+
+Run mode scopes mounted profile credentials and audits execution. It is not a
+filesystem or network sandbox.
 
 `switchboard.mandate-status.v1` lets a harness poll mandate state. The payload
 includes the mandate store path, optional repo filter, and matching mandates
@@ -159,6 +181,11 @@ Human mode remains unchanged: without `--json`, the same failure is printed as
 `error: ...` on stderr. Error payloads include `ok: false`, a stable `code`, a
 human-readable `message`, and `nextActions` when Switchboard can suggest a
 local recovery command.
+
+MCP runtime failures also include `switchboard.mcp-error.v1` under `mcpError`
+while preserving the older `error` and `nextActions` fields. Harnesses should
+prefer `mcpError.code` for branch mismatch, expired mandate, missing secret,
+denied tool, approval-required, and approval-denied handling.
 
 ## Parent/Child Authority Proof
 

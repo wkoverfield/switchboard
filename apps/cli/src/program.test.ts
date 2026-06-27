@@ -3955,6 +3955,10 @@ describe("switchboard CLI program", () => {
         transport: "stdio",
         mandateId: "fix-ci",
         cwd: root,
+        runtimeDir: null,
+        env: {},
+        approvalWaitMs: 0,
+        daemonIsolation: "default",
         command: "switchboard",
         args: ["--cwd", root, "mcp", "--mandate", "fix-ci"],
         commands: {
@@ -4067,6 +4071,19 @@ describe("switchboard CLI program", () => {
         mcpLaunch: {
           schemaVersion: "switchboard.mcp-launch.v1",
           mandateId: "fix-ci"
+        },
+        runLaunch: {
+          schemaVersion: "switchboard.run-launch.v1",
+          command: "switchboard",
+          args: ["--cwd", root, "run", "--mandate", "fix-ci", "--"],
+          env: {},
+          note: expect.stringContaining("not a filesystem or network sandbox")
+        },
+        capabilities: {
+          mcpLaunchEnv: true,
+          runLaunch: true,
+          structuredMcpErrors: true,
+          daemonRuntimeDir: false
         },
         commands: {
           mcp: {
@@ -4359,6 +4376,10 @@ describe("switchboard CLI program", () => {
         schemaVersion: "switchboard.mcp-launch.v1",
         mandateId: "rerun-checks",
         cwd: root,
+        runtimeDir: null,
+        env: {},
+        approvalWaitMs: 0,
+        daemonIsolation: "default",
         args: ["--cwd", root, "mcp", "--mandate", "rerun-checks"],
         commands: {
           toolSurface: {
@@ -4440,6 +4461,14 @@ describe("switchboard CLI program", () => {
         },
         mcpLaunch: {
           mandateId: "rerun-checks"
+        },
+        runLaunch: {
+          schemaVersion: "switchboard.run-launch.v1",
+          args: ["--cwd", root, "run", "--mandate", "rerun-checks", "--"]
+        },
+        capabilities: {
+          runLaunch: true,
+          structuredMcpErrors: true
         }
       }
     });
