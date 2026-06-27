@@ -26,6 +26,8 @@ export interface SwitchboardImportPlanOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
+  cleanupClient?: boolean;
+  now?: Date;
 }
 
 export interface SwitchboardImportPlan {
@@ -42,10 +44,12 @@ export interface SwitchboardImportPlan {
     envFiles: ImportEnvFileDetection[];
   };
   bypassFindings: BypassFinding[];
+  cleanupPlan: ImportClientCleanupPlan[];
   actions: ImportPlanAction[];
   commands: {
     dryRun: CommandShape;
     writePreview: CommandShape;
+    cleanupClient: CommandShape;
     installClients: CommandShape[];
     secretCommands: CommandShape[];
   };
@@ -62,6 +66,7 @@ export interface WrittenSwitchboardImportPlan {
   backupPath: string | null;
   plan: SwitchboardImportPlan;
   createdProfiles: string[];
+  clientCleanup: WrittenImportClientCleanup[];
   nextContent: string | null;
 }
 
@@ -116,6 +121,25 @@ export interface BypassFinding {
   riskTags: BypassRiskTag[];
   reasons: string[];
   nextActions: string[];
+}
+
+export interface ImportClientCleanupPlan {
+  client: SupportedClient;
+  targetPath: string;
+  status: "planned" | "noop" | "invalid" | "missing";
+  affectedServerNames: string[];
+  rollbackCommand: string | null;
+  acceptedRiskGuidance: string;
+}
+
+export interface WrittenImportClientCleanup {
+  client: SupportedClient;
+  targetPath: string;
+  status: "updated" | "noop" | "invalid" | "missing";
+  backupPath: string | null;
+  affectedServerNames: string[];
+  rollbackCommand: string | null;
+  acceptedRiskGuidance: string;
 }
 
 export interface ImportSwitchboardProfile {
@@ -179,6 +203,7 @@ export async function createSwitchboardImportPlan(
     clients,
     switchboardProfiles
   });
+  const cleanupPlan = buildClientCleanupPlan(clients);
   const createProfileActions = uniqueServersByProfile(detectedServers)
     .filter((server) => !profileNames.has(server.suggestedProfileName))
     .map((server) => createProfileAction(server));
@@ -263,10 +288,15 @@ export async function createSwitchboardImportPlan(
       envFiles
     },
     bypassFindings,
+    cleanupPlan,
     actions,
     commands: {
       dryRun: { command: "switchboard", args: ["import", "--dry-run"] },
       writePreview: { command: "switchboard", args: ["import", "--write"] },
+      cleanupClient: {
+        command: "switchboard",
+        args: ["import", "--write", "--cleanup-client"]
+      },
       installClients,
       secretCommands
     },
@@ -277,7 +307,7 @@ export async function createSwitchboardImportPlan(
 }
 
 export async function writeSwitchboardImportPlan(
-  options: SwitchboardImportPlanOptions & { now?: Date } = {}
+  options: SwitchboardImportPlanOptions = {}
 ): Promise<WrittenSwitchboardImportPlan> {
   const plan = await createSwitchboardImportPlan(options);
   const cwd = plan.repo.cwd;
@@ -297,6 +327,9 @@ export async function writeSwitchboardImportPlan(
   );
 
   if (importableServers.length === 0) {
+    const clientCleanup = options.cleanupClient
+      ? await writeClientCleanupPlan(plan, options.now)
+      : [];
     return {
       ok: true,
       schemaVersion: importPlanSchemaVersion,
@@ -305,6 +338,7 @@ export async function writeSwitchboardImportPlan(
       backupPath: null,
       plan,
       createdProfiles: [],
+      clientCleanup,
       nextContent: null
     };
   }
@@ -318,6 +352,10 @@ export async function writeSwitchboardImportPlan(
     : null;
   await writeFile(targetPath, nextContent, "utf8");
 
+  const clientCleanup = options.cleanupClient
+    ? await writeClientCleanupPlan(plan, options.now)
+    : [];
+
   return {
     ok: true,
     schemaVersion: importPlanSchemaVersion,
@@ -326,6 +364,7 @@ export async function writeSwitchboardImportPlan(
     backupPath,
     plan,
     createdProfiles: importableServers.map((server) => server.suggestedProfileName),
+    clientCleanup,
     nextContent
   };
 }
@@ -845,6 +884,168 @@ function looksLikeBroadFilesystemMount(
       normalized === repoParent
     );
   });
+}
+
+function buildClientCleanupPlan(
+  clients: ImportClientDetection[]
+): ImportClientCleanupPlan[] {
+  return clients.map((client) => {
+    const affectedServerNames = client.servers
+      .filter((server) => !server.routesThroughSwitchboard)
+      .map((server) => server.name);
+    const acceptedRiskGuidance =
+      affectedServerNames.length > 0
+        ? `If any direct route is intentional, leave it in place for now and document the accepted risk; accepted-risk persistence is planned after cleanup V0.`
+        : "No direct MCP routes need accepted-risk handling.";
+
+    if (client.status === "missing") {
+      return {
+        client: client.client,
+        targetPath: client.targetPath,
+        status: "missing",
+        affectedServerNames: [],
+        rollbackCommand: null,
+        acceptedRiskGuidance
+      };
+    }
+
+    if (client.status === "invalid") {
+      return {
+        client: client.client,
+        targetPath: client.targetPath,
+        status: "invalid",
+        affectedServerNames: [],
+        rollbackCommand: null,
+        acceptedRiskGuidance
+      };
+    }
+
+    return {
+      client: client.client,
+      targetPath: client.targetPath,
+      status: affectedServerNames.length > 0 ? "planned" : "noop",
+      affectedServerNames,
+      rollbackCommand:
+        affectedServerNames.length > 0
+          ? `cp <backupPath> ${shellQuotePath(client.targetPath)}`
+          : null,
+      acceptedRiskGuidance
+    };
+  });
+}
+
+async function writeClientCleanupPlan(
+  plan: SwitchboardImportPlan,
+  now?: Date
+): Promise<WrittenImportClientCleanup[]> {
+  const results: WrittenImportClientCleanup[] = [];
+
+  for (const item of plan.cleanupPlan) {
+    if (item.status !== "planned") {
+      results.push({
+        client: item.client,
+        targetPath: item.targetPath,
+        status: item.status,
+        backupPath: null,
+        affectedServerNames: item.affectedServerNames,
+        rollbackCommand: item.rollbackCommand,
+        acceptedRiskGuidance: item.acceptedRiskGuidance
+      });
+      continue;
+    }
+
+    const existing = await readOptionalTextFileAsync(item.targetPath);
+    if (existing === null) {
+      results.push({
+        client: item.client,
+        targetPath: item.targetPath,
+        status: "missing",
+        backupPath: null,
+        affectedServerNames: [],
+        rollbackCommand: null,
+        acceptedRiskGuidance: item.acceptedRiskGuidance
+      });
+      continue;
+    }
+
+    const nextContent =
+      item.client === "claude"
+        ? removeClaudeMcpServers(existing, item.affectedServerNames)
+        : removeCodexMcpServers(existing, item.affectedServerNames);
+
+    if (nextContent === existing) {
+      results.push({
+        client: item.client,
+        targetPath: item.targetPath,
+        status: "noop",
+        backupPath: null,
+        affectedServerNames: [],
+        rollbackCommand: null,
+        acceptedRiskGuidance: item.acceptedRiskGuidance
+      });
+      continue;
+    }
+
+    const backupPath = await backupExistingFile(item.targetPath, now);
+    await writeFile(item.targetPath, nextContent, "utf8");
+    results.push({
+      client: item.client,
+      targetPath: item.targetPath,
+      status: "updated",
+      backupPath,
+      affectedServerNames: item.affectedServerNames,
+      rollbackCommand: `cp ${shellQuotePath(backupPath)} ${shellQuotePath(item.targetPath)}`,
+      acceptedRiskGuidance: item.acceptedRiskGuidance
+    });
+  }
+
+  return results;
+}
+
+function removeClaudeMcpServers(content: string, serverNames: string[]): string {
+  const parsed = JSON.parse(content) as Record<string, unknown>;
+  const mcpServers = isRecord(parsed.mcpServers) ? parsed.mcpServers : {};
+  for (const serverName of serverNames) {
+    delete mcpServers[serverName];
+  }
+
+  return `${JSON.stringify(
+    {
+      ...parsed,
+      mcpServers
+    },
+    null,
+    2
+  )}\n`;
+}
+
+function removeCodexMcpServers(content: string, serverNames: string[]): string {
+  const remove = new Set(serverNames);
+  const lines = content.split(/\r?\n/);
+  const kept: string[] = [];
+  let removing = false;
+
+  for (const line of lines) {
+    const serverHeader = line.match(/^\s*\[mcp_servers\.([^\].]+)\]\s*$/);
+    const envHeader = line.match(/^\s*\[mcp_servers\.([^\].]+)\.env\]\s*$/);
+    const headerName = serverHeader?.[1] ?? envHeader?.[1];
+
+    if (headerName) {
+      removing = remove.has(unquoteTomlKey(headerName));
+    } else if (/^\s*\[/.test(line)) {
+      removing = false;
+    }
+
+    if (!removing) {
+      kept.push(line);
+    }
+  }
+
+  return `${kept.join("\n").replace(/\n{3,}/g, "\n\n").replace(/\n*$/, "")}\n`;
+}
+
+function shellQuotePath(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function codexServerSections(content: string): Array<{

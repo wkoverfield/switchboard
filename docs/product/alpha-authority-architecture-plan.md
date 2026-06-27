@@ -117,10 +117,9 @@ optional wrapper rather than the authority boundary.
   - direct MCP server in the same client config as the `switchboard` server
   - filesystem MCP mounted at `/`, `$HOME`, repo parent directories, or other
     broad paths
-- Add `switchboard import --cleanup-plan --json` or extend import JSON with a
-  cleanup section.
-- Add `switchboard import --write --cleanup-client` only after the plan is
-  explicit and backup-protected.
+- Extend import JSON with a cleanup section.
+- Add `switchboard import --write --cleanup-client` after the plan is explicit
+  and backup-protected.
 - Preserve existing client config backups and rollback commands.
 
 ### Cleanup Semantics
@@ -146,6 +145,10 @@ Cleanup must be boring and reversible:
 ```bash
 switchboard import --write --cleanup-client --accept-direct filesystem
 ```
+
+Cleanup V0 ships backup-protected active-route removal and accepted-risk
+guidance. Persistent accepted-risk config remains the next cleanup hardening
+step.
 
 Accepted direct routes remain visible in `doctor` as accepted risk, not `ok`
 silence.
