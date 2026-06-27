@@ -78,8 +78,8 @@ portable contract that agents and harnesses consume.
 ## Phase 0: Patch Redaction Release
 
 **Why first:** PR #107 fixed import redaction for token-like command args in
-main, but the public `0.1.0` npm package can still expose this trust break.
-Ship `0.1.1` as the safety patch before broader architecture work.
+main, and `0.1.1` shipped that fix to npm. Keep this safety patch as the
+release baseline before broader architecture work.
 
 ### Build
 
@@ -91,9 +91,8 @@ Ship `0.1.1` as the safety patch before broader architecture work.
 ### Done Means
 
 - Public npm package includes import arg redaction.
-- `npm view` returns the patched version for core, runtime, and CLI.
-- `pnpm eval:published-alpha` passes against the patched package or an explicit
-  package spec for the patched version.
+- `npm view` returns `0.1.1` for core, runtime, and CLI.
+- `pnpm eval:published-alpha` passes against `@switchboard-mcp/cli@0.1.1`.
 
 ## Phase 1: Bypass Detection And Cleanup
 
