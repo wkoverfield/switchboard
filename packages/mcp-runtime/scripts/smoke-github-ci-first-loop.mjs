@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -15,11 +15,13 @@ const repo = resolve(packageDir, "..", "..");
 const cliPath = join(repo, "apps/cli/dist/index.js");
 const fixtureServerPath = join(packageDir, "fixtures", "echo-server.mjs");
 const project = mkdtempSync(join(tmpdir(), "switchboard-github-ci-loop-"));
-const secretRef = "github/example/dev/token";
+const repoSlug = safeIdentifier(basename(project));
+const profileName = `github_${repoSlug}_ci`;
+const secretRef = `github/${repoSlug}/dev/token`;
 const secretValue = "github-ci-loop-secret-do-not-print";
 const secretHash = sha256(secretValue);
 const mandateId = "fix-ci";
-const toolName = "github_ci_secret_status";
+const toolName = `${profileName}_secret_status`;
 
 if (!existsSync(cliPath)) {
   throw new Error(
@@ -47,7 +49,7 @@ try {
     "--json"
   );
   assert(add.action === "created", "expected add to create config");
-  assert(add.mandateCommand?.includes("--profiles github_ci"), "expected mandate command");
+  assert(add.mandateCommand?.includes(`--profiles ${profileName}`), "expected mandate command");
   assertNoSecretText(JSON.stringify(add), "add output");
 
   const setSecret = runCli(
@@ -62,7 +64,7 @@ try {
     "check",
     "github-ci",
     "--profile",
-    "github_ci",
+    profileName,
     "--json"
   ]);
   assert(
@@ -90,27 +92,29 @@ try {
     "create",
     "--from",
     "github-ci",
+    "--profiles",
+    profileName,
     "--json"
   );
   assert(create.mandate?.id === mandateId, "expected mandate id");
   assert(create.mandate?.branch === "fix/ci", "expected template branch");
   assert(
-    create.mandate?.deniedTools?.includes?.("github_ci_deploy_prod"),
+    create.mandate?.deniedTools?.includes?.(`${profileName}_deploy_prod`),
     "expected template denied production deploy"
   );
   assert(
-    create.mandate?.deniedTools?.includes?.("github_ci_create_repository"),
+    create.mandate?.deniedTools?.includes?.(`${profileName}_create_repository`),
     "expected template denied repository creation"
   );
   assert(
     create.mandate?.approvalGates?.some?.(
-      (gate) => gate.toolPattern === "github_ci_*comment*"
+      (gate) => gate.toolPattern === `${profileName}_*comment*`
     ),
     "expected comment approval gate from template"
   );
   assert(
     create.mandate?.approvalGates?.some?.(
-      (gate) => gate.toolPattern === "github_ci_*merge*"
+      (gate) => gate.toolPattern === `${profileName}_*merge*`
     ),
     "expected merge approval gate from template"
   );
@@ -240,6 +244,15 @@ function redactSecret(value) {
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function safeIdentifier(value) {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized.length > 0 ? normalized : "repo";
 }
 
 function textContent(result) {

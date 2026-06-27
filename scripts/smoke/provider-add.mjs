@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 
 const repo = resolve(import.meta.dirname, "..", "..");
-const project = mkdtempSync(join(tmpdir(), "switchboard-provider-add-"));
+const projectRoot = mkdtempSync(join(tmpdir(), "switchboard-provider-add-"));
+const project = join(projectRoot, "stockr");
 const cliPath = join(repo, "apps/cli/dist/index.js");
 
 if (!existsSync(cliPath)) {
@@ -16,7 +17,13 @@ if (!existsSync(cliPath)) {
 }
 
 try {
+  mkdirSync(project);
   writeFileSync(join(project, ".gitignore"), ".switchboard.local.yaml\n");
+
+  const defaultPlan = runCli("add", "github-ci", "--json");
+  assert(defaultPlan.profileName === "github_stockr_ci", "expected repo-aware default profile");
+  assert(defaultPlan.namespace === "github_stockr_ci", "expected repo-aware default namespace");
+  assert(defaultPlan.secretRef === "github/stockr/dev/token", "expected repo-aware default secretRef");
 
   const plan = runCli(
     "add",
@@ -105,7 +112,7 @@ try {
     "expected second write to create backup"
   );
 } finally {
-  rmSync(project, { force: true, recursive: true });
+  rmSync(projectRoot, { force: true, recursive: true });
 }
 
 function runCli(...args) {

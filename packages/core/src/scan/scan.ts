@@ -166,7 +166,12 @@ export async function scanSwitchboardProject(
     vercelProjectPresent: existsSync(join(root, ".vercel", "project.json"))
   } as const;
   const warnings = buildWarnings({ providers, profileNames, clients });
-  const suggestions = buildSuggestions({ providers, profileNames, clients });
+  const suggestions = buildSuggestions({
+    providers,
+    profileNames,
+    clients,
+    repoName: basename(root)
+  });
 
   return {
     schemaVersion: scanSchemaVersion,
@@ -497,6 +502,7 @@ function buildSuggestions(options: {
   providers: ScanProviderHint[];
   profileNames: string[];
   clients: ProjectClientConfigInspection[];
+  repoName: string;
 }): ScanSuggestion[] {
   const suggestions: ScanSuggestion[] = [];
   const providers = new Set(options.providers.map((provider) => provider.provider));
@@ -505,8 +511,8 @@ function buildSuggestions(options: {
     suggestions.push({
       kind: "provider-profile",
       provider: "github",
-      profileName: "github_ci",
-      namespace: "github_ci",
+      profileName: repoAwareProfileName("github-ci", options.repoName),
+      namespace: repoAwareProfileName("github-ci", options.repoName),
       command: "switchboard setup github-ci",
       reason: "GitHub repo or env hints were detected."
     });
@@ -516,8 +522,8 @@ function buildSuggestions(options: {
     suggestions.push({
       kind: "provider-profile",
       provider: "vercel",
-      profileName: "vercel_preview",
-      namespace: "vercel_preview",
+      profileName: repoAwareProfileName("vercel-preview", options.repoName),
+      namespace: repoAwareProfileName("vercel-preview", options.repoName),
       command: "switchboard setup vercel-preview",
       reason: "Vercel project or env hints were detected."
     });
@@ -544,6 +550,17 @@ function buildSuggestions(options: {
   return suggestions;
 }
 
+function repoAwareProfileName(presetId: string, repoName: string): string {
+  const repo = safeIdentifier(repoName);
+  if (presetId === "github-ci") {
+    return `github_${repo}_ci`;
+  }
+  if (presetId === "vercel-preview") {
+    return `vercel_${repo}_preview`;
+  }
+  return safeIdentifier(`${presetId}_${repo}`);
+}
+
 function configuredMandatePresetIds(profileNames: string[]): string[] {
   const presetIds: string[] = [];
   if (hasProfile(profileNames, "github")) {
@@ -561,4 +578,13 @@ function hasProfile(profileNames: string[], provider: ScanProviderId): boolean {
 
 function nextActionsFromSuggestions(suggestions: ScanSuggestion[]): string[] {
   return [...new Set(suggestions.map((suggestion) => suggestion.command))];
+}
+
+function safeIdentifier(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized.length > 0 ? normalized : "repo";
 }

@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import process from "node:process";
 
 const repo = resolve(import.meta.dirname, "..", "..");
@@ -13,7 +13,9 @@ const fixtureServerPath = join(
   "packages/mcp-runtime/fixtures/echo-server.mjs"
 );
 const project = mkdtempSync(join(tmpdir(), "switchboard-harness-proof-"));
-const secretRef = "github/example/dev/token";
+const repoSlug = safeIdentifier(basename(project));
+const profileName = `github_${repoSlug}_ci`;
+const secretRef = `github/${repoSlug}/dev/token`;
 const secretValue = "harness-proof-secret-do-not-print";
 const secretHash = sha256(secretValue);
 
@@ -35,7 +37,7 @@ try {
     "--arg",
     fixtureServerPath,
     "--arg",
-    "github_ci",
+    profileName,
     "--arg",
     "GITHUB_PERSONAL_ACCESS_TOKEN",
     "--arg",
@@ -53,7 +55,15 @@ try {
   assert(setSecret.status === 0, "expected secret set to succeed");
   assertNoSecretLeak(setSecret, "secret set");
 
-  const parent = runCliJson("mandate", "create", "--from", "github-ci", "--json");
+  const parent = runCliJson(
+    "mandate",
+    "create",
+    "--from",
+    "github-ci",
+    "--profiles",
+    profileName,
+    "--json"
+  );
   assert(parent.mandate?.id === "fix-ci", "expected parent mandate id");
   assert(parent.mandate?.branch === "main", "expected current branch binding");
   assert(
@@ -78,14 +88,14 @@ try {
     "expected child mandate command template"
   );
   assert(
-    parent.mcpLaunch?.policy?.allowedTools?.includes?.("github_ci_*"),
+    parent.mcpLaunch?.policy?.allowedTools?.includes?.(`${profileName}_*`),
     "expected launch policy summary"
   );
   assertNoSecretText(JSON.stringify(parent), "parent mandate");
 
   const parentTools = runCliJson("tools", "--mandate", "fix-ci", "--json");
   assert(
-    parentTools.tools?.some?.((tool) => tool.name === "github_ci_echo"),
+    parentTools.tools?.some?.((tool) => tool.name === `${profileName}_echo`),
     "expected parent scoped tool surface"
   );
   assertNoSecretText(JSON.stringify(parentTools), "parent tool surface");
@@ -99,13 +109,13 @@ try {
     "--agent",
     "tester",
     "--profiles",
-    "github_ci",
+    profileName,
     "--branch",
     "main",
     "--lease",
     "30m",
     "--allow-tool",
-    "github_ci_echo",
+    `${profileName}_echo`,
     "--delegated-by",
     "harness-smoke",
     "--json"
@@ -119,7 +129,7 @@ try {
 
   const childTools = runCliJson("tools", "--mandate", "inspect-ci", "--json");
   assert(
-    childTools.tools?.map?.((tool) => tool.name).join(",") === "github_ci_echo",
+    childTools.tools?.map?.((tool) => tool.name).join(",") === `${profileName}_echo`,
     "expected narrowed child tool surface"
   );
   assertNoSecretText(JSON.stringify(childTools), "child tool surface");
@@ -196,6 +206,15 @@ function redactSecret(value) {
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function safeIdentifier(value) {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized.length > 0 ? normalized : "repo";
 }
 
 function assert(condition, message) {
