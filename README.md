@@ -23,20 +23,20 @@ state, and a harness-friendly MCP launch payload.
 
 ## Install
 
-Public npm install will be the normal path after the first package publish:
+Install from npm:
 
 ```bash
 npm install -g @switchboard-mcp/cli
 switchboard --help
 ```
 
-For one-off or harness use without a global install after publish:
+For one-off or harness use without a global install:
 
 ```bash
 npx -y @switchboard-mcp/cli@latest --help
 ```
 
-Current pre-public alpha users should install from source:
+To work from source:
 
 ```bash
 git clone https://github.com/woverfield/switchboard.git
