@@ -1,6 +1,6 @@
 import { Command } from "commander";
-import { execFileSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -559,6 +559,155 @@ export function createProgram(io: ProgramIo = {}): Command {
           : formatScan(displayResult)
       );
     });
+
+  program
+    .command("run")
+    .description("Run an allowed provider command with mandate-scoped credentials and audit.")
+    .requiredOption("--mandate <id>", "active mandate id")
+    .option("--json", "print machine-readable JSON")
+    .allowUnknownOption(false)
+    .argument("<command>", "provider command to run")
+    .argument("[args...]", "command arguments")
+    .action(
+      async (
+        command: string,
+        args: string[],
+        options: { mandate: string; json?: boolean }
+      ) => {
+        const globalOptions = program.opts<{ cwd?: string }>();
+        const cwd = resolve(globalOptions.cwd ?? process.cwd());
+        const loaded = loadSwitchboardConfig(optionsFromCwd(cwd));
+        const mandateStorePath = io.mandateStorePath ?? resolveMandateStorePath();
+        const startedAt = Date.now();
+
+        try {
+          const mandate = await resolveActiveMandate({
+            id: options.mandate,
+            repoPath: cwd,
+            path: mandateStorePath
+          });
+          const readiness = await validateRunReadiness({
+            cwd,
+            command,
+            args,
+            mandate,
+            config: loaded.config,
+            secretStore
+          });
+
+          if (!readiness.ok) {
+            await safeAuditLog(auditLogger, {
+              action: "command_run",
+              status: "error",
+              mandateId: mandate.id,
+              ...(mandate.mandateUid ? { mandateUid: mandate.mandateUid } : {}),
+              repoPath: mandate.repoPath,
+              worktreePath: mandate.worktreePath,
+              branch: mandate.branch,
+              command,
+              args,
+              cwd,
+              envKeys: readiness.envKeys,
+              durationMs: Date.now() - startedAt,
+              error: readiness.message
+            });
+            writeCommandError({
+              json: options.json,
+              code: readiness.code,
+              message: readiness.message,
+              nextActions: readiness.nextActions
+            });
+            process.exitCode = 1;
+            return;
+          }
+
+          const result = spawnSync(readiness.commandPath, args, {
+            cwd,
+            env: readiness.env,
+            encoding: "utf8",
+            maxBuffer: 1024 * 1024
+          });
+          const status = result.status === 0 ? "ok" : "error";
+          const stdout = result.stdout ?? "";
+          const stderr = result.stderr ?? "";
+          await safeAuditLog(auditLogger, {
+            action: "command_run",
+            status,
+            mandateId: mandate.id,
+            ...(mandate.mandateUid ? { mandateUid: mandate.mandateUid } : {}),
+            repoPath: mandate.repoPath,
+            worktreePath: mandate.worktreePath,
+            branch: mandate.branch,
+            command,
+            args,
+            cwd,
+            envKeys: Object.keys(readiness.env).sort(),
+            exitCode: result.status,
+            durationMs: Date.now() - startedAt,
+            stdoutSnippet: snippet(stdout),
+            stderrSnippet: snippet(stderr),
+            ...(result.error ? { error: messageFromError(result.error) } : {})
+          });
+
+          if (options.json) {
+            writeOut(
+              JSON.stringify(
+                {
+                  ok: status === "ok",
+                  schemaVersion: "switchboard.run.v1",
+                  mandateId: mandate.id,
+                  command,
+                  args,
+                  cwd,
+                  envKeys: Object.keys(readiness.env).sort(),
+                  exitCode: result.status,
+                  durationMs: Date.now() - startedAt,
+                  stdout: redactCommandOutput(stdout),
+                  stderr: redactCommandOutput(stderr),
+                  note:
+                    "switchboard run scopes credentials and audits execution; it is not a filesystem or network sandbox."
+                },
+                null,
+                2
+              )
+            );
+          } else {
+            if (stdout) {
+              writeOut(redactCommandOutput(stdout).trimEnd());
+            }
+            if (stderr) {
+              writeErr(redactCommandOutput(stderr).trimEnd());
+            }
+          }
+
+          if (status !== "ok") {
+            process.exitCode = result.status ?? 1;
+          }
+        } catch (error) {
+          const message = messageFromError(error);
+          await safeAuditLog(auditLogger, {
+            action: "command_run",
+            status: "error",
+            mandateId: normalizeMandateId(options.mandate),
+            repoPath: cwd,
+            worktreePath: cwd,
+            branch: currentGitBranch(cwd) ?? "unknown",
+            command,
+            args,
+            cwd,
+            durationMs: Date.now() - startedAt,
+            error: message
+          });
+          writeCommandError({
+            json: options.json,
+            code: runErrorCode(message),
+            message,
+            nextActions: runErrorNextActions(message, options.mandate)
+          });
+          process.exitCode = 1;
+        }
+      }
+    );
 
   program
     .command("import")
@@ -6884,6 +7033,288 @@ function providerTemplateDoctorNextSteps(
   }
 
   return steps;
+}
+
+type RunReadinessResult =
+  | {
+      ok: true;
+      commandPath: string;
+      env: Record<string, string>;
+      envKeys: string[];
+    }
+  | {
+      ok: false;
+      code: string;
+      message: string;
+      nextActions: string[];
+      envKeys: string[];
+    };
+
+async function validateRunReadiness(options: {
+  cwd: string;
+  command: string;
+  args: string[];
+  mandate: MandateWithStatus;
+  config: SwitchboardConfig;
+  secretStore: SecretStore;
+}): Promise<RunReadinessResult> {
+  const cwdPath = realPathOrResolve(options.cwd);
+  const repoPath = realPathOrResolve(options.mandate.repoPath);
+  const worktreePath = realPathOrResolve(options.mandate.worktreePath);
+
+  if (cwdPath !== repoPath) {
+    return {
+      ok: false,
+      code: "repo_mismatch",
+      message: `mandate "${options.mandate.id}" is scoped to ${options.mandate.repoPath}, not ${options.cwd}`,
+      nextActions: [`cd ${shellQuoteCommandArg(options.mandate.repoPath)}`],
+      envKeys: []
+    };
+  }
+
+  if (cwdPath !== worktreePath) {
+    return {
+      ok: false,
+      code: "worktree_mismatch",
+      message: `mandate "${options.mandate.id}" is scoped to worktree ${options.mandate.worktreePath}`,
+      nextActions: [`cd ${shellQuoteCommandArg(options.mandate.worktreePath)}`],
+      envKeys: []
+    };
+  }
+
+  const branch = currentGitBranch(options.cwd);
+  if (branch && branch !== options.mandate.branch) {
+    return {
+      ok: false,
+      code: "branch_mismatch",
+      message: `mandate "${options.mandate.id}" is scoped to branch ${options.mandate.branch}, but current branch is ${branch}`,
+      nextActions: [`git switch ${shellQuoteCommandArg(options.mandate.branch)}`],
+      envKeys: []
+    };
+  }
+
+  if (options.mandate.handoffState !== "open") {
+    return {
+      ok: false,
+      code: "handoff_closed",
+      message: `mandate "${options.mandate.id}" is closed with handoff state "${options.mandate.handoffState}"`,
+      nextActions: [`switchboard mandate status ${options.mandate.id}`],
+      envKeys: []
+    };
+  }
+
+  const missingProfiles = options.mandate.profiles.filter(
+    (profileName) => !options.config.profiles[profileName]
+  );
+  if (missingProfiles.length > 0) {
+    return {
+      ok: false,
+      code: "missing_profiles",
+      message: `mandate profiles were not found: ${missingProfiles.join(", ")}`,
+      nextActions: ["Run switchboard status to list configured profiles."],
+      envKeys: []
+    };
+  }
+
+  const commandClass = classifyRunCommand(options.command);
+  if (
+    commandClass.kind === "denied" ||
+    (commandClass.kind === "unclassified" &&
+      !mandateAllowsRunCommand(options.mandate, commandClass.name))
+  ) {
+    return {
+      ok: false,
+      code: "run_command_denied",
+      message:
+        commandClass.kind === "denied"
+          ? `${commandClass.name} is denied by default in switchboard run; shell wrappers and package scripts are not classified in V0.`
+          : `${commandClass.name} is unclassified in switchboard run V0.`,
+      nextActions: [
+        `Use gh, vercel, stripe, or a fixture CLI directly, or create a mandate with --allow-tool run:${commandClass.name}.`
+      ],
+      envKeys: []
+    };
+  }
+
+  const envResult = await envForMandateProfiles({
+    config: options.config,
+    profiles: options.mandate.profiles,
+    secretStore: options.secretStore
+  });
+  if (!envResult.ok) {
+    return {
+      ok: false,
+      code: "missing_secret",
+      message: envResult.message,
+      nextActions: envResult.nextActions,
+      envKeys: envResult.envKeys
+    };
+  }
+
+  const commandPath = resolveRunCommandPath(options.command);
+  if (!commandPath) {
+    return {
+      ok: false,
+      code: "command_not_found",
+      message: `command "${options.command}" was not found`,
+      nextActions: [`Install ${options.command} or pass an absolute command path.`],
+      envKeys: Object.keys(envResult.env).sort()
+    };
+  }
+
+  return {
+    ok: true,
+    commandPath,
+    env: envResult.env,
+    envKeys: Object.keys(envResult.env).sort()
+  };
+}
+
+async function envForMandateProfiles(options: {
+  config: SwitchboardConfig;
+  profiles: string[];
+  secretStore: SecretStore;
+}): Promise<
+  | { ok: true; env: Record<string, string>; envKeys: string[] }
+  | { ok: false; message: string; nextActions: string[]; envKeys: string[] }
+> {
+  const env: Record<string, string> = {};
+  const envKeys: string[] = [];
+
+  for (const profileName of options.profiles) {
+    const profile = options.config.profiles[profileName];
+    const upstreamEnv = profile?.upstream?.env ?? {};
+    for (const [envName, value] of Object.entries(upstreamEnv)) {
+      if (!isSecretRefRuntimeValue(value)) {
+        continue;
+      }
+      envKeys.push(envName);
+      const secret = await options.secretStore.get(value.secretRef);
+      if (secret === null) {
+        return {
+          ok: false,
+          message: `secretRef "${value.secretRef}" is not set`,
+          nextActions: [
+            `switchboard secrets set ${value.secretRef} --value-stdin`
+          ],
+          envKeys: [...new Set(envKeys)].sort()
+        };
+      }
+      env[envName] = secret;
+    }
+  }
+
+  return { ok: true, env, envKeys: Object.keys(env).sort() };
+}
+
+function isSecretRefRuntimeValue(value: unknown): value is { secretRef: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "secretRef" in value &&
+    typeof value.secretRef === "string"
+  );
+}
+
+function classifyRunCommand(
+  command: string
+): { kind: "allowed" | "denied" | "unclassified"; name: string } {
+  const name = basename(command);
+  if (["gh", "vercel", "stripe", "fixture"].includes(name)) {
+    return { kind: "allowed", name };
+  }
+  if (
+    [
+      "bash",
+      "sh",
+      "zsh",
+      "fish",
+      "node",
+      "npm",
+      "pnpm",
+      "yarn",
+      "bun",
+      "python",
+      "python3",
+      "ruby",
+      "perl"
+    ].includes(name)
+  ) {
+    return { kind: "denied", name };
+  }
+  return { kind: "unclassified", name };
+}
+
+function mandateAllowsRunCommand(mandate: MandateWithStatus, name: string): boolean {
+  return mandate.allowedTools.some(
+    (pattern) => pattern === "run:*" || pattern === `run:${name}`
+  );
+}
+
+function resolveRunCommandPath(command: string): string | null {
+  if (isAbsolute(command)) {
+    return command;
+  }
+
+  try {
+    return execFileSync("which", [command], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function realPathOrResolve(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+function snippet(value: string): string {
+  return redactCommandOutput(value).slice(0, 2_000);
+}
+
+function redactCommandOutput(value: string): string {
+  return value
+    .replace(/https?:\/\/([^/\s:@]+):([^/\s@]+)@/gi, "https://[redacted]@")
+    .replace(/\b(sk-[A-Za-z0-9_-]{8,})\b/g, "[redacted]")
+    .replace(/\b(gh[pousr]_[A-Za-z0-9_]{8,})\b/g, "[redacted]")
+    .replace(/\b(xox[baprs]-[A-Za-z0-9-]{8,})\b/g, "[redacted]")
+    .replace(
+      /\b(authorization\s*:\s*bearer)\s+[A-Za-z0-9._~+/=-]+/gi,
+      "$1 [redacted]"
+    )
+    .replace(/\b(token|secret|password|api[_-]?key)=\S+/gi, "$1=[redacted]");
+}
+
+function runErrorCode(message: string): string {
+  if (message.includes("expired")) {
+    return "mandate_expired";
+  }
+  if (message.includes("closed")) {
+    return "handoff_closed";
+  }
+  if (message.includes("was not found")) {
+    return "mandate_not_found";
+  }
+  return "run_failed";
+}
+
+function runErrorNextActions(message: string, mandateId: string): string[] {
+  if (message.includes("expired")) {
+    return [`switchboard mandate renew ${mandateId} --lease 2h`];
+  }
+  if (message.includes("closed")) {
+    return [`switchboard mandate status ${mandateId}`];
+  }
+  if (message.includes("was not found")) {
+    return ["switchboard mandate status"];
+  }
+  return ["Run switchboard doctor."];
 }
 
 function clientLaunchSummary(launches: ClientLaunchCheck[]): string {

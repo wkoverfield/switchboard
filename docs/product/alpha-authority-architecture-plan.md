@@ -204,6 +204,11 @@ Add to scan/import/doctor JSON:
 or provider CLIs instead of MCP. Switchboard loses relevance if it only governs
 MCP.
 
+Run Mode V0 is shipped as the local code-mode authority path. It validates the
+mandate/runtime boundary, injects mounted profile `secretRef` env values, audits
+redacted command execution metadata, and denies shell/script wrappers by
+default. It is credential scoping plus audit, not sandboxing.
+
 ### Build
 
 Add:
@@ -257,12 +262,12 @@ arbitrary shell policy.
   - `pnpm run ...`
   - `npm run ...`
 - Unclassified commands are denied unless the mandate explicitly allows them or
-  the user passes an intentional escape hatch such as
-  `--allow-unclassified-command`.
+  the mandate includes an intentional allow pattern such as `run:<command>` or
+  `run:*`.
 - Audit stdout/stderr is size-limited and redacted. Store full command metadata,
   but cap captured output to a documented byte limit.
-- Approval-required commands create the same local approval request primitive as
-  MCP tool calls.
+- Approval-required command subclasses should later create the same local
+  approval request primitive as MCP tool calls.
 
 ### JSON Contract
 

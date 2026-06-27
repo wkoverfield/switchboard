@@ -3,7 +3,11 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { PathResolutionOptions } from "../config/paths.js";
 
-export type AuditAction = "profile_test" | "tool_call" | "approval_elicitation";
+export type AuditAction =
+  | "profile_test"
+  | "tool_call"
+  | "approval_elicitation"
+  | "command_run";
 export type AuditStatus = "ok" | "error";
 
 export interface AuditLogEntry {
@@ -24,6 +28,13 @@ export interface AuditLogEntry {
   approvalGateId?: string;
   approvalGatePattern?: string;
   approvalDecision?: "approved" | "denied" | "declined" | "cancelled" | "failed";
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  envKeys?: string[];
+  exitCode?: number | null;
+  stdoutSnippet?: string;
+  stderrSnippet?: string;
   durationMs?: number;
   error?: string;
 }
@@ -134,11 +145,19 @@ export async function readAuditLogEntries(
 function redactAuditEntry(
   entry: Omit<AuditLogEntry, "version" | "timestamp">
 ): Omit<AuditLogEntry, "version" | "timestamp"> {
-  if (!entry.error) {
-    return entry;
-  }
-
-  return { ...entry, error: redactSecretLikeText(entry.error) };
+  return {
+    ...entry,
+    ...(entry.args
+      ? { args: entry.args.map((arg) => redactSecretLikeText(arg)) }
+      : {}),
+    ...(entry.error ? { error: redactSecretLikeText(entry.error) } : {}),
+    ...(entry.stdoutSnippet
+      ? { stdoutSnippet: redactSecretLikeText(entry.stdoutSnippet) }
+      : {}),
+    ...(entry.stderrSnippet
+      ? { stderrSnippet: redactSecretLikeText(entry.stderrSnippet) }
+      : {})
+  };
 }
 
 function redactSecretLikeText(value: string): string {

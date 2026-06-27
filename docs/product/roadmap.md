@@ -285,6 +285,10 @@ Implemented in the current codebase:
 - backup-protected `switchboard import --write --cleanup-client` for removing
   direct Codex/Claude MCP bypass routes from active project client config, with
   rollback commands and idempotent reruns
+- `switchboard run --mandate <id> -- <command> [...args]` V0 for code-mode
+  authority: validates mandate/runtime scope, injects mounted `secretRef` env
+  values, denies shell/script wrappers by default, and audits redacted command
+  execution metadata
 
 Not started:
 

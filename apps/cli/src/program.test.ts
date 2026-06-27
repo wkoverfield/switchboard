@@ -1545,6 +1545,177 @@ describe("switchboard CLI program", () => {
     expect(serialized).not.toContain("ghp_doctor_should_not_print");
   });
 
+  it("runs a fixture command with mandate-scoped secretRef env and audit", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "main");
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  fixture_profile:",
+        "    provider: fixture",
+        "    upstream:",
+        "      type: stdio",
+        "      command: fixture",
+        "      env:",
+        "        FIXTURE_TOKEN:",
+        "          secretRef: fixture/demo/dev/token",
+        "        RAW_ENV: raw_should_not_be_injected"
+      ].join("\n")
+    );
+    const fixturePath = join(root, "fixture");
+    writeFileSync(
+      fixturePath,
+      [
+        "#!/bin/sh",
+        "has=false",
+        "[ -n \"$FIXTURE_TOKEN\" ] && has=true",
+        "raw=null",
+        "[ -n \"$RAW_ENV\" ] && raw='\"present\"'",
+        "path=null",
+        "[ -n \"$PATH\" ] && path='\"present\"'",
+        "printf '{\"argv\":[\"%s\"],\"hasToken\":%s,\"rawEnv\":%s,\"pathEnv\":%s}\\n' \"$1\" \"$has\" \"$raw\" \"$path\""
+      ].join("\n")
+    );
+    chmodSync(fixturePath, 0o755);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const auditEntries: unknown[] = [];
+    const output: string[] = [];
+    const program = createProgram({
+      mandateStorePath,
+      secretStore: createMemorySecretStore({
+        "fixture/demo/dev/token": "fixture_secret_should_not_print"
+      }),
+      auditLogger: {
+        async log(entry) {
+          auditEntries.push(entry);
+        }
+      },
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "fixture_profile",
+        "--branch",
+        "main",
+        "--lease",
+        "2h"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "run",
+        "--mandate",
+        "fix-ci",
+        "--json",
+        fixturePath,
+        "read"
+      ],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[1] ?? "{}") as {
+      ok: boolean;
+      envKeys: string[];
+      stdout: string;
+    };
+    const child = JSON.parse(parsed.stdout) as {
+      argv: string[];
+      hasToken: boolean;
+      rawEnv: string | null;
+      pathEnv: string | null;
+    };
+    const serialized = JSON.stringify({ parsed, auditEntries });
+
+    expect(parsed.ok).toBe(true);
+    expect(parsed.envKeys).toEqual(["FIXTURE_TOKEN"]);
+    expect(child).toEqual({
+      argv: ["read"],
+      hasToken: true,
+      rawEnv: null,
+      pathEnv: "present"
+    });
+    expect(auditEntries).toContainEqual(
+      expect.objectContaining({
+        action: "command_run",
+        status: "ok",
+        mandateId: "fix-ci",
+        command: fixturePath,
+        args: ["read"],
+        envKeys: ["FIXTURE_TOKEN"],
+        exitCode: 0
+      })
+    );
+    expect(serialized).not.toContain("fixture_secret_should_not_print");
+    expect(serialized).not.toContain("raw_should_not_be_injected");
+  });
+
+  it("denies shell wrappers in run mode by default", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "main");
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const output: string[] = [];
+    const program = createProgram({
+      mandateStorePath,
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "main",
+        "--lease",
+        "2h"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "run",
+        "--mandate",
+        "fix-ci",
+        "--json",
+        "--",
+        "bash",
+        "-c",
+        "echo hi"
+      ],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[1] ?? "{}")).toMatchObject({
+      ok: false,
+      code: "run_command_denied"
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
   it("reports installed client configs with missing launch commands", async () => {
     const root = makeTempProject();
     writeStdioConfig(root);
