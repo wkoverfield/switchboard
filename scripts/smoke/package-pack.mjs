@@ -54,6 +54,10 @@ try {
     assert(packageJson.version === "0.1.0", "package version");
     assert(packageJson.repository?.url, "repository metadata");
     assert(packageJson.license === "UNLICENSED", "license metadata");
+    assert(
+      packageJson.publishConfig?.access === "public",
+      "scoped package publish access"
+    );
     if (packageSpec.expectedName === "@switchboard-mcp/cli") {
       assert(packageJson.bin?.switchboard === "./dist/index.js", "cli bin");
       assert(

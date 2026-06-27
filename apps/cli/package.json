@@ -4,6 +4,9 @@
   "type": "module",
   "description": "Local-first MCP profile router for multiple accounts, projects, environments, and AI coding agents.",
   "license": "UNLICENSED",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/woverfield/switchboard.git",

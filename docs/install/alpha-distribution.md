@@ -31,6 +31,35 @@ To verify publish readiness before npm publish:
 pnpm build
 pnpm smoke:package-pack
 pnpm smoke:package-install
+pnpm release:npm-alpha:preflight
+```
+
+`release:npm-alpha:preflight` packs the three publishable packages, checks
+`npm whoami`, checks whether each exact package version already exists, and
+runs `npm publish <tarball> --access public --dry-run`. It exits non-zero when
+npm auth is missing so the publish blocker is obvious before a tester sees it.
+
+Current publish blocker: this machine must be authenticated with npm first:
+
+```bash
+npm adduser
+npm whoami
+```
+
+After auth and a passing preflight, publish in dependency order:
+
+```bash
+npm publish <core-tarball> --access public
+npm publish <mcp-runtime-tarball> --access public
+npm publish <cli-tarball> --access public
+```
+
+Then verify the real public install path in a clean shell:
+
+```bash
+npm install -g @switchboard-mcp/cli
+switchboard --help
+npx -y @switchboard-mcp/cli@latest --help
 ```
 
 ## Source Install
@@ -54,7 +83,7 @@ pnpm smoke:package-pack
 pnpm smoke:package-install
 ```
 
-The smoke packs:
+The smoke and preflight pack:
 
 - `@switchboard-mcp/core`
 - `@switchboard-mcp/mcp-runtime`

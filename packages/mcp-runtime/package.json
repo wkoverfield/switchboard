@@ -4,6 +4,9 @@
   "type": "module",
   "description": "MCP runtime, routing, daemon client, and stdio server helpers for Switchboard.",
   "license": "UNLICENSED",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/woverfield/switchboard.git",
