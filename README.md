@@ -1,14 +1,25 @@
 # Switchboard
 
-Repo-aware MCP setup and task-scoped authority for agentic software work.
+Safe, repo-aware tool access for coding agents.
 
-Your agents should know which tools belong to this repo.
+Switchboard looks at a repo, imports or sets up the MCP tools that belong
+there, and gives agents bounded workspace authority instead of your whole
+developer environment.
 
-Switchboard gives coding agents the right tools for each repo, environment, and task. The simple entry point is local-first MCP setup for developers using Codex, Claude Code, Cursor, VS Code, and other MCP-compatible agents: `switchboard scan` detects repo/account/provider hints without network calls or secret values, guided setup creates project-scoped config, and production-safe defaults keep raw secrets out of config/output while nudging risky provider actions toward non-prod profiles, approval gates, leases, and audit logs. Codex and Claude Code are shipped installer targets today; Cursor and VS Code remain planned surfaces.
+The first aha should be simple:
 
-The deeper power layer is mandates: temporary, task-scoped authority that lets agents do bounded jobs without inheriting a human's whole tool surface. Mandates stay optional for simple setup, but they give advanced users and external harnesses a way to bind profiles, tools, leases, approvals, and audit logs to a specific task.
+```bash
+switchboard scan
+switchboard import --dry-run
+switchboard setup github-ci
+switchboard mandate create --from github-ci --json
+switchboard mcp --mandate fix-ci
+```
 
-This repository is in foundation work for the local mandate layer. It currently ships the TypeScript workspace, CLI shell, local `switchboard scan`, config/profile schemas, namespace normalization, collision detection, `switchboard status`, `switchboard doctor` with `ok` / `setup-incomplete` / `failed` readiness, generic stdio MCP upstream mounting, namespaced tool routing, a stdio MCP front door, client config dry-run and write-mode installers for Codex and Claude Code, project client config and existing MCP server detection in doctor, local audit logs, daemon lifecycle commands, daemon-side tool discovery, a daemon-backed MCP adapter for tool listing and routed calls, local mandate creation/status, preset-backed `switchboard mandate create --from <preset>`, mandate-scoped MCP runtime context, mandate allow/deny tool policy, local secret refs backed by a keychain adapter, provider-add structured command JSON, and end-to-end MCP smoke checks.
+Setup/import is the front door. Mandates and workspace leases are the deeper
+layer: temporary, task-scoped records that bind repo, worktree, branch, agent
+role, profiles, allowed/denied tools, approval gates, lease expiry, audit
+state, and a harness-friendly MCP launch payload.
 
 ## Install
 
@@ -36,6 +47,22 @@ switchboard install codex --write
 switchboard mandate create --from github-ci
 ```
 
+For Claude Code:
+
+```bash
+switchboard install claude --write
+```
+
+For harnesses and subagent systems:
+
+```bash
+switchboard mandate create --from github-ci --json
+```
+
+Read `workspaceLease.mcpLaunch` from the JSON response and launch the returned
+stdio MCP endpoint. Switchboard grants and audits authority; your harness still
+owns scheduling, retries, agent processes, and long-running loops.
+
 ## Install From Source
 
 ```bash
@@ -50,6 +77,12 @@ pnpm smoke:import-dry-run
 pnpm smoke:github-ci-first-loop
 pnpm smoke:harness-subagent-proof
 pnpm smoke:vercel-preview-dogfood
+pnpm smoke:mandate-runtime-readiness
+pnpm smoke:provider-presets
+pnpm eval:fresh-agent-import
+pnpm eval:fresh-agent-github-ci
+pnpm eval:fresh-agent-expired-mandate
+pnpm eval:fresh-agent-subagent
 pnpm smoke:mcp-serve-session
 ```
 
@@ -72,25 +105,26 @@ switchboard import --dry-run
 switchboard import --json
 switchboard import --write
 switchboard init
-switchboard setup <github-ci|vercel-preview>
-switchboard add <github-ci|vercel-preview>
-switchboard add <github-ci|vercel-preview> --write
+switchboard setup <github-ci|vercel-preview|stripe-test>
+switchboard add <github-ci|vercel-preview|stripe-test>
+switchboard add <github-ci|vercel-preview|stripe-test> --write
 switchboard status
 switchboard doctor
 switchboard demo mandate [profile]
 switchboard test <profile>
-switchboard auth <github-ci|vercel-preview>
+switchboard auth <github-ci|vercel-preview|stripe-test>
 switchboard install <codex|claude>
 switchboard install <codex|claude> --write
 switchboard install <codex|claude> --rollback <backup>
 switchboard mandate create --from github-ci
-switchboard mandate create --from <github-ci|vercel-preview> --json
+switchboard mandate create --from <github-ci|vercel-preview|stripe-test> --json
 switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration>
 switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --json
 switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --allow-tool <pattern> --deny-tool <pattern>
 switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --require-approval-tool <pattern> --require-approval-reason <reason>
 switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --require-approval-tool <pattern> --require-approval-risk <risk> --require-approval-label <label>
 switchboard mandate child <task> --parent <id> --agent <role> --profiles <profiles> --branch <branch> --lease <duration>
+switchboard mandate renew <id> --lease <duration>
 switchboard mandate status [id]
 switchboard tools
 switchboard tools --mandate <id> --json
@@ -103,8 +137,8 @@ switchboard secrets list
 switchboard secrets remove <ref>
 switchboard secrets doctor
 switchboard presets list
-switchboard presets show <github-ci|vercel-preview>
-switchboard presets check <github-ci|vercel-preview> --profile <profile>
+switchboard presets show <github-ci|vercel-preview|stripe-test>
+switchboard presets check <github-ci|vercel-preview|stripe-test> --profile <profile>
 switchboard logs
 switchboard logs --mandate <id>
 switchboard daemon <status|start|ping|tools|stop>
@@ -114,6 +148,36 @@ switchboard mcp --mandate <id> --approval-wait <duration>
 switchboard serve
 switchboard serve --mandate <id>
 ```
+
+## Why Not Existing Options?
+
+**Claude/Codex project MCP config:** project config is useful, but it is still
+mostly static wiring. Switchboard can import that wiring, keep secrets out of
+repo/client files, and add scoped leases, approval gates, runtime readiness,
+audit, and handoff reports.
+
+**Docker MCP Gateway:** a gateway is a good way to run or package MCP servers.
+Switchboard is the local authority layer above that: which profile, account,
+repo, branch, tools, approvals, and lease should this agent get for this task?
+Docker can be one upstream runtime behind a Switchboard profile.
+
+**Composio, Arcade, and hosted tool platforms:** hosted platforms can be great
+for managed OAuth and broad SaaS coverage. Switchboard is local-first for
+coding-agent repos: project-scoped config, local secret refs, local audit, and
+harness-friendly JSON contracts without becoming your orchestrator.
+
+**Just give the agent a token:** that is fast until the token is broad, stale,
+live/prod, or copied into the wrong config. Switchboard keeps the token behind a
+local `secretRef`, narrows exposed tools through mandates, and records what the
+agent was allowed to do.
+
+## Alpha Status
+
+Switchboard is alpha software. It is local-first, repo-scoped, and currently
+targets Codex and Claude project MCP setup. It is not a hosted OAuth broker,
+dashboard, sandbox provisioner, or provider marketplace. Runtime readiness
+checks catch lease, branch, worktree, and missing-secret problems, but they do
+not create a filesystem or network sandbox.
 
 ## Product Roadmap
 

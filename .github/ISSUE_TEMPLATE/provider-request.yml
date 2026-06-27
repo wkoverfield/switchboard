@@ -1,0 +1,26 @@
+name: Provider request
+description: Request a new provider safety preset.
+title: "Provider request: "
+labels: ["provider", "request"]
+body:
+  - type: input
+    id: provider
+    attributes:
+      label: Provider
+      placeholder: "Stripe, Supabase, Sentry, PostHog, etc."
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Agent workflow
+      description: What should an agent safely inspect or do?
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risky actions
+      description: Which tools should be denied or approval-gated?
+    validations:
+      required: true

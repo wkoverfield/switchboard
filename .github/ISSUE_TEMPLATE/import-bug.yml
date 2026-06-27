@@ -1,0 +1,27 @@
+name: Import bug
+description: Existing MCP config was detected, imported, or explained incorrectly.
+title: "Import bug: "
+labels: ["import", "bug"]
+body:
+  - type: textarea
+    id: repo-shape
+    attributes:
+      label: Repo/client setup
+      description: Which client config existed before import?
+      placeholder: ".codex/config.toml, .mcp.json, Claude project config, etc."
+    validations:
+      required: true
+  - type: textarea
+    id: command-output
+    attributes:
+      label: Redacted command output
+      description: Paste output from `switchboard import --dry-run --json` or `switchboard import --write`.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
