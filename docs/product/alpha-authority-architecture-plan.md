@@ -103,6 +103,10 @@ optional wrapper rather than the authority boundary.
 ### Build
 
 - Detect direct non-Switchboard MCP servers in Codex and Claude project config.
+- Ship Bypass Findings V0 in `scan`, `doctor`, and import output before cleanup
+  writes: unresolved direct routes appear as `bypassFindings`, human output gets
+  an "Authority bypasses" section, and `doctor` fails the `direct-mcp-bypass`
+  check instead of reporting `ok`.
 - Mark direct routes as bypasses when Switchboard is also installed or when an
   import plan exists for those servers.
 - Add risk findings for:

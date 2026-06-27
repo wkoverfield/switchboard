@@ -53,6 +53,7 @@ import {
   type SwitchboardScanResult,
   type SwitchboardImportPlan,
   type WrittenSwitchboardImportPlan,
+  type BypassFinding,
   type RenderedProviderSafetyTemplate,
   type ProviderAddPlan,
   type WrittenProviderAddPlan,
@@ -654,6 +655,11 @@ export function createProgram(io: ProgramIo = {}): Command {
         loaded.config,
         secretStore
       );
+      const importPlan = await createSwitchboardImportPlan({
+        cwd,
+        env: process.env
+      });
+      const bypassFindings = importPlan.bypassFindings;
       const checks = [
         {
           name: "config-schema",
@@ -684,6 +690,11 @@ export function createProgram(io: ProgramIo = {}): Command {
           name: "secrets",
           ok: missingSecrets.length === 0,
           message: secretCheckSummary(missingSecrets)
+        },
+        {
+          name: "direct-mcp-bypass",
+          ok: bypassFindings.length === 0,
+          message: bypassCheckSummary(bypassFindings)
         }
       ];
 
@@ -695,6 +706,7 @@ export function createProgram(io: ProgramIo = {}): Command {
         clientConfigs,
         clientLaunches,
         missingSecrets,
+        bypassFindings,
         cwd: globalOptions.cwd
       }).map((step) =>
         rewriteSwitchboardCommand(step, switchboardCommandPrefixForRepo(cwd))
@@ -712,6 +724,7 @@ export function createProgram(io: ProgramIo = {}): Command {
           usages: collectSecretRefUsages(loaded.config),
           missing: missingSecrets
         },
+        bypassFindings,
         nextSteps
       };
 
@@ -3443,6 +3456,14 @@ function formatScan(result: SwitchboardScanResult): string {
     );
   }
 
+  if (result.bypassFindings.length > 0) {
+    lines.push(
+      "",
+      "Authority bypasses:",
+      ...result.bypassFindings.map(formatBypassFindingLine)
+    );
+  }
+
   const providerSuggestions = result.suggestions.filter(
     (suggestion) => suggestion.kind === "provider-profile"
   );
@@ -3678,6 +3699,14 @@ function formatImportPlan(plan: SwitchboardImportPlan): string {
     );
   }
 
+  if (plan.bypassFindings.length > 0) {
+    lines.push(
+      "",
+      "Authority bypasses:",
+      ...plan.bypassFindings.map(formatBypassFindingLine)
+    );
+  }
+
   if (plan.actions.length > 0) {
     lines.push("", "Recommended cleanup:");
     for (const action of plan.actions) {
@@ -3783,6 +3812,7 @@ function formatDoctor(result: {
     usages: ReturnType<typeof collectSecretRefUsages>;
     missing: MissingSecretRef[];
   };
+  bypassFindings?: BypassFinding[];
   nextSteps: string[];
 }): string {
   const lines = [`Switchboard doctor: ${formatDoctorStatus(result.status)}`];
@@ -3832,6 +3862,16 @@ function formatDoctor(result: {
     }
   }
 
+  if (result.bypassFindings && result.bypassFindings.length > 0) {
+    lines.push("", "Authority bypasses:");
+    for (const finding of result.bypassFindings) {
+      lines.push(formatBypassFindingLine(finding));
+      for (const reason of finding.reasons) {
+        lines.push(`    ${reason}`);
+      }
+    }
+  }
+
   if (result.nextSteps.length > 0) {
     lines.push("", "Next steps:");
     for (const step of result.nextSteps) {
@@ -3840,6 +3880,13 @@ function formatDoctor(result: {
   }
 
   return lines.join("\n");
+}
+
+function formatBypassFindingLine(finding: BypassFinding): string {
+  const provider =
+    finding.provider === "unknown" ? "provider unknown" : finding.provider;
+  const tags = finding.riskTags.join(", ");
+  return `  ${finding.severity} ${finding.client}:${finding.serverName} (${provider}; ${tags})`;
 }
 
 function formatDoctorStatus(
@@ -3896,6 +3943,17 @@ function secretCheckSummary(missingSecrets: MissingSecretRef[]): string {
   }
 
   return `${missingSecrets.length} configured local token(s) are missing or unavailable.`;
+}
+
+function bypassCheckSummary(findings: BypassFinding[]): string {
+  if (findings.length === 0) {
+    return "No direct Codex/Claude MCP bypass routes were detected.";
+  }
+
+  const high = findings.filter((finding) => finding.severity === "high").length;
+  return high > 0
+    ? `${findings.length} direct MCP bypass route(s) detected, including ${high} high-risk route(s).`
+    : `${findings.length} direct MCP bypass route(s) detected.`;
 }
 
 function formatProviderAddPlanJson(plan: ProviderAddPlan): Record<string, unknown> {
@@ -6636,6 +6694,7 @@ function doctorNextSteps(options: {
   clientConfigs: ProjectClientConfigInspection[];
   clientLaunches: ClientLaunchCheck[];
   missingSecrets: MissingSecretRef[];
+  bypassFindings: BypassFinding[];
   cwd: string | undefined;
 }): string[] {
   const steps: string[] = [];
@@ -6685,6 +6744,10 @@ function doctorNextSteps(options: {
         `${clientLaunchInstallHint(launch.command)}, then rerun switchboard install ${launch.client} --write`
       );
     }
+  }
+
+  if (options.bypassFindings.length > 0) {
+    steps.push("switchboard import --dry-run");
   }
 
   if (placeholderProfiles.length > 0) {

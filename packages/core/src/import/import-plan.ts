@@ -1,5 +1,6 @@
 import { constants, readdirSync, readFileSync, statSync } from "node:fs";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { deepMerge, loadSwitchboardConfig } from "../config/load-config.js";
@@ -23,6 +24,8 @@ export type ImportPlanActionKind =
 
 export interface SwitchboardImportPlanOptions {
   cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  homeDir?: string;
 }
 
 export interface SwitchboardImportPlan {
@@ -38,6 +41,7 @@ export interface SwitchboardImportPlan {
     switchboardProfiles: ImportSwitchboardProfile[];
     envFiles: ImportEnvFileDetection[];
   };
+  bypassFindings: BypassFinding[];
   actions: ImportPlanAction[];
   commands: {
     dryRun: CommandShape;
@@ -89,6 +93,31 @@ export interface ImportDetectedServer {
   }>;
 }
 
+export type BypassRiskTag =
+  | "direct-mcp-server"
+  | "switchboard-coexists"
+  | "provider-overlap"
+  | "secret-env-name"
+  | "token-like-arg"
+  | "broad-filesystem-mount";
+
+export interface BypassFinding {
+  id: string;
+  status: "unaccepted";
+  severity: "medium" | "high";
+  client: SupportedClient;
+  targetPath: string;
+  serverName: string;
+  provider: ScanProviderId | "unknown";
+  command: string | null;
+  args: string[];
+  envKeys: string[];
+  suggestedProfileName: string;
+  riskTags: BypassRiskTag[];
+  reasons: string[];
+  nextActions: string[];
+}
+
 export interface ImportSwitchboardProfile {
   name: string;
   provider: string | null;
@@ -126,7 +155,11 @@ export async function createSwitchboardImportPlan(
 ): Promise<SwitchboardImportPlan> {
   const cwd = resolve(options.cwd ?? process.cwd());
   const repoName = basename(cwd);
-  const loaded = loadSwitchboardConfig({ cwd });
+  const loaded = loadSwitchboardConfig({
+    cwd,
+    ...(options.env ? { env: options.env } : {}),
+    ...(options.homeDir ? { homeDir: options.homeDir } : {})
+  });
   const profileNames = new Set(Object.keys(loaded.config.profiles));
   const switchboardProfiles = Object.entries(loaded.config.profiles).map(
     ([name, profile]) => ({
@@ -140,6 +173,12 @@ export async function createSwitchboardImportPlan(
   const detectedServers = clients.flatMap((client) =>
     client.servers.filter((server) => server.name !== "switchboard")
   );
+  const bypassFindings = buildBypassFindings({
+    cwd,
+    ...(options.homeDir ? { homeDir: options.homeDir } : {}),
+    clients,
+    switchboardProfiles
+  });
   const createProfileActions = uniqueServersByProfile(detectedServers)
     .filter((server) => !profileNames.has(server.suggestedProfileName))
     .map((server) => createProfileAction(server));
@@ -195,7 +234,12 @@ export async function createSwitchboardImportPlan(
     ...installActions,
     ...reviewActions
   ];
-  const warnings = buildWarnings({ clients, envFiles, detectedServers });
+  const warnings = buildWarnings({
+    clients,
+    envFiles,
+    detectedServers,
+    bypassFindings
+  });
   const safetyNotes = [
     "Dry run only: this command does not write .switchboard.yaml or client config.",
     "Secret values are never read from env files or client config; only env variable names are reported.",
@@ -218,6 +262,7 @@ export async function createSwitchboardImportPlan(
       switchboardProfiles,
       envFiles
     },
+    bypassFindings,
     actions,
     commands: {
       dryRun: { command: "switchboard", args: ["import", "--dry-run"] },
@@ -629,6 +674,7 @@ function buildWarnings(options: {
   clients: ImportClientDetection[];
   envFiles: ImportEnvFileDetection[];
   detectedServers: ImportDetectedServer[];
+  bypassFindings?: BypassFinding[];
 }): string[] {
   const warnings: string[] = [];
   for (const client of options.clients) {
@@ -660,8 +706,145 @@ function buildWarnings(options: {
       "Existing MCP configs reference secret-looking env names; store values behind Switchboard local token aliases before routing agents."
     );
   }
+  if (options.bypassFindings && options.bypassFindings.length > 0) {
+    warnings.push(
+      "Direct MCP servers bypass Switchboard authority; review bypass findings before giving agents this repo."
+    );
+  }
 
   return [...new Set(warnings)];
+}
+
+export function buildBypassFindings(options: {
+  cwd: string;
+  homeDir?: string;
+  clients: ImportClientDetection[];
+  switchboardProfiles: ImportSwitchboardProfile[];
+}): BypassFinding[] {
+  const hasSwitchboardClientRoute = options.clients.some((client) =>
+    client.servers.some((server) => server.routesThroughSwitchboard)
+  );
+  const home = options.homeDir ?? homedir();
+
+  return options.clients.flatMap((client) =>
+    client.servers
+      .filter((server) => !server.routesThroughSwitchboard)
+      .map((server) => {
+        const riskTags: BypassRiskTag[] = ["direct-mcp-server"];
+        const reasons = [
+          `${client.client} server "${server.name}" can give agents tools without Switchboard mandate policy, leases, approvals, or audit.`
+        ];
+
+        if (hasSwitchboardClientRoute) {
+          riskTags.push("switchboard-coexists");
+          reasons.push(
+            "This direct MCP route coexists with a Switchboard client route, so agents can bypass the intended control plane."
+          );
+        }
+
+        if (providerOverlapsSwitchboard(server, options.switchboardProfiles)) {
+          riskTags.push("provider-overlap");
+          reasons.push(
+            `This server appears to overlap a configured Switchboard ${server.provider} profile.`
+          );
+        }
+
+        if (server.envKeys.some((key) => isSecretLikeName(key))) {
+          riskTags.push("secret-env-name");
+          reasons.push(
+            "The server references secret-looking env names; Switchboard should keep values behind local secretRefs."
+          );
+        }
+
+        if (server.args.some((arg) => arg.includes("[redacted]"))) {
+          riskTags.push("token-like-arg");
+          reasons.push(
+            "The server command args include token-like material; values were redacted from output."
+          );
+        }
+
+        if (looksLikeBroadFilesystemMount(server, options.cwd, home)) {
+          riskTags.push("broad-filesystem-mount");
+          reasons.push(
+            "The server appears to mount a broad filesystem path such as /, $HOME, or the repo parent."
+          );
+        }
+
+        const severity = riskTags.some((tag) =>
+          [
+            "provider-overlap",
+            "secret-env-name",
+            "token-like-arg",
+            "broad-filesystem-mount"
+          ].includes(tag)
+        )
+          ? "high"
+          : "medium";
+
+        return {
+          id: `${client.client}:${server.name}`,
+          status: "unaccepted" as const,
+          severity,
+          client: client.client,
+          targetPath: client.targetPath,
+          serverName: server.name,
+          provider: server.provider,
+          command: server.command,
+          args: server.args,
+          envKeys: server.envKeys,
+          suggestedProfileName: server.suggestedProfileName,
+          riskTags: [...new Set(riskTags)],
+          reasons,
+          nextActions: [
+            "switchboard import --dry-run",
+            server.suggestedSecretRefs.length > 0
+              ? `switchboard secrets set ${server.suggestedSecretRefs[0]?.ref ?? "<ref>"} --value-stdin`
+              : `switchboard import --write`
+          ]
+        };
+      })
+  );
+}
+
+function providerOverlapsSwitchboard(
+  server: ImportDetectedServer,
+  profiles: ImportSwitchboardProfile[]
+): boolean {
+  if (server.provider === "unknown") {
+    return false;
+  }
+
+  return profiles.some((profile) => {
+    const provider = profile.provider?.toLowerCase();
+    return (
+      provider === server.provider ||
+      profile.name.toLowerCase().includes(server.provider) ||
+      (profile.namespace?.toLowerCase().includes(server.provider) ?? false)
+    );
+  });
+}
+
+function looksLikeBroadFilesystemMount(
+  server: ImportDetectedServer,
+  cwd: string,
+  homeDir: string
+): boolean {
+  const joined = [server.name, server.command ?? "", ...server.args].join(" ");
+  if (!/filesystem|file-system|fs|desktop-commander/i.test(joined)) {
+    return false;
+  }
+
+  const repoParent = dirname(resolve(cwd));
+  return server.args.some((arg) => {
+    const normalized = arg.replace(/^['"]|['"]$/g, "");
+    return (
+      normalized === "/" ||
+      normalized === homeDir ||
+      normalized === "$HOME" ||
+      normalized === "~" ||
+      normalized === repoParent
+    );
+  });
 }
 
 function codexServerSections(content: string): Array<{

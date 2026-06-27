@@ -112,6 +112,59 @@ describe("switchboard import plan", () => {
     expect(plan.warnings).toContain(
       "Existing MCP configs reference secret-looking env names; store values behind Switchboard local token aliases before routing agents."
     );
+    expect(plan.bypassFindings).toHaveLength(2);
+    expect(plan.bypassFindings[0]).toMatchObject({
+      id: "codex:github",
+      status: "unaccepted",
+      severity: "high",
+      client: "codex",
+      serverName: "github",
+      provider: "github",
+      riskTags: expect.arrayContaining([
+        "direct-mcp-server",
+        "switchboard-coexists",
+        "secret-env-name",
+        "token-like-arg"
+      ])
+    });
+    expect(plan.bypassFindings[1]).toMatchObject({
+      id: "claude:vercel",
+      severity: "high",
+      provider: "vercel"
+    });
+    expect(serialized).toContain(
+      "Direct MCP servers bypass Switchboard authority"
+    );
+  });
+
+  it("flags broad filesystem mounts as high-risk bypasses", async () => {
+    const base = await mkdtemp(join(tmpdir(), "switchboard-import-fs-"));
+    const root = join(base, "repo");
+    await mkdir(root);
+    await writeFile(
+      join(root, ".mcp.json"),
+      JSON.stringify(
+        {
+          mcpServers: {
+            filesystem: {
+              command: "npx",
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "/"]
+            }
+          }
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const plan = await createSwitchboardImportPlan({ cwd: root });
+
+    expect(plan.bypassFindings).toHaveLength(1);
+    expect(plan.bypassFindings[0]).toMatchObject({
+      severity: "high",
+      riskTags: expect.arrayContaining(["broad-filesystem-mount"])
+    });
   });
 
   it("returns an import plan with an invalid client finding instead of throwing", async () => {

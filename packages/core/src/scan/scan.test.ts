@@ -123,6 +123,59 @@ describe("switchboard project scan", () => {
     );
   });
 
+  it("reports direct MCP bypass findings from project agent configs", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-scan-bypass-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "switchboard-scan-home-"));
+    await mkdir(join(root, ".codex"), { recursive: true });
+    await writeFile(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_stockr_ci:",
+        "    provider: github",
+        "    namespace: github_stockr_ci",
+        "    upstream:",
+        "      type: stdio",
+        "      command: docker"
+      ].join("\n"),
+      "utf8"
+    );
+    await writeFile(
+      join(root, ".codex", "config.toml"),
+      [
+        "[mcp_servers.switchboard]",
+        'command = "switchboard"',
+        'args = ["--cwd", "/tmp/example", "mcp"]',
+        "",
+        "[mcp_servers.github]",
+        'command = "docker"',
+        'args = ["run", "GITHUB_TOKEN=ghp_scan_should_not_print", "ghcr.io/github/github-mcp-server"]',
+        'env = { GITHUB_TOKEN = "ghp_scan_should_not_print" }'
+      ].join("\n"),
+      "utf8"
+    );
+
+    const result = await scanSwitchboardProject({ cwd: root, homeDir });
+    const serialized = JSON.stringify(result);
+
+    expect(result.bypassFindings).toHaveLength(1);
+    expect(result.bypassFindings[0]).toMatchObject({
+      id: "codex:github",
+      severity: "high",
+      provider: "github",
+      riskTags: expect.arrayContaining([
+        "switchboard-coexists",
+        "provider-overlap",
+        "secret-env-name",
+        "token-like-arg"
+      ])
+    });
+    expect(result.warnings.some((warning) => warning.includes("direct MCP bypass"))).toBe(true);
+    expect(result.nextActions[0]).toBe("switchboard import --dry-run");
+    expect(serialized).not.toContain("ghp_scan_should_not_print");
+  });
+
   it("redacts credentials embedded in git remote URLs", async () => {
     const root = await mkdtemp(join(tmpdir(), "switchboard-scan-remote-"));
     const homeDir = await mkdtemp(join(tmpdir(), "switchboard-scan-home-"));
