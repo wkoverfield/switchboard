@@ -16,6 +16,7 @@ gets for that task.
 | --- | --- | --- | --- |
 | Provider setup plan | `switchboard add <github-ci\|vercel-preview> --json` | `schemaVersion: "switchboard.provider-add.v1"` | Stable enough for alpha setup automation |
 | MCP launch payload | `switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --json` | `mcpLaunch.schemaVersion: "switchboard.mcp-launch.v1"` | Stable enough for harness startup |
+| Workspace lease payload | `switchboard mandate create ... --json` and `switchboard mandate child ... --json` | `workspaceLease.schemaVersion: "switchboard.workspace-lease.v1"` | Stable enough for harness authority handoff |
 | Preset-backed MCP launch payload | `switchboard mandate create --from <github-ci\|vercel-preview> --json` | `mcpLaunch.schemaVersion: "switchboard.mcp-launch.v1"` | Stable enough for harness startup |
 | Child MCP launch payload | `switchboard mandate child <task> --parent <id> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --json` | `mcpLaunch.schemaVersion: "switchboard.mcp-launch.v1"` | Stable enough for delegated worker startup |
 | Mandate status | `switchboard mandate status [id] --json` | `schemaVersion: "switchboard.mandate-status.v1"` | Stable enough for harness polling |
@@ -92,6 +93,13 @@ logs, escalation, and a child-mandate template. The additive `policy` object
 summarizes mounted profiles, allowed tool patterns, denied tool patterns, and
 approval gates so a harness can display the authority grant before launching an
 agent without parsing the full persisted mandate.
+
+`switchboard.workspace-lease.v1` wraps the mandate authority into a single
+harness-friendly contract. It includes repo path, worktree path, branch,
+runtime transport, coarse environment class, profiles, policy summary, lease
+timestamps, `mcpLaunch`, follow-up commands, and explicit limits. The mandate
+record remains the local source of truth; `workspaceLease` is the portable
+handoff object an orchestrator can pass to a worker agent.
 
 `switchboard.mandate-status.v1` lets a harness poll mandate state. The payload
 includes the mandate store path, optional repo filter, and matching mandates

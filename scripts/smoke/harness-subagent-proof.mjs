@@ -72,6 +72,19 @@ try {
     "expected harness mcpLaunch args"
   );
   assert(
+    parent.workspaceLease?.schemaVersion === "switchboard.workspace-lease.v1",
+    "expected workspace lease schema"
+  );
+  assert(
+    parent.workspaceLease?.mcpLaunch?.args?.join(" ") ===
+      `--cwd ${project} mcp --mandate fix-ci`,
+    "expected workspace lease mcp launch"
+  );
+  assert(
+    parent.workspaceLease?.authority?.profiles?.includes?.(profileName),
+    "expected workspace lease authority profiles"
+  );
+  assert(
     parent.mcpLaunch?.commands?.toolSurface?.args?.join(" ") ===
       `--cwd ${project} tools --mandate fix-ci --json`,
     "expected structured tool-surface command"

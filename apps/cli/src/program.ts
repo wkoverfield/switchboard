@@ -97,6 +97,7 @@ import {
 
 const version = "0.1.0";
 const mandateMcpLaunchSchemaVersion = "switchboard.mcp-launch.v1";
+const workspaceLeaseSchemaVersion = "switchboard.workspace-lease.v1";
 const mandateStatusSchemaVersion = "switchboard.mandate-status.v1";
 const mandateReportSchemaVersion = "switchboard.mandate-report.v1";
 const mandateEscalationSchemaVersion = "switchboard.mandate-escalation.v1";
@@ -164,6 +165,39 @@ interface MandateMcpLaunchPolicy {
     risk?: string;
     labels?: string[];
   }>;
+}
+
+interface WorkspaceLeasePayload {
+  schemaVersion: typeof workspaceLeaseSchemaVersion;
+  mandateId: string;
+  mandateUid: string | null;
+  repo: {
+    path: string;
+    worktreePath: string;
+    branch: string;
+  };
+  runtime: {
+    kind: "local";
+    transport: "stdio";
+  };
+  envClass: "non-prod" | "prod" | "unknown";
+  authority: {
+    agentRole: string;
+    profiles: string[];
+    allowedTools: string[];
+    deniedTools: string[];
+    approvalGates: MandateMcpLaunchPolicy["approvalGates"];
+    parentMandateId?: string;
+    parentMandateUid?: string;
+  };
+  lease: {
+    createdAt: string;
+    expiresAt: string;
+    status: MandateWithStatus["runtimeStatus"];
+  };
+  mcpLaunch: MandateMcpLaunchPayload;
+  commands: MandateMcpLaunchCommands;
+  limits: string[];
 }
 
 interface MandateMcpLaunchCommandCandidate {
@@ -2395,12 +2429,14 @@ export function createProgram(io: ProgramIo = {}): Command {
                 ]
               });
               if (options.json) {
+                const mcpLaunch = createMandateMcpLaunchPayload(mandate);
                 writeOut(
                   JSON.stringify(
                     {
                       path,
                       mandate,
-                      mcpLaunch: createMandateMcpLaunchPayload(mandate)
+                      mcpLaunch,
+                      workspaceLease: createWorkspaceLeasePayload(mandate, mcpLaunch)
                     },
                     null,
                     2
@@ -2613,12 +2649,14 @@ export function createProgram(io: ProgramIo = {}): Command {
                 )
               });
               if (options.json) {
+                const mcpLaunch = createMandateMcpLaunchPayload(mandate);
                 writeOut(
                   JSON.stringify(
                     {
                       path,
                       mandate,
-                      mcpLaunch: createMandateMcpLaunchPayload(mandate)
+                      mcpLaunch,
+                      workspaceLease: createWorkspaceLeasePayload(mandate, mcpLaunch)
                     },
                     null,
                     2
@@ -4675,6 +4713,71 @@ function createMandateMcpLaunchPayload(
     installHint:
       "Use command/args when the switchboard binary is on PATH. If it is not, use a commandCandidates entry such as current-entrypoint."
   };
+}
+
+function createWorkspaceLeasePayload(
+  mandate: MandateWithStatus,
+  mcpLaunch: MandateMcpLaunchPayload = createMandateMcpLaunchPayload(mandate)
+): WorkspaceLeasePayload {
+  return {
+    schemaVersion: workspaceLeaseSchemaVersion,
+    mandateId: mandate.id,
+    mandateUid: mandate.mandateUid ?? null,
+    repo: {
+      path: mandate.repoPath,
+      worktreePath: mandate.worktreePath,
+      branch: mandate.branch
+    },
+    runtime: {
+      kind: "local",
+      transport: "stdio"
+    },
+    envClass: envClassFromMandate(mandate),
+    authority: {
+      agentRole: mandate.agentRole,
+      profiles: mandate.profiles,
+      allowedTools: mandate.allowedTools,
+      deniedTools: mandate.deniedTools,
+      approvalGates: mcpLaunch.policy.approvalGates,
+      ...(mandate.parentMandateId
+        ? { parentMandateId: mandate.parentMandateId }
+        : {}),
+      ...(mandate.parentMandateUid
+        ? { parentMandateUid: mandate.parentMandateUid }
+        : {})
+    },
+    lease: {
+      createdAt: mandate.createdAt,
+      expiresAt: mandate.expiresAt,
+      status: mandate.runtimeStatus
+    },
+    mcpLaunch,
+    commands: mcpLaunch.commands,
+    limits: [
+      "local authority contract only; this is not a sandbox",
+      "tool access requires launching through the included mcpLaunch command",
+      "authority expires at lease.expiresAt"
+    ]
+  };
+}
+
+function envClassFromMandate(
+  mandate: MandateWithStatus
+): WorkspaceLeasePayload["envClass"] {
+  const text = [
+    mandate.id,
+    mandate.task,
+    mandate.branch,
+    ...mandate.profiles,
+    ...mandate.allowedTools
+  ].join(" ");
+  if (/(^|[_\-.])(prod|production|live)([_\-.]|$)/i.test(text)) {
+    return "prod";
+  }
+  if (/(^|[_\-.])(dev|development|local|test|preview|staging|ci)([_\-.]|$)/i.test(text)) {
+    return "non-prod";
+  }
+  return "unknown";
 }
 
 function createMandateMcpLaunchCommands(
