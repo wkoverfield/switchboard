@@ -44,7 +44,8 @@
     "eval:fresh-agent-import": "node scripts/evals/fresh-agent.mjs import",
     "eval:fresh-agent-github-ci": "node scripts/evals/fresh-agent.mjs github-ci",
     "eval:fresh-agent-expired-mandate": "node scripts/evals/fresh-agent.mjs expired-mandate",
-    "eval:fresh-agent-subagent": "node scripts/evals/fresh-agent.mjs subagent"
+    "eval:fresh-agent-subagent": "node scripts/evals/fresh-agent.mjs subagent",
+    "eval:published-alpha": "node scripts/evals/published-alpha.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

@@ -1,6 +1,6 @@
 # Switchboard Roadmap
 
-Last updated: 2026-06-25
+Last updated: 2026-06-27
 
 This is the working roadmap for Switchboard. The source planning documents live in
 `docs/product/source/` and are preserved source material from the original
@@ -16,6 +16,8 @@ with this roadmap or `docs/product/mandate-strategy.md`.
 - `docs/product/source/switchboard-agent-research-synthesis.md`
 - `docs/product/source/switchboard-competitive-landscape.md`
 - `docs/product/mandate-strategy.md`
+- `docs/product/eval-strategy.md`
+- `docs/product/adversarial-alpha-eval-2026-06-27.md`
 - `docs/product/approval-elicitation-research.md`
 - `docs/security/secrets-keychain-architecture.md`
 
@@ -267,6 +269,11 @@ Implemented in the current codebase:
   `@switchboard-mcp/cli`
 - alpha distribution doc with package pack checks, client install smokes, and
   known limitations
+- public npm alpha packages:
+  `@switchboard-mcp/core@0.1.0`,
+  `@switchboard-mcp/mcp-runtime@0.1.0`, and
+  `@switchboard-mcp/cli@0.1.0`
+- `pnpm eval:published-alpha` for public-package install/usefulness checks
 
 Not started:
 
@@ -275,7 +282,9 @@ Not started:
 - richer mandate tree approval escalation and result aggregation beyond
   visibility/reporting
 - global/user-scope client installers
-- Supabase, Stripe, PostHog, or Sentry integrations
+- Supabase, PostHog, or Sentry integrations
+- real Stripe test-mode MCP dogfood beyond the shipped `stripe-test` safety
+  template
 
 Remaining roadmap should be grouped into these buckets:
 

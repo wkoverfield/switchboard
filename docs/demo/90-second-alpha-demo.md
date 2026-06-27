@@ -11,17 +11,19 @@ pnpm eval:fresh-agent-import
 pnpm eval:fresh-agent-github-ci
 pnpm eval:fresh-agent-expired-mandate
 pnpm eval:fresh-agent-subagent
+pnpm eval:published-alpha
 ```
 
-Before public alpha, verify npm publish status:
+Verify npm publish status:
 
 ```bash
 npm view @switchboard-mcp/cli version
 ```
 
-If this returns `404 Not Found`, use the source install and package-install
-smoke above. Do not send testers to `npm install -g @switchboard-mcp/cli` until
-the package is actually published.
+This should return `0.1.0` or newer. The published-package eval installs
+`@switchboard-mcp/cli` from npm in a clean temp directory, then checks the
+three launch claims: MCP cleanup, scoped provider setup, and harness-ready
+workspace leases.
 
 Narration:
 
@@ -35,6 +37,7 @@ Narration:
    `switchboard mandate renew`.
 5. Parent/child mandates show agents scoping narrower agents while Switchboard
    remains the authority/control plane, not the orchestrator.
+6. The public npm package path works without a source checkout.
 
 Close with:
 

@@ -18,7 +18,7 @@ describe("switchboard import plan", () => {
       [
         "[mcp_servers.github]",
         'command = "docker"',
-        'args = ["run", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server"]',
+        'args = ["run", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "GITHUB_TOKEN=ghp_arg_should_not_print", "ghcr.io/github/github-mcp-server"]',
         'env = { GITHUB_PERSONAL_ACCESS_TOKEN = "ghp_should_not_print" }',
         "",
         "[mcp_servers.switchboard]",
@@ -34,7 +34,11 @@ describe("switchboard import plan", () => {
           mcpServers: {
             vercel: {
               command: "npx",
-              args: ["-y", "vercel-platform-mcp-server"],
+              args: [
+                "-y",
+                "vercel-platform-mcp-server",
+                "VERCEL_TOKEN=vercel_arg_should_not_print"
+              ],
               env: {
                 VERCEL_TOKEN: "vercel_should_not_print"
               }
@@ -98,9 +102,13 @@ describe("switchboard import plan", () => {
       }
     ]);
     expect(serialized).not.toContain("ghp_should_not_print");
+    expect(serialized).not.toContain("ghp_arg_should_not_print");
     expect(serialized).not.toContain("vercel_should_not_print");
+    expect(serialized).not.toContain("vercel_arg_should_not_print");
     expect(serialized).not.toContain("sk_live_should_not_print");
     expect(serialized).not.toContain("phc_should_not_print");
+    expect(serialized).toContain("GITHUB_TOKEN=[redacted]");
+    expect(serialized).toContain("VERCEL_TOKEN=[redacted]");
     expect(plan.warnings).toContain(
       "Existing MCP configs reference secret-looking env names; store values behind Switchboard local token aliases before routing agents."
     );
@@ -147,7 +155,11 @@ describe("switchboard import plan", () => {
           mcpServers: {
             github: {
               command: "docker",
-              args: ["run", "ghcr.io/github/github-mcp-server"],
+              args: [
+                "run",
+                "GITHUB_TOKEN=ghp_write_should_not_print",
+                "ghcr.io/github/github-mcp-server"
+              ],
               env: {
                 GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_should_not_print"
               }
@@ -179,6 +191,9 @@ describe("switchboard import plan", () => {
     expect(config).toContain("existing_profile");
     expect(afterClient).toBe(beforeClient);
     expect(serialized).not.toContain("ghp_should_not_print");
+    expect(serialized).not.toContain("ghp_write_should_not_print");
     expect(config).not.toContain("ghp_should_not_print");
+    expect(config).not.toContain("ghp_write_should_not_print");
+    expect(config).toContain("GITHUB_TOKEN=[redacted]");
   });
 });

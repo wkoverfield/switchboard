@@ -564,7 +564,7 @@ function detectedServerFromEntry(options: {
     name: options.name,
     routesThroughSwitchboard,
     command: options.command,
-    args: options.args,
+    args: redactSecretLikeArgs(options.args),
     envKeys: [...new Set(options.envKeys)].sort(),
     provider,
     suggestedProfileName,
@@ -887,6 +887,20 @@ function secretRefLeaf(envName: string): string {
 
 function isSecretLikeName(name: string): boolean {
   return /(SECRET|TOKEN|KEY|PASSWORD|PRIVATE)/i.test(name);
+}
+
+function redactSecretLikeArgs(args: string[]): string[] {
+  return args.map((arg) =>
+    arg
+      .replace(
+        /\b([A-Za-z_][A-Za-z0-9_]*(?:SECRET|TOKEN|KEY|PASSWORD|PRIVATE)[A-Za-z0-9_]*)=([^\s]+)/gi,
+        "$1=[redacted]"
+      )
+      .replace(/\b(gh[pousr]_[A-Za-z0-9_]{8,})\b/g, "[redacted]")
+      .replace(/\b(sk_(?:live|test)_[A-Za-z0-9_]{8,})\b/g, "[redacted]")
+      .replace(/\b(xox[baprs]-[A-Za-z0-9-]{8,})\b/g, "[redacted]")
+      .replace(/\b(npm_[A-Za-z0-9]{8,})\b/g, "[redacted]")
+  );
 }
 
 function renderCommand(command: CommandShape): string {
