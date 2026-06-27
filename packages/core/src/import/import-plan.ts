@@ -1,9 +1,17 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
-import { loadSwitchboardConfig } from "../config/load-config.js";
+import { constants, readdirSync, readFileSync, statSync } from "node:fs";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { deepMerge, loadSwitchboardConfig } from "../config/load-config.js";
+import { resolveRepoConfigPaths } from "../config/paths.js";
 import { resolveProjectClientConfigPath } from "../install/client-config.js";
 import type { SupportedClient } from "../install/client-config.js";
+import { normalizeNamespace } from "../namespaces/namespaces.js";
 import type { ScanProviderId } from "../scan/scan.js";
+import {
+  type SwitchboardConfig,
+  switchboardConfigSchema
+} from "../schemas/config.js";
 
 export const importPlanSchemaVersion = "switchboard.import-plan.v1";
 
@@ -40,6 +48,17 @@ export interface SwitchboardImportPlan {
   warnings: string[];
   safetyNotes: string[];
   nextActions: string[];
+}
+
+export interface WrittenSwitchboardImportPlan {
+  ok: true;
+  schemaVersion: typeof importPlanSchemaVersion;
+  action: "created" | "updated" | "noop";
+  targetPath: string;
+  backupPath: string | null;
+  plan: SwitchboardImportPlan;
+  createdProfiles: string[];
+  nextContent: string | null;
 }
 
 export interface CommandShape {
@@ -210,6 +229,191 @@ export async function createSwitchboardImportPlan(
     safetyNotes,
     nextActions: [...new Set(nextActions)]
   };
+}
+
+export async function writeSwitchboardImportPlan(
+  options: SwitchboardImportPlanOptions & { now?: Date } = {}
+): Promise<WrittenSwitchboardImportPlan> {
+  const plan = await createSwitchboardImportPlan(options);
+  const cwd = plan.repo.cwd;
+  const targetPath =
+    resolveRepoConfigPaths({ cwd }).repoConfigPath ?? join(cwd, ".switchboard.yaml");
+  const importableServers = uniqueServersByProfile(
+    plan.detected.clients.flatMap((client) =>
+      client.servers.filter(
+        (server) =>
+          !server.routesThroughSwitchboard &&
+          server.command !== null &&
+          !plan.detected.switchboardProfiles.some(
+            (profile) => profile.name === server.suggestedProfileName
+          )
+      )
+    )
+  );
+
+  if (importableServers.length === 0) {
+    return {
+      ok: true,
+      schemaVersion: importPlanSchemaVersion,
+      action: "noop",
+      targetPath,
+      backupPath: null,
+      plan,
+      createdProfiles: [],
+      nextContent: null
+    };
+  }
+
+  assertNoNamespaceCollisions(plan, importableServers);
+  const existing = await readOptionalTextFileAsync(targetPath);
+  const nextContent = renderMergedImportConfig(existing, importableServers);
+  await mkdir(dirname(targetPath), { recursive: true });
+  const backupPath = existing
+    ? await backupExistingFile(targetPath, options.now)
+    : null;
+  await writeFile(targetPath, nextContent, "utf8");
+
+  return {
+    ok: true,
+    schemaVersion: importPlanSchemaVersion,
+    action: existing ? "updated" : "created",
+    targetPath,
+    backupPath,
+    plan,
+    createdProfiles: importableServers.map((server) => server.suggestedProfileName),
+    nextContent
+  };
+}
+
+function assertNoNamespaceCollisions(
+  plan: SwitchboardImportPlan,
+  servers: ImportDetectedServer[]
+): void {
+  const existing = new Map<string, string>();
+  for (const profile of plan.detected.switchboardProfiles) {
+    existing.set(
+      normalizeNamespace(profile.namespace ?? profile.name),
+      profile.name
+    );
+  }
+
+  const planned = new Map<string, string>();
+  for (const server of servers) {
+    const namespace = normalizeNamespace(server.suggestedNamespace);
+    const existingProfile = existing.get(namespace);
+    if (existingProfile && existingProfile !== server.suggestedProfileName) {
+      throw new Error(
+        `namespace "${namespace}" would collide with existing profile "${existingProfile}"`
+      );
+    }
+    const plannedProfile = planned.get(namespace);
+    if (plannedProfile && plannedProfile !== server.suggestedProfileName) {
+      throw new Error(
+        `namespace "${namespace}" would collide between planned profiles "${plannedProfile}" and "${server.suggestedProfileName}"`
+      );
+    }
+    planned.set(namespace, server.suggestedProfileName);
+  }
+}
+
+function renderMergedImportConfig(
+  existingContent: string | null,
+  servers: ImportDetectedServer[]
+): string {
+  const rendered = renderImportConfig(servers);
+  if (!existingContent?.trim()) {
+    return `${stringifyYaml(rendered, { lineWidth: 0 })}`;
+  }
+
+  const existing = parseConfigYaml(existingContent, ".switchboard.yaml");
+  const merged = deepMerge(existing, rendered);
+  const parsed = switchboardConfigSchema.safeParse(merged);
+  if (!parsed.success) {
+    throw new Error(parsed.error.issues.map((issue) => issue.message).join("\n"));
+  }
+
+  return `${stringifyYaml(ensureDefaultWorkspaceProfiles(parsed.data), {
+    lineWidth: 0
+  })}`;
+}
+
+function renderImportConfig(servers: ImportDetectedServer[]): SwitchboardConfig {
+  const profiles = Object.fromEntries(
+    servers.map((server) => [
+      server.suggestedProfileName,
+      {
+        provider: server.provider === "unknown" ? "generic" : server.provider,
+        namespace: server.suggestedNamespace,
+        readOnly: false,
+        mode: "guarded" as const,
+        enforcement: "switchboard" as const,
+        upstream: {
+          type: "stdio",
+          command: server.command ?? "",
+          ...(server.args.length > 0 ? { args: server.args } : {}),
+          ...renderImportedEnv(server)
+        }
+      }
+    ])
+  );
+
+  return {
+    version: 1,
+    defaults: {},
+    profiles,
+    workspaces: {
+      default: {
+        paths: ["."],
+        profiles: servers.map((server) => server.suggestedProfileName)
+      }
+    },
+    policies: {}
+  };
+}
+
+function renderImportedEnv(
+  server: ImportDetectedServer
+): { env?: Record<string, { secretRef: string }> } {
+  const env = Object.fromEntries(
+    server.suggestedSecretRefs.map((secret) => [
+      secret.envName,
+      { secretRef: secret.ref }
+    ])
+  );
+  return Object.keys(env).length > 0 ? { env } : {};
+}
+
+function ensureDefaultWorkspaceProfiles(
+  config: SwitchboardConfig
+): SwitchboardConfig {
+  const defaultWorkspace = config.workspaces.default;
+  if (!defaultWorkspace) {
+    return config;
+  }
+
+  return {
+    ...config,
+    workspaces: {
+      ...config.workspaces,
+      default: {
+        ...defaultWorkspace,
+        paths: unique(defaultWorkspace.paths),
+        profiles: unique(defaultWorkspace.profiles)
+      }
+    }
+  };
+}
+
+function parseConfigYaml(content: string, label: string): Record<string, unknown> {
+  const parsed = content.trim().length === 0 ? {} : parseYaml(content);
+  if (parsed === null || parsed === undefined) {
+    return {};
+  }
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${label} must be a YAML mapping`);
+  }
+
+  return parsed as Record<string, unknown>;
 }
 
 function uniqueServersByProfile(
@@ -689,6 +893,21 @@ function renderCommand(command: CommandShape): string {
   return ["switchboard", ...command.args].join(" ");
 }
 
+async function readOptionalTextFileAsync(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 function readOptionalTextFile(path: string): string | null {
   try {
     return readFileSync(path, "utf8");
@@ -702,6 +921,38 @@ function readOptionalTextFile(path: string): string | null {
     }
     throw error;
   }
+}
+
+async function backupExistingFile(path: string, now?: Date): Promise<string> {
+  const baseBackupPath = `${path}.switchboard-backup-${backupTimestamp(now)}`;
+
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const backupPath =
+      attempt === 0 ? baseBackupPath : `${baseBackupPath}-${attempt}`;
+    try {
+      await copyFile(path, backupPath, constants.COPYFILE_EXCL);
+      return backupPath;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "EEXIST"
+      ) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error(`could not create a unique backup path for ${path}`);
+}
+
+function backupTimestamp(now: Date = new Date()): string {
+  return now.toISOString().replaceAll(/[-:.]/g, "").replace("T", "-");
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
 }
 
 function safeIsFile(path: string): boolean {

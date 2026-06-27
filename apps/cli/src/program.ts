@@ -51,6 +51,7 @@ import {
   scanSwitchboardProject,
   type SwitchboardScanResult,
   type SwitchboardImportPlan,
+  type WrittenSwitchboardImportPlan,
   type RenderedProviderSafetyTemplate,
   type ProviderAddPlan,
   type WrittenProviderAddPlan,
@@ -66,6 +67,7 @@ import {
   validateSwitchboardClientConfigOptions,
   type ProjectClientConfigInspection,
   writeSwitchboardClientConfig,
+  writeSwitchboardImportPlan,
   writeProviderAddPlan,
   type RolledBackClientConfig,
   type WrittenClientConfig
@@ -516,20 +518,32 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--json", "print machine-readable JSON")
     .action(
       async (options: { dryRun?: boolean; write?: boolean; json?: boolean }) => {
+        const globalOptions = program.opts<{ cwd?: string }>();
         if (options.write) {
-          writeCommandError({
-            json: options.json,
-            code: "import_write_not_supported",
-            message: "switchboard import --write is planned but not shipped yet",
-            nextActions: [
-              "Run switchboard import --dry-run to inspect the cleanup plan.",
-              "Use switchboard setup <preset> for guided provider setup today."
-            ]
-          });
+          try {
+            const result = await writeSwitchboardImportPlan({
+              ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
+            });
+            const displayResult = rewriteWrittenImportCommandsForCurrentInvocation(result);
+            writeOut(
+              options.json
+                ? JSON.stringify(formatImportWriteJson(displayResult), null, 2)
+                : formatImportWrite(displayResult)
+            );
+          } catch (error) {
+            writeCommandError({
+              json: options.json,
+              code: "import_write_failed",
+              message: messageFromError(error),
+              nextActions: [
+                "Run switchboard import --dry-run to inspect the cleanup plan before writing.",
+                "Resolve profile or namespace collisions, then retry switchboard import --write."
+              ]
+            });
+          }
           return;
         }
 
-        const globalOptions = program.opts<{ cwd?: string }>();
         const plan = await createSwitchboardImportPlan({
           ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
         });
@@ -3391,6 +3405,15 @@ function rewriteImportCommandsForCurrentInvocation(
   };
 }
 
+function rewriteWrittenImportCommandsForCurrentInvocation(
+  result: WrittenSwitchboardImportPlan
+): WrittenSwitchboardImportPlan {
+  return {
+    ...result,
+    plan: rewriteImportCommandsForCurrentInvocation(result.plan)
+  };
+}
+
 function rewriteCommandShape(
   command: { command: string; args: string[] },
   prefix: string
@@ -3564,6 +3587,54 @@ function formatImportPlan(plan: SwitchboardImportPlan): string {
   }
 
   return lines.join("\n");
+}
+
+function formatImportWriteJson(
+  result: WrittenSwitchboardImportPlan
+): Record<string, unknown> {
+  return {
+    ok: true,
+    schemaVersion: result.schemaVersion,
+    action: result.action,
+    targetPath: result.targetPath,
+    backupPath: result.backupPath,
+    createdProfiles: result.createdProfiles,
+    plan: result.plan,
+    nextContent: result.nextContent
+  };
+}
+
+function formatImportWrite(result: WrittenSwitchboardImportPlan): string {
+  if (result.action === "noop") {
+    return [
+      `Switchboard import found nothing new for ${result.plan.repo.name}`,
+      "No files were written.",
+      "",
+      "Detected setup:",
+      ...result.plan.detected.clients.map(
+        (client) =>
+          `- ${capitalize(client.client)} project MCP config ${formatImportClientStatus(client.status)}`
+      ),
+      "",
+      "Next:",
+      ...result.plan.nextActions.map((action) => `- ${formatHumanCommand(action)}`)
+    ].join("\n");
+  }
+
+  return [
+    `Switchboard import ${result.action}`,
+    `Target: ${result.targetPath}`,
+    ...(result.backupPath ? [`Backup: ${result.backupPath}`] : []),
+    `Profiles: ${result.createdProfiles.join(", ")}`,
+    "",
+    "What changed:",
+    "- Created Switchboard profiles for existing project MCP servers.",
+    "- Stored secret-looking env names as local token aliases in config.",
+    "- Left Codex and Claude client config untouched.",
+    "",
+    "Next:",
+    ...result.plan.nextActions.map((action) => `- ${formatHumanCommand(action)}`)
+  ].join("\n");
 }
 
 function formatImportClientStatus(status: string): string {
