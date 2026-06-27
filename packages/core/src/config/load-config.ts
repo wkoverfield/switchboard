@@ -53,7 +53,8 @@ const builtInConfig: SwitchboardConfig = {
   },
   profiles: {},
   workspaces: {},
-  policies: {}
+  policies: {},
+  acceptedRisks: { directMcp: [] }
 };
 
 export function loadSwitchboardConfig(

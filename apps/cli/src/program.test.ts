@@ -96,6 +96,7 @@ describe("switchboard CLI program", () => {
       schemaVersion: string;
       repo: { remote: { owner: string; repo: string } };
       providers: Array<{ provider: string; envVars: string[] }>;
+      authorityStatus: { status: string };
       recommendedNextAction: { primary: { command: string } | null };
       nextActions: string[];
     };
@@ -111,6 +112,7 @@ describe("switchboard CLI program", () => {
     expect(parsed.providers.map((provider) => provider.provider)).toContain(
       "vercel"
     );
+    expect(parsed.authorityStatus.status).toBe("bypass-present");
     expect(parsed.nextActions).toContain("switchboard setup github-ci");
     expect(parsed.recommendedNextAction.primary?.command).toBe(
       "switchboard setup github-ci"
@@ -139,12 +141,46 @@ describe("switchboard CLI program", () => {
     const text = output.join("\n");
     expect(text).toContain("This looks like");
     expect(text).toContain("GitHub: wkoverfield/stockr");
+    expect(text).toContain("authority:");
     expect(text).toContain("Provider hints:");
     expect(text).toContain("STRIPE_SECRET_KEY");
     expect(text).toContain("Recommended next:");
     expect(text).toContain("switchboard setup github-ci");
     expect(text).toContain("switchboard install codex --write");
     expect(text).not.toContain("secret\n");
+  });
+
+  it("prints import dry-run before and after cleanup story", async () => {
+    const root = makeTempProject();
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      join(root, ".codex", "config.toml"),
+      [
+        "[mcp_servers.switchboard]",
+        'command = "switchboard"',
+        `args = ["--cwd", "${root}", "mcp"]`,
+        "",
+        "[mcp_servers.github]",
+        'command = "docker"',
+        'args = ["run", "GITHUB_TOKEN=ghp_import_should_not_print", "ghcr.io/github/github-mcp-server"]',
+        'env = { GITHUB_TOKEN = "ghp_import_should_not_print" }'
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "import", "--dry-run"], {
+      from: "user"
+    });
+
+    const text = output.join("\n");
+    expect(text).toContain("Authority status: bypass-present");
+    expect(text).toContain("Before:");
+    expect(text).toContain("Codex github direct MCP");
+    expect(text).toContain("Switchboard can change this to:");
+    expect(text).toContain("direct client routes removed from active config");
+    expect(text).toContain("Recommended next:");
+    expect(text).not.toContain("ghp_import_should_not_print");
   });
 
   it("prints the recommended next action as JSON", async () => {
@@ -511,6 +547,75 @@ describe("switchboard CLI program", () => {
         `pnpm --dir ${sourceRoot} switchboard --cwd ${root} presets check vercel-preview --profile ${vercelRepoProfile(root)}`
       );
       expect(text).not.toContain("  pnpm switchboard auth vercel-preview");
+    } finally {
+      restoreEnvValue("npm_lifecycle_event", originalLifecycle);
+      restoreEnvValue("npm_package_name", originalPackageName);
+      if (originalArgv1 === undefined) {
+        process.argv.splice(1, 1);
+      } else {
+        process.argv[1] = originalArgv1;
+      }
+    }
+  });
+
+  it("prints source-checkout authority recommended actions with the target repo cwd", async () => {
+    const root = makeTempProject();
+    const sourceRoot = join(root, "switchboard-source");
+    const sourceEntrypoint = join(
+      sourceRoot,
+      "apps",
+      "cli",
+      "dist",
+      "index.js"
+    );
+    const originalLifecycle = process.env.npm_lifecycle_event;
+    const originalPackageName = process.env.npm_package_name;
+    const originalArgv1 = process.argv[1];
+    process.env.npm_lifecycle_event = "switchboard";
+    process.env.npm_package_name = "switchboard";
+    process.argv[1] = sourceEntrypoint;
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      join(root, ".codex", "config.toml"),
+      [
+        "[mcp_servers.switchboard]",
+        'command = "switchboard"',
+        `args = ["--cwd", "${root}", "mcp"]`,
+        "",
+        "[mcp_servers.github]",
+        'command = "docker"',
+        'args = ["run", "GITHUB_TOKEN=ghp_source_should_not_print", "ghcr.io/github/github-mcp-server"]'
+      ].join("\n")
+    );
+
+    try {
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message)
+      });
+      await program.parseAsync(["--cwd", root, "doctor", "--json"], {
+        from: "user"
+      });
+
+      const parsed = JSON.parse(output[0] ?? "{}") as {
+        authorityStatus: {
+          recommendedAction: { command: string; args: string[] } | null;
+        };
+      };
+      expect(parsed.authorityStatus.recommendedAction).toEqual({
+        command: "pnpm",
+        args: [
+          "--dir",
+          sourceRoot,
+          "switchboard",
+          "--cwd",
+          root,
+          "import",
+          "--write",
+          "--cleanup-client"
+        ]
+      });
+      expect(JSON.stringify(parsed)).not.toContain("ghp_source_should_not_print");
     } finally {
       restoreEnvValue("npm_lifecycle_event", originalLifecycle);
       restoreEnvValue("npm_package_name", originalPackageName);
@@ -1633,12 +1738,14 @@ describe("switchboard CLI program", () => {
         severity: string;
         riskTags: string[];
       }>;
+      authorityStatus: { status: string };
       nextSteps: string[];
     };
     const serialized = JSON.stringify(parsed);
 
     expect(parsed.ok).toBe(false);
     expect(parsed.status).toBe("failed");
+    expect(parsed.authorityStatus.status).toBe("bypass-present");
     expect(parsed.checks).toContainEqual(
       expect.objectContaining({ name: "direct-mcp-bypass", ok: false })
     );

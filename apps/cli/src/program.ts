@@ -55,6 +55,8 @@ import {
   type WrittenSwitchboardImportPlan,
   type BypassFinding,
   type RiskFinding,
+  planAuthorityStatus,
+  type AuthorityStatus,
   planRecommendedNextAction,
   type NextActionCandidate,
   type RecommendedNextAction,
@@ -742,15 +744,19 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--dry-run", "print the import plan without writing")
     .option("--write", "apply the import plan")
     .option("--cleanup-client", "remove direct MCP bypass routes from active project client config with backups")
+    .option("--accept-direct <client:server>", "preserve an intentional direct MCP route as accepted risk", collectOption, [])
     .option("--json", "print machine-readable JSON")
     .action(
-      async (options: { dryRun?: boolean; write?: boolean; cleanupClient?: boolean; json?: boolean }) => {
+      async (options: { dryRun?: boolean; write?: boolean; cleanupClient?: boolean; acceptDirect?: string[]; json?: boolean }) => {
         const globalOptions = program.opts<{ cwd?: string }>();
         if (options.write) {
           try {
             const result = await writeSwitchboardImportPlan({
               ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
-              ...(options.cleanupClient ? { cleanupClient: true } : {})
+              ...(options.cleanupClient ? { cleanupClient: true } : {}),
+              ...(options.acceptDirect && options.acceptDirect.length > 0
+                ? { acceptDirect: options.acceptDirect }
+                : {})
             });
             const displayResult = rewriteWrittenImportCommandsForCurrentInvocation(result);
             writeOut(
@@ -773,7 +779,10 @@ export function createProgram(io: ProgramIo = {}): Command {
         }
 
         const plan = await createSwitchboardImportPlan({
-          ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
+          ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+          ...(options.acceptDirect && options.acceptDirect.length > 0
+            ? { acceptDirect: options.acceptDirect }
+            : {})
         });
         const displayPlan = rewriteImportCommandsForCurrentInvocation(plan);
         writeOut(
@@ -3571,6 +3580,8 @@ function formatScan(result: SwitchboardScanResult): string {
   lines.push(`- ${remoteLabel}`);
   lines.push(`- branch: ${result.repo.branch ?? "unknown"}`);
   lines.push(`- runtime: ${formatScanRuntime(result)}`);
+  lines.push(`- authority: ${formatAuthorityStatusLabel(result.authorityStatus)}`);
+  lines.push(`  ${result.authorityStatus.summary}`);
 
   const detected = formatScanDetected(result);
   if (detected.length > 0) {
@@ -3667,6 +3678,7 @@ function rewriteScanCommandsForCurrentInvocation(
     riskFindings: result.riskFindings.map((finding) =>
       rewriteRiskFindingCommands(finding, prefix)
     ),
+    authorityStatus: rewriteAuthorityStatus(result.authorityStatus, prefix),
     recommendedNextAction: rewriteRecommendedNextAction(
       result.recommendedNextAction,
       prefix
@@ -3696,6 +3708,7 @@ function rewriteImportCommandsForCurrentInvocation(
     riskFindings: plan.riskFindings.map((finding) =>
       rewriteRiskFindingCommands(finding, prefix)
     ),
+    authorityStatus: rewriteAuthorityStatus(plan.authorityStatus, prefix),
     commands: {
       dryRun: rewriteCommandShape(plan.commands.dryRun, prefix),
       writePreview: rewriteCommandShape(plan.commands.writePreview, prefix),
@@ -3756,6 +3769,20 @@ function rewriteRecommendedNextAction(
       ...item,
       command: rewriteSwitchboardCommand(item.command, prefix)
     }))
+  };
+}
+
+function rewriteAuthorityStatus(
+  status: AuthorityStatus,
+  prefix: string
+): AuthorityStatus {
+  if (!status.recommendedAction || prefix === "switchboard") {
+    return status;
+  }
+
+  return {
+    ...status,
+    recommendedAction: rewriteCommandShape(status.recommendedAction, prefix)
   };
 }
 
@@ -3866,6 +3893,8 @@ function formatImportPlan(plan: SwitchboardImportPlan): string {
   const lines = [
     `Switchboard import plan for ${plan.repo.name}`,
     "Dry run: no files were written.",
+    `Authority status: ${formatAuthorityStatusLabel(plan.authorityStatus)}`,
+    plan.authorityStatus.summary,
     "",
     "Detected:"
   ];
@@ -3926,6 +3955,20 @@ function formatImportPlan(plan: SwitchboardImportPlan): string {
       "",
       "Risk findings:",
       ...plan.riskFindings.map(formatRiskFindingLine)
+    );
+  }
+
+  const beforeLines = formatImportBeforeLines(plan);
+  if (beforeLines.length > 0) {
+    lines.push("", "Before:", ...beforeLines.map((line) => `- ${line}`));
+  }
+
+  const afterLines = formatImportAfterLines(plan);
+  if (afterLines.length > 0) {
+    lines.push(
+      "",
+      "Switchboard can change this to:",
+      ...afterLines.map((line) => `- ${line}`)
     );
   }
 
@@ -4030,12 +4073,16 @@ function formatImportWrite(result: WrittenSwitchboardImportPlan): string {
     }`,
     ...formatClientCleanupWriteLines(result),
     "",
-    "What changed:",
+    `Authority status: ${formatAuthorityStatusLabel(result.plan.authorityStatus)}`,
+    result.plan.authorityStatus.summary,
+    "",
+    "Changed:",
     "- Created Switchboard profiles for existing project MCP servers.",
     "- Stored secret-looking env names as local token aliases in config.",
     result.clientCleanup.some((item) => item.status === "updated")
       ? "- Removed direct MCP bypass routes from active Codex/Claude project config with backups."
       : "- Left Codex and Claude client config untouched.",
+    "- Kept raw secret values out of repo and client config.",
     "",
     "Next:",
     ...result.plan.nextActions.map((action) => `- ${formatHumanCommand(action)}`)
@@ -4065,6 +4112,58 @@ function formatClientCleanupWriteLines(
       lines.push(`  Rollback: ${item.rollbackCommand}`);
     }
     lines.push(`  ${item.acceptedRiskGuidance}`);
+  }
+  return lines;
+}
+
+function formatAuthorityStatusLabel(authorityStatus: AuthorityStatus): string {
+  return authorityStatus.status;
+}
+
+function formatImportBeforeLines(plan: SwitchboardImportPlan): string[] {
+  const lines: string[] = [];
+  for (const finding of plan.bypassFindings) {
+    const tags = finding.riskTags.join(", ");
+    lines.push(
+      `${capitalize(finding.client)} ${finding.serverName} direct MCP: ${tags}`
+    );
+  }
+  for (const finding of plan.riskFindings) {
+    const evidence =
+      finding.evidence.length > 0 ? `: ${finding.evidence.join(", ")}` : "";
+    lines.push(`${finding.kind}${evidence}`);
+  }
+  return lines;
+}
+
+function formatImportAfterLines(plan: SwitchboardImportPlan): string[] {
+  const lines: string[] = [];
+  if (
+    plan.detected.clients.some((client) =>
+      client.servers.some((server) => server.routesThroughSwitchboard)
+    ) ||
+    plan.commands.installClients.length > 0
+  ) {
+    lines.push("one Switchboard MCP endpoint per installed project client");
+  }
+  const profiles = plan.actions
+    .filter((action) => action.kind === "create-profile" && action.profileName)
+    .map((action) => action.profileName as string);
+  if (profiles.length > 0) {
+    lines.push(`${profiles.join(", ")} profile(s) behind local secretRefs`);
+  }
+  const cleanupTargets = plan.cleanupPlan
+    .filter((item) => item.status === "planned")
+    .flatMap((item) => item.affectedServerNames);
+  if (cleanupTargets.length > 0) {
+    lines.push("direct client routes removed from active config with backups");
+    lines.push("timestamped rollback command for each modified client config");
+  }
+  if (plan.bypassFindings.some((finding) => finding.status === "accepted")) {
+    lines.push("accepted direct routes preserved but kept visible as risk");
+  }
+  if (lines.length === 0) {
+    lines.push("a reviewed setup plan without writing files");
   }
   return lines;
 }
@@ -4099,6 +4198,7 @@ async function createDoctorResult(options: {
     missing: MissingSecretRef[];
   };
   bypassFindings: BypassFinding[];
+  authorityStatus: AuthorityStatus;
   recommendedNextAction: RecommendedNextAction;
   nextSteps: string[];
 }> {
@@ -4155,7 +4255,7 @@ async function createDoctorResult(options: {
     },
     {
       name: "direct-mcp-bypass",
-      ok: bypassFindings.length === 0,
+      ok: bypassFindings.every((finding) => finding.status === "accepted"),
       message: bypassCheckSummary(bypassFindings)
     }
   ];
@@ -4172,21 +4272,41 @@ async function createDoctorResult(options: {
   }).map((step) =>
     rewriteSwitchboardCommand(step, switchboardCommandPrefixForRepo(cwd))
   );
-  const status = doctorStatus({ ok, nextSteps });
-  const recommendedNextAction = rewriteRecommendedNextAction(
-    planRecommendedNextAction(
-      doctorNextActionCandidates({
-        loaded,
-        localIgnoreOk: localIgnore.ok,
-        clientConfigs,
-        clientLaunches,
-        missingSecrets,
-        bypassFindings,
-        nextSteps
-      })
-    ),
-    switchboardCommandPrefixForRepo(cwd)
+  const rawRecommendedNextAction = planRecommendedNextAction(
+    doctorNextActionCandidates({
+      loaded,
+      localIgnoreOk: localIgnore.ok,
+      clientConfigs,
+      clientLaunches,
+      missingSecrets,
+      bypassFindings,
+      nextSteps
+    })
   );
+  const commandPrefix = switchboardCommandPrefixForRepo(cwd);
+  const recommendedNextAction = rewriteRecommendedNextAction(
+    rawRecommendedNextAction,
+    commandPrefix
+  );
+  const authorityStatus = rewriteAuthorityStatus(planAuthorityStatus({
+    diagnostics: loaded.diagnostics,
+    invalidClientConfigs: clientConfigs.some(
+      (client) => client.status === "invalid"
+    ),
+    bypassFindings,
+    riskFindings: importPlan.riskFindings,
+    missingSecrets,
+    switchboardConfigured: Object.keys(loaded.config.profiles).length > 0,
+    switchboardInstalled: clientConfigs.some(
+      (client) => client.status === "installed"
+    ),
+    recommendedNextAction: rawRecommendedNextAction
+  }), commandPrefix);
+  const status = doctorStatus({
+    ok,
+    nextSteps,
+    authorityStatus
+  });
 
   return {
     ok,
@@ -4201,6 +4321,7 @@ async function createDoctorResult(options: {
       missing: missingSecrets
     },
     bypassFindings,
+    authorityStatus,
     recommendedNextAction,
     nextSteps
   };
@@ -4230,7 +4351,7 @@ function doctorNextActionCandidates(options: {
       reason: `Set ${missing.ref} before launching agents.`
     });
   }
-  if (options.bypassFindings.length > 0) {
+  if (options.bypassFindings.some((finding) => finding.status !== "accepted")) {
     candidates.push({
       kind: "bypass-cleanup",
       command: "switchboard import --write --cleanup-client",
@@ -4277,11 +4398,18 @@ function formatDoctor(result: {
     missing: MissingSecretRef[];
   };
   bypassFindings?: BypassFinding[];
+  authorityStatus?: AuthorityStatus;
   recommendedNextAction?: RecommendedNextAction;
   nextSteps: string[];
 }): string {
   const lines = [`Switchboard doctor: ${formatDoctorStatus(result.status)}`];
   lines.push(formatDoctorReadinessLine(result.status));
+  if (result.authorityStatus) {
+    lines.push(
+      `Authority status: ${formatAuthorityStatusLabel(result.authorityStatus)}`
+    );
+    lines.push(result.authorityStatus.summary);
+  }
 
   for (const check of result.checks) {
     lines.push(`${check.ok ? "ok" : "fail"} ${check.name} - ${check.message}`);
@@ -4467,10 +4595,18 @@ function bypassCheckSummary(findings: BypassFinding[]): string {
     return "No direct Codex/Claude MCP bypass routes were detected.";
   }
 
-  const high = findings.filter((finding) => finding.severity === "high").length;
-  return high > 0
-    ? `${findings.length} direct MCP bypass route(s) detected, including ${high} high-risk route(s).`
-    : `${findings.length} direct MCP bypass route(s) detected.`;
+  const unaccepted = findings.filter((finding) => finding.status !== "accepted");
+  const accepted = findings.length - unaccepted.length;
+  const high = unaccepted.filter((finding) => finding.severity === "high").length;
+  const base =
+    unaccepted.length > 0
+      ? `${unaccepted.length} unaccepted direct MCP bypass route(s) detected.`
+      : "Only accepted direct MCP bypass route(s) remain.";
+  const suffix = [
+    ...(high > 0 ? [`${high} high-risk`] : []),
+    ...(accepted > 0 ? [`${accepted} accepted-risk`] : [])
+  ];
+  return suffix.length > 0 ? `${base} (${suffix.join(", ")})` : base;
 }
 
 function formatProviderAddPlanJson(plan: ProviderAddPlan): Record<string, unknown> {
@@ -7323,7 +7459,7 @@ function doctorNextSteps(options: {
     }
   }
 
-  if (options.bypassFindings.length > 0) {
+  if (options.bypassFindings.some((finding) => finding.status !== "accepted")) {
     steps.push("switchboard import --dry-run");
   }
 
@@ -7718,9 +7854,17 @@ function clientLaunchInstallHint(command: string): string {
 function doctorStatus(options: {
   ok: boolean;
   nextSteps: string[];
+  authorityStatus?: AuthorityStatus;
 }): "ok" | "setup-incomplete" | "failed" {
   if (!options.ok) {
     return "failed";
+  }
+
+  if (
+    options.authorityStatus &&
+    options.authorityStatus.status !== "controlled"
+  ) {
+    return "setup-incomplete";
   }
 
   const setupSteps = options.nextSteps.filter(isSetupIncompleteStep);

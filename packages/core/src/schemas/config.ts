@@ -107,13 +107,29 @@ export const policySchema = z
   })
   .passthrough();
 
+export const acceptedDirectRiskSchema = z
+  .object({
+    id: z.string().min(1),
+    client: z.enum(["codex", "claude"]),
+    serverName: z.string().min(1),
+    reason: z.string().min(1).optional()
+  })
+  .passthrough();
+
+export const acceptedRisksSchema = z
+  .object({
+    directMcp: z.array(acceptedDirectRiskSchema).default([])
+  })
+  .passthrough();
+
 export const switchboardConfigSchema = z
   .object({
     version: z.literal(1).default(1),
     defaults: z.record(z.string(), z.unknown()).default({}),
     profiles: z.record(z.string(), profileSchema).default({}),
     workspaces: z.record(z.string(), workspaceSchema).default({}),
-    policies: z.record(z.string(), policySchema).default({})
+    policies: z.record(z.string(), policySchema).default({}),
+    acceptedRisks: acceptedRisksSchema.default({ directMcp: [] })
   })
   .passthrough()
   .superRefine((config, context) => {
@@ -146,6 +162,7 @@ export type StdioUpstreamConfig = z.infer<typeof stdioUpstreamSchema>;
 export type UpstreamEnvValue = z.infer<typeof upstreamEnvValueSchema>;
 export type WorkspaceConfig = z.infer<typeof workspaceSchema>;
 export type PolicyConfig = z.infer<typeof policySchema>;
+export type AcceptedRisksConfig = z.infer<typeof acceptedRisksSchema>;
 
 function canNormalizeNamespace(input: string): boolean {
   return (

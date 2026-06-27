@@ -64,6 +64,13 @@ describe("switchboard import plan", () => {
 
     expect(plan.schemaVersion).toBe("switchboard.import-plan.v1");
     expect(plan.mode).toBe("dry-run");
+    expect(plan.authorityStatus).toMatchObject({
+      status: "bypass-present",
+      recommendedAction: {
+        command: "switchboard",
+        args: ["import", "--write", "--cleanup-client"]
+      }
+    });
     expect(plan.detected.clients.flatMap((client) => client.servers.map((server) => server.name))).toEqual([
       "github",
       "switchboard",
@@ -186,6 +193,7 @@ describe("switchboard import plan", () => {
       severity: "critical",
       riskTags: expect.arrayContaining(["broad-filesystem-mount"])
     });
+    expect(plan.authorityStatus.status).toBe("bypass-present");
   });
 
   it("returns an import plan with an invalid client finding instead of throwing", async () => {
@@ -198,6 +206,7 @@ describe("switchboard import plan", () => {
     expect(plan.detected.clients.find((client) => client.client === "claude")).toMatchObject({
       status: "invalid"
     });
+    expect(plan.authorityStatus.status).toBe("invalid");
     expect(plan.warnings.some((warning) => warning.includes("claude config could not be parsed"))).toBe(true);
   });
 
@@ -373,11 +382,76 @@ describe("switchboard import plan", () => {
     expect(claudeConfig).not.toContain("vercel_cleanup_should_not_print");
     expect(serialized).not.toContain("ghp_cleanup_should_not_print");
     expect(serialized).not.toContain("vercel_cleanup_should_not_print");
+    expect(result.plan.authorityStatus.status).toBe("controlled");
 
     const rerun = await writeSwitchboardImportPlan({
       cwd: root,
       cleanupClient: true
     });
     expect(rerun.clientCleanup.every((item) => item.status !== "updated")).toBe(true);
+  });
+
+  it("preserves accepted direct routes during cleanup and records accepted risk", async () => {
+    const base = await mkdtemp(join(tmpdir(), "switchboard-import-accept-"));
+    const root = join(base, "stockr");
+    await mkdir(root);
+    await mkdir(join(root, ".codex"), { recursive: true });
+    await writeFile(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  local_echo:",
+        "    provider: fixture",
+        "    namespace: local_echo",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "acceptedRisks:",
+        "  directMcp:",
+        "    - id: claude:legacy",
+        "      client: claude",
+        "      serverName: legacy"
+      ].join("\n"),
+      "utf8"
+    );
+    await writeFile(
+      join(root, ".codex", "config.toml"),
+      [
+        "[mcp_servers.switchboard]",
+        'command = "switchboard"',
+        'args = ["--cwd", "/tmp/example", "mcp"]',
+        "",
+        "[mcp_servers.filesystem]",
+        'command = "npx"',
+        'args = ["-y", "@modelcontextprotocol/server-filesystem", "/", "--tools=all"]'
+      ].join("\n"),
+      "utf8"
+    );
+
+    const result = await writeSwitchboardImportPlan({
+      cwd: root,
+      cleanupClient: true,
+      acceptDirect: ["codex:filesystem"],
+      now: new Date("2026-03-04T05:06:07.008Z")
+    });
+    const codexConfig = await readFile(join(root, ".codex", "config.toml"), "utf8");
+    const config = await readFile(join(root, ".switchboard.yaml"), "utf8");
+
+    expect(result.clientCleanup.find((item) => item.client === "codex")).toMatchObject({
+      status: "noop",
+      affectedServerNames: []
+    });
+    expect(codexConfig).toContain("[mcp_servers.filesystem]");
+    expect(config).toContain("acceptedRisks:");
+    expect(config).toContain("id: claude:legacy");
+    expect(config).toContain("id: codex:filesystem");
+    expect(result.plan.bypassFindings).toContainEqual(
+      expect.objectContaining({
+        id: "codex:filesystem",
+        status: "accepted"
+      })
+    );
+    expect(result.plan.authorityStatus.status).toBe("partial-control");
   });
 });
