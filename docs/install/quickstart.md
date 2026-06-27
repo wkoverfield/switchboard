@@ -24,6 +24,7 @@ client, provider, and environment hints by name without printing secret values.
 
 ```bash
 switchboard scan
+switchboard import --dry-run
 switchboard setup github-ci
 switchboard doctor
 switchboard presets check github-ci --profile github_ci
@@ -38,6 +39,11 @@ profiles, token values hidden behind `secretRef`s, non-prod/preview posture wher
 the template can express it, risky provider tools denied or approval-gated under
 a mandate, and a local audit trail. Switchboard is runtime-aware, not a sandbox
 guarantee.
+
+`switchboard import --dry-run` is read-only. Use it when a repo already has
+Codex or Claude MCP config; it reports existing servers, env variable names,
+recommended Switchboard profiles, local token aliases, and cleanup actions
+without writing config or reading secret values.
 
 If you want to inspect each step before writing, use the manual flow:
 

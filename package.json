@@ -22,6 +22,7 @@
     "smoke:secret-ref-profile": "pnpm --filter @switchboard-mcp/mcp-runtime smoke:secret-ref-profile",
     "smoke:mandate-secret-ref": "pnpm --filter @switchboard-mcp/mcp-runtime smoke:mandate-secret-ref",
     "smoke:provider-add": "node scripts/smoke/provider-add.mjs",
+    "smoke:import-dry-run": "node scripts/smoke/import-dry-run.mjs",
     "smoke:provider-presets": "node scripts/smoke/provider-presets.mjs",
     "smoke:package-pack": "node scripts/smoke/package-pack.mjs",
     "smoke:package-install": "node scripts/smoke/package-install.mjs",

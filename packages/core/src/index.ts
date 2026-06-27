@@ -5,6 +5,7 @@ export * from "./config/gitignore.js";
 export * from "./config/paths.js";
 export * from "./daemon/daemon-state.js";
 export * from "./install/client-config.js";
+export * from "./import/import-plan.js";
 export * from "./mandates/mandates.js";
 export * from "./namespaces/namespaces.js";
 export * from "./onboarding/init-config.js";
