@@ -33,6 +33,7 @@ import {
   safeAuditLog,
   collectSecretRefUsages,
   checkProviderSafetyTemplateTools,
+  createSwitchboardImportPlan,
   createProviderAddPlan,
   createKeychainSecretStore,
   getProviderSafetyTemplate,
@@ -49,6 +50,7 @@ import {
   resolveRepoConfigPaths,
   scanSwitchboardProject,
   type SwitchboardScanResult,
+  type SwitchboardImportPlan,
   type RenderedProviderSafetyTemplate,
   type ProviderAddPlan,
   type WrittenProviderAddPlan,
@@ -505,6 +507,40 @@ export function createProgram(io: ProgramIo = {}): Command {
           : formatScan(displayResult)
       );
     });
+
+  program
+    .command("import")
+    .description("Plan a cleanup of existing project MCP config into Switchboard.")
+    .option("--dry-run", "print the import plan without writing")
+    .option("--write", "apply the import plan (planned for a later slice)")
+    .option("--json", "print machine-readable JSON")
+    .action(
+      async (options: { dryRun?: boolean; write?: boolean; json?: boolean }) => {
+        if (options.write) {
+          writeCommandError({
+            json: options.json,
+            code: "import_write_not_supported",
+            message: "switchboard import --write is planned but not shipped yet",
+            nextActions: [
+              "Run switchboard import --dry-run to inspect the cleanup plan.",
+              "Use switchboard setup <preset> for guided provider setup today."
+            ]
+          });
+          return;
+        }
+
+        const globalOptions = program.opts<{ cwd?: string }>();
+        const plan = await createSwitchboardImportPlan({
+          ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
+        });
+        const displayPlan = rewriteImportCommandsForCurrentInvocation(plan);
+        writeOut(
+          options.json
+            ? JSON.stringify(displayPlan, null, 2)
+            : formatImportPlan(displayPlan)
+        );
+      }
+    );
 
   program
     .command("status")
@@ -3323,6 +3359,63 @@ function rewriteScanCommandsForCurrentInvocation(
   };
 }
 
+function rewriteImportCommandsForCurrentInvocation(
+  plan: SwitchboardImportPlan
+): SwitchboardImportPlan {
+  const prefix = switchboardCommandPrefixForRepo(plan.repo.cwd);
+  if (prefix === "switchboard") {
+    return plan;
+  }
+
+  return {
+    ...plan,
+    actions: plan.actions.map((action) => ({
+      ...action,
+      ...(action.command
+        ? { command: rewriteCommandShape(action.command, prefix) }
+        : {})
+    })),
+    commands: {
+      dryRun: rewriteCommandShape(plan.commands.dryRun, prefix),
+      writePreview: rewriteCommandShape(plan.commands.writePreview, prefix),
+      installClients: plan.commands.installClients.map((command) =>
+        rewriteCommandShape(command, prefix)
+      ),
+      secretCommands: plan.commands.secretCommands.map((command) =>
+        rewriteCommandShape(command, prefix)
+      )
+    },
+    nextActions: plan.nextActions.map((action) =>
+      rewriteSwitchboardCommand(action, prefix)
+    )
+  };
+}
+
+function rewriteCommandShape(
+  command: { command: string; args: string[] },
+  prefix: string
+): { command: string; args: string[] } {
+  if (prefix === "switchboard") {
+    return command;
+  }
+
+  const parts = splitCommandPrefix(prefix);
+  return {
+    command: parts[0] ?? command.command,
+    args: [...parts.slice(1), ...command.args]
+  };
+}
+
+function splitCommandPrefix(prefix: string): string[] {
+  const matches = [
+    ...prefix.matchAll(/'([^']*(?:'\\''[^']*)*)'|("[^"]*")|(\S+)/g)
+  ];
+  return matches
+    .map((match) => match[1] ?? match[2]?.slice(1, -1) ?? match[3] ?? "")
+    .map((part) => part.replace(/'\\''/g, "'"))
+    .filter((part) => part.length > 0);
+}
+
 function rewriteSwitchboardCommand(command: string, prefix: string): string {
   return command === "switchboard"
     ? prefix
@@ -3388,6 +3481,103 @@ function formatScanDetected(result: SwitchboardScanResult): string[] {
     }
   }
   return [...new Set(lines)];
+}
+
+function formatImportPlan(plan: SwitchboardImportPlan): string {
+  const lines = [
+    `Switchboard import plan for ${plan.repo.name}`,
+    "Dry run: no files were written.",
+    "",
+    "Detected:"
+  ];
+
+  for (const client of plan.detected.clients) {
+    lines.push(
+      `- ${capitalize(client.client)} project MCP config ${formatImportClientStatus(client.status)} (${client.targetPath})`
+    );
+    for (const server of client.servers) {
+      if (server.routesThroughSwitchboard) {
+        lines.push(`  - ${server.name}: already routes through Switchboard`);
+        continue;
+      }
+      const provider =
+        server.provider === "unknown" ? "provider unknown" : server.provider;
+      const env =
+        server.envKeys.length > 0
+          ? `; env names: ${server.envKeys.join(", ")}`
+          : "";
+      lines.push(
+        `  - ${server.name}: ${provider} -> ${server.suggestedProfileName}${env}`
+      );
+    }
+  }
+
+  if (plan.detected.switchboardProfiles.length > 0) {
+    lines.push(
+      "",
+      "Existing Switchboard profiles:",
+      ...plan.detected.switchboardProfiles.map((profile) => {
+        const provider = profile.provider ? ` (${profile.provider})` : "";
+        const namespace = profile.namespace ? ` namespace ${profile.namespace}` : "";
+        return `- ${profile.name}${provider}${namespace}`;
+      })
+    );
+  }
+
+  if (plan.detected.envFiles.length > 0) {
+    lines.push(
+      "",
+      "Env files:",
+      ...plan.detected.envFiles.map(
+        (file) => `- ${shortPath(file.path)}: ${file.envKeys.join(", ")}`
+      )
+    );
+  }
+
+  if (plan.actions.length > 0) {
+    lines.push("", "Recommended cleanup:");
+    for (const action of plan.actions) {
+      lines.push(`- ${action.title}`);
+      lines.push(`  ${action.reason}`);
+      if (action.command) {
+        lines.push(`  ${formatHumanCommand(renderCommandShape(action.command))}`);
+      }
+    }
+  }
+
+  if (plan.warnings.length > 0) {
+    lines.push("", "Warnings:", ...plan.warnings.map((warning) => `- ${warning}`));
+  }
+
+  lines.push(
+    "",
+    "Safety notes:",
+    ...plan.safetyNotes.map((note) => `- ${note}`)
+  );
+
+  if (plan.nextActions.length > 0) {
+    lines.push(
+      "",
+      "Next:",
+      ...plan.nextActions.map((action) => `- ${formatHumanCommand(action)}`)
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function formatImportClientStatus(status: string): string {
+  if (status === "detected") {
+    return "found";
+  }
+  if (status === "missing") {
+    return "missing";
+  }
+  return status;
+}
+
+function renderCommandShape(command: { command: string; args: string[] }): string {
+  return [command.command, ...command.args.map(shellQuoteCommandArg)].join(" ");
 }
 
 function formatDoctor(result: {

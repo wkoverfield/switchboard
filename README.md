@@ -29,6 +29,7 @@ Then run the repo setup flow from the project you want agents to work in:
 
 ```bash
 switchboard scan
+switchboard import --dry-run
 switchboard setup github-ci
 switchboard doctor
 switchboard install codex --write
@@ -45,6 +46,7 @@ pnpm smoke:profile-test
 pnpm smoke:secret-ref-profile
 pnpm smoke:mandate-secret-ref
 pnpm smoke:provider-add
+pnpm smoke:import-dry-run
 pnpm smoke:github-ci-first-loop
 pnpm smoke:harness-subagent-proof
 pnpm smoke:vercel-preview-dogfood
@@ -66,6 +68,8 @@ pnpm switchboard add github-ci --write
 switchboard --help
 switchboard scan
 switchboard scan --json
+switchboard import --dry-run
+switchboard import --json
 switchboard init
 switchboard setup <github-ci|vercel-preview>
 switchboard add <github-ci|vercel-preview>
