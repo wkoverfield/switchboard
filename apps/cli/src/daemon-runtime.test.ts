@@ -132,7 +132,8 @@ describe("daemon runtime mandate context", () => {
     ).resolves.toMatchObject({
       id: "req-secret",
       ok: false,
-      error: expect.stringContaining('secretRef "github/findu/dev/token"')
+      error: expect.stringContaining('secretRef "github/findu/dev/token"'),
+      nextActions: ["switchboard secrets set github/findu/dev/token --value-stdin"]
     });
   });
 
@@ -153,7 +154,8 @@ describe("daemon runtime mandate context", () => {
       ok: false,
       error: expect.stringContaining(
         'mandate "fix-ci" is scoped to branch "fix/ci", but current git branch is "main"'
-      )
+      ),
+      nextActions: ["git switch fix/ci", "switchboard mandate status fix-ci"]
     });
   });
 
@@ -176,7 +178,31 @@ describe("daemon runtime mandate context", () => {
       ok: false,
       error: expect.stringContaining(
         'mandate "fix-ci" is scoped to branch "fix/ci", but current git branch is "main"'
+      ),
+      nextActions: ["git switch fix/ci", "switchboard mandate status fix-ci"]
+    });
+  });
+
+  it("returns recovery actions for expired mandate-scoped daemon requests", async () => {
+    const root = await makeExpiredMandateRepo();
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "expired",
+          type: "list_tools",
+          mandateId: "fix-ci"
+        }),
+        { cwd: root }
       )
+    ).resolves.toMatchObject({
+      id: "expired",
+      ok: false,
+      error: 'mandate "fix-ci" is expired',
+      nextActions: [
+        "switchboard mandate renew fix-ci --lease 2h",
+        "switchboard mandate status fix-ci"
+      ]
     });
   });
 
@@ -634,6 +660,36 @@ async function makeMandateRepoOnWrongBranch(): Promise<string> {
     agentRole: "implementer",
     profiles: ["github_findu"],
     lease: "2h"
+  });
+
+  return root;
+}
+
+async function makeExpiredMandateRepo(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "switchboard-daemon-runtime-"));
+  process.env.XDG_STATE_HOME = join(root, "state");
+  execFileSync("git", ["init", "-b", "main"], {
+    cwd: root,
+    stdio: "ignore"
+  });
+  await writeFile(
+    join(root, ".switchboard.yaml"),
+    [
+      "version: 1",
+      "profiles:",
+      "  github_findu:",
+      "    provider: generic"
+    ].join("\n")
+  );
+  await createMandate({
+    task: "fix-ci",
+    repoPath: root,
+    worktreePath: root,
+    branch: "main",
+    agentRole: "implementer",
+    profiles: ["github_findu"],
+    lease: "1m",
+    now: () => new Date(Date.now() - 3_600_000)
   });
 
   return root;

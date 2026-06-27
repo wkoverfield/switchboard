@@ -20,6 +20,7 @@ gets for that task.
 | Preset-backed MCP launch payload | `switchboard mandate create --from <github-ci\|vercel-preview> --json` | `mcpLaunch.schemaVersion: "switchboard.mcp-launch.v1"` | Stable enough for harness startup |
 | Child MCP launch payload | `switchboard mandate child <task> --parent <id> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --json` | `mcpLaunch.schemaVersion: "switchboard.mcp-launch.v1"` | Stable enough for delegated worker startup |
 | Mandate status | `switchboard mandate status [id] --json` | `schemaVersion: "switchboard.mandate-status.v1"` | Stable enough for harness polling |
+| Mandate renewal | `switchboard mandate renew <id> --lease <duration> --json` | Existing mandate payload | Stable enough for expired-lease recovery |
 | Mandate report | `switchboard mandate report <id> --json` | `schemaVersion: "switchboard.mandate-report.v1"` | Stable enough for harness handoff inspection |
 | Mandate escalation | `switchboard mandate escalate <id> --json` | `schemaVersion: "switchboard.mandate-escalation.v1"` | Stable enough for local escalation planning |
 | Approval requests | `switchboard approvals --mandate <id> --include-children --json` | `schemaVersion: "switchboard.approvals.v1"` | Stable enough for mandate-tree approval visibility |
@@ -104,7 +105,12 @@ handoff object an orchestrator can pass to a worker agent.
 `switchboard.mandate-status.v1` lets a harness poll mandate state. The payload
 includes the mandate store path, optional repo filter, and matching mandates
 with runtime status, lease, profile, branch, policy, approval gate, and handoff
-fields.
+fields. It also includes an additive `readiness` object with per-mandate and
+aggregate `blockers`, `warnings`, and `nextActions`. Current readiness checks
+cover expired leases, branch mismatch, worktree mismatch, and missing scoped
+`secretRef`s. `switchboard mandate renew <id> --lease <duration> --json`
+renews an open mandate from now; child mandates still cannot outlive their
+parent mandate's lease.
 
 `switchboard.mandate-report.v1` lets a harness inspect a parent/child mandate
 chain at handoff time. The payload includes the selected mandate id, root
@@ -184,6 +190,28 @@ can launch a lead agent from the parent `mcpLaunch`, launch a narrower worker
 from the child `mcpLaunch`, then inspect `mandate report` for the delegation
 chain. Switchboard grants and audits authority; the harness owns the worker
 processes and long-running loop.
+
+## Runtime Recovery Proof
+
+`pnpm smoke:mandate-runtime-readiness` exercises the current recovery contract
+with a fixture repo:
+
+```bash
+switchboard mandate status fix-ci --json
+switchboard mandate renew fix-ci --lease 2h --json
+switchboard mandate status fix-ci --json
+```
+
+The smoke forces an expired mandate and then verifies `mandate status --json`
+returns a renew command in `readiness.nextActions`. It also switches the git
+worktree to a different branch and verifies the same status payload tells the
+harness to switch back to the mandate branch. MCP runtime errors include the
+same style of structured `nextActions` for expired mandates, branch mismatch,
+and missing scoped secrets.
+
+These checks are runtime awareness, not sandboxing. Switchboard can detect and
+deny mismatched local authority before launching or routing tools, but it does
+not provision an isolated filesystem, network boundary, or VM.
 
 ## Not Yet Contracted
 

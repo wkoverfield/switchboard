@@ -24,6 +24,7 @@ import {
   namespacesForProfiles,
   normalizeMandateId,
   readAuditLogEntries,
+  renewMandate,
   renderSwitchboardClientConfig,
   resolveApprovalRequestStorePath,
   resolveAuditLogPath,
@@ -262,6 +263,20 @@ interface MandateReportReadiness {
   }>;
   blockers: string[];
   nextActions: string[];
+}
+
+interface MandateStatusReadiness {
+  blockers: string[];
+  warnings: string[];
+  nextActions: string[];
+  mandates: Record<
+    string,
+    {
+      blockers: string[];
+      warnings: string[];
+      nextActions: string[];
+    }
+  >;
 }
 
 interface MandateReportResults {
@@ -2453,7 +2468,8 @@ export function createProgram(io: ProgramIo = {}): Command {
               writeCommandError({
                 json: options.json,
                 code: commandError.code,
-                message: commandError.message
+                message: commandError.message,
+                nextActions: commandError.nextActions
               });
             }
           }
@@ -2673,7 +2689,8 @@ export function createProgram(io: ProgramIo = {}): Command {
               writeCommandError({
                 json: options.json,
                 code: commandError.code,
-                message: commandError.message
+                message: commandError.message,
+                nextActions: commandError.nextActions
               });
             }
           }
@@ -2782,7 +2799,8 @@ export function createProgram(io: ProgramIo = {}): Command {
               writeCommandError({
                 json: options.json,
                 code: commandError.code,
-                message: commandError.message
+                message: commandError.message,
+                nextActions: commandError.nextActions
               });
             }
           }
@@ -2843,7 +2861,56 @@ export function createProgram(io: ProgramIo = {}): Command {
               writeCommandError({
                 json: options.json,
                 code: commandError.code,
-                message: commandError.message
+                message: commandError.message,
+                nextActions: commandError.nextActions
+              });
+            }
+          }
+        )
+    )
+    .addCommand(
+      new Command("renew")
+        .description("Renew an open mandate lease from now.")
+        .argument("<id>", "mandate id to renew")
+        .requiredOption("--lease <duration>", "new lease duration, like 30m, 2h, or 1d")
+        .option("--json", "print machine-readable JSON")
+        .action(
+          async (
+            id: string,
+            options: { lease: string; json?: boolean }
+          ) => {
+            const globalOptions = program.opts<{ cwd?: string }>();
+            const repoPath = installTargetCwd(globalOptions.cwd);
+            const path = io.mandateStorePath ?? resolveMandateStorePath();
+            try {
+              const mandate = await renewMandate({
+                path,
+                id,
+                repoPath,
+                lease: options.lease
+              });
+              const result = { path, mandate };
+              writeOut(
+                options.json
+                  ? JSON.stringify(result, null, 2)
+                  : [
+                      `Renewed mandate ${mandate.id}`,
+                      `Runtime: ${mandate.runtimeStatus}`,
+                      `Lease: ${mandate.lease}`,
+                      `Expires: ${mandate.expiresAt}`,
+                      `Store: ${path}`
+                    ].join("\n")
+              );
+            } catch (error) {
+              const commandError = mandateCommandError(
+                error,
+                "mandate_renew_failed"
+              );
+              writeCommandError({
+                json: options.json,
+                code: commandError.code,
+                message: commandError.message,
+                nextActions: commandError.nextActions
               });
             }
           }
@@ -2903,7 +2970,8 @@ export function createProgram(io: ProgramIo = {}): Command {
               writeCommandError({
                 json: options.json,
                 code: commandError.code,
-                message: commandError.message
+                message: commandError.message,
+                nextActions: commandError.nextActions
               });
             }
           }
@@ -2944,14 +3012,23 @@ export function createProgram(io: ProgramIo = {}): Command {
               schemaVersion: mandateStatusSchemaVersion,
               path,
               repoPath: repoPath ?? null,
-              mandates
+              mandates,
+              readiness: await createMandateStatusReadiness({
+                mandates,
+                repoPath,
+                cwd: globalOptions.cwd,
+                secretStore
+              })
             };
 
             if (id && mandates.length === 0) {
               writeCommandError({
                 json: options.json,
                 code: "mandate_not_found",
-                message: `mandate "${id}" was not found`
+                message: `mandate "${id}" was not found`,
+                nextActions: [
+                  "Run switchboard mandate status to list mandates for this repo."
+                ]
               });
               return;
             }
@@ -5556,6 +5633,7 @@ function formatMandateStatus(result: {
   path: string;
   repoPath: string | null;
   mandates: MandateWithStatus[];
+  readiness?: MandateStatusReadiness;
 }): string {
   const lines = [
     "Switchboard mandates",
@@ -5593,7 +5671,115 @@ function formatMandateStatus(result: {
     );
   }
 
+  if (result.readiness && result.readiness.blockers.length > 0) {
+    lines.push("", "Runtime blockers:");
+    for (const blocker of result.readiness.blockers) {
+      lines.push(`  ${blocker}`);
+    }
+  }
+
+  if (result.readiness && result.readiness.warnings.length > 0) {
+    lines.push("", "Runtime warnings:");
+    for (const warning of result.readiness.warnings) {
+      lines.push(`  ${warning}`);
+    }
+  }
+
+  if (result.readiness && result.readiness.nextActions.length > 0) {
+    lines.push("", "Next:");
+    for (const action of result.readiness.nextActions) {
+      lines.push(`  ${action}`);
+    }
+  }
+
   return lines.join("\n");
+}
+
+async function createMandateStatusReadiness(options: {
+  mandates: MandateWithStatus[];
+  repoPath: string | undefined;
+  cwd: string | undefined;
+  secretStore: SecretStore;
+}): Promise<MandateStatusReadiness> {
+  const mandateReadiness: MandateStatusReadiness["mandates"] = {};
+  let gitBinding: { worktreePath: string; branch: string } | undefined;
+  if (options.repoPath) {
+    try {
+      gitBinding = resolveGitWorktreeBinding(options.repoPath);
+    } catch {
+      gitBinding = undefined;
+    }
+  }
+
+  let missingSecretRefs: MissingSecretRef[] = [];
+  if (options.repoPath) {
+    const loaded = loadSwitchboardConfig(optionsFromCwd(options.cwd));
+    if (!loadedConfigCommandError(loaded)) {
+      missingSecretRefs = await findMissingSecretRefs(
+        loaded.config,
+        options.secretStore
+      );
+    }
+  }
+
+  for (const mandate of options.mandates) {
+    const blockers: string[] = [];
+    const warnings: string[] = [];
+    const nextActions: string[] = [];
+
+    if (mandate.runtimeStatus === "expired") {
+      blockers.push(`mandate "${mandate.id}" is expired`);
+      nextActions.push(`switchboard mandate renew ${mandate.id} --lease ${mandate.lease}`);
+    }
+    if (mandate.runtimeStatus === "closed") {
+      warnings.push(
+        `mandate "${mandate.id}" is closed with handoff state "${mandate.handoffState}"`
+      );
+    }
+    if (gitBinding && mandate.branch !== gitBinding.branch) {
+      blockers.push(
+        `mandate "${mandate.id}" is scoped to branch "${mandate.branch}", but current git branch is "${gitBinding.branch}"`
+      );
+      nextActions.push(`git switch ${mandate.branch}`);
+    }
+    if (gitBinding && mandate.worktreePath !== gitBinding.worktreePath) {
+      blockers.push(
+        `mandate "${mandate.id}" is scoped to worktree "${mandate.worktreePath}", but current worktree is "${gitBinding.worktreePath}"`
+      );
+      nextActions.push(`cd ${mandate.worktreePath}`);
+    }
+
+    const mandateProfiles = new Set(mandate.profiles);
+    for (const missing of missingSecretRefs) {
+      const usedByMandate = missing.usages.some((usage) =>
+        mandateProfiles.has(usage.profileName)
+      );
+      if (!usedByMandate) {
+        continue;
+      }
+      blockers.push(`secretRef "${missing.ref}" is ${missing.status}`);
+      nextActions.push(`switchboard secrets set ${missing.ref} --value-stdin`);
+    }
+
+    mandateReadiness[mandate.id] = {
+      blockers: uniqueStrings(blockers),
+      warnings: uniqueStrings(warnings),
+      nextActions: uniqueStrings(nextActions)
+    };
+  }
+
+  return {
+    blockers: uniqueStrings(
+      Object.values(mandateReadiness).flatMap((readiness) => readiness.blockers)
+    ),
+    warnings: uniqueStrings(
+      Object.values(mandateReadiness).flatMap((readiness) => readiness.warnings)
+    ),
+    nextActions: uniqueStrings(
+      Object.values(mandateReadiness).flatMap((readiness) => readiness.nextActions)
+    ),
+    mandates: mandateReadiness
+  };
 }
 
 function formatMandateHandoff(path: string, mandate: MandateWithStatus): string {
@@ -6145,11 +6331,16 @@ function parserErrorCode(message: string): string {
 function mandateCommandError(
   error: unknown,
   fallbackCode: string
-): { code: string; message: string } {
+): { code: string; message: string; nextActions: string[] } {
   const message = messageFromError(error);
   return {
-    code: isMandateNotFoundMessage(message) ? "mandate_not_found" : fallbackCode,
-    message
+    code: isMandateNotFoundMessage(message)
+      ? "mandate_not_found"
+      : isMandateExpiredMessage(message)
+        ? "mandate_expired"
+        : fallbackCode,
+    message,
+    nextActions: mandateRecoveryNextActions(message)
   };
 }
 
@@ -6158,6 +6349,38 @@ function isMandateNotFoundMessage(message: string): boolean {
     /^mandate "[^"]+" was not found(?:$|\sfor\s)/.test(message) ||
     /^active parent mandate "[^"]+" was not found(?:$|\sfor\s)/.test(message)
   );
+}
+
+function isMandateExpiredMessage(message: string): boolean {
+  return /^mandate "[^"]+" is expired$/.test(message);
+}
+
+function mandateRecoveryNextActions(message: string): string[] {
+  const expired = /^mandate "([^"]+)" is expired$/.exec(message);
+  if (expired?.[1]) {
+    return [
+      `switchboard mandate renew ${expired[1]} --lease 2h`,
+      `switchboard mandate create ${expired[1]} --lease 2h --agent <role> --profiles <profiles> --branch <branch>`
+    ];
+  }
+
+  const missing = /^mandate "([^"]+)" was not found/.exec(message);
+  if (missing?.[1]) {
+    return ["Run switchboard mandate status to list mandates for this repo."];
+  }
+
+  const branchMismatch =
+    /^mandate "([^"]+)" is scoped to branch "([^"]+)", but current git branch is "([^"]+)"/.exec(
+      message
+    );
+  if (branchMismatch?.[2]) {
+    return [
+      `git switch ${branchMismatch[2]}`,
+      `switchboard mandate status ${branchMismatch[1] ?? ""}`.trim()
+    ];
+  }
+
+  return [];
 }
 
 function approvalGateLabels(
@@ -6249,14 +6472,15 @@ async function resolveActiveMandateForCommand(options: {
     return mandate;
   } catch (error) {
     if (options.json && options.writeCommandError) {
-      const { code, message } = mandateCommandError(
+      const { code, message, nextActions } = mandateCommandError(
         error,
         "active_mandate_failed"
       );
       options.writeCommandError({
         json: true,
         code,
-        message
+        message,
+        nextActions
       });
       return undefined;
     }
