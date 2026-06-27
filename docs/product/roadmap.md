@@ -18,6 +18,7 @@ with this roadmap or `docs/product/mandate-strategy.md`.
 - `docs/product/mandate-strategy.md`
 - `docs/product/eval-strategy.md`
 - `docs/product/adversarial-alpha-eval-2026-06-27.md`
+- `docs/product/alpha-authority-architecture-plan.md`
 - `docs/product/approval-elicitation-research.md`
 - `docs/security/secrets-keychain-architecture.md`
 

@@ -12,6 +12,9 @@ The evaluated launch hypothesis was:
 > Find risky MCP/tool access in your repo and turn it into scoped agent
 > permissions.
 
+The implementation response is planned in
+`docs/product/alpha-authority-architecture-plan.md`.
+
 ## Validated
 
 - `switchboard scan` is a good first command: fast, local, and understandable.
