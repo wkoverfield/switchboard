@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { dirname, isAbsolute, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type AuditLogEntry,
@@ -871,8 +871,10 @@ export function createProgram(io: ProgramIo = {}): Command {
           return;
         }
 
-        const secretRef = options.secretRef ?? template.defaultSecretRef;
-        const validation = validateSecretRef(secretRef);
+        const cwd = resolve(program.opts<{ cwd?: string }>().cwd ?? process.cwd());
+        const defaults = repoAwarePresetDefaults(preset, cwd);
+        const resolvedSecretRef = options.secretRef ?? defaults.secretRef;
+        const validation = validateSecretRef(resolvedSecretRef);
         if (!validation.ok) {
           writeCommandError({
             json: options.json,
@@ -903,8 +905,8 @@ export function createProgram(io: ProgramIo = {}): Command {
             return;
           }
 
-          await secretStore.set(secretRef, value);
-          await rememberSecretRef(secretRef, secretIndexOptions(io.secretIndexPath));
+          await secretStore.set(resolvedSecretRef, value);
+          await rememberSecretRef(resolvedSecretRef, secretIndexOptions(io.secretIndexPath));
           const result = {
             ok: true,
             schemaVersion: secretsSchemaVersion,
@@ -913,15 +915,17 @@ export function createProgram(io: ProgramIo = {}): Command {
             provider: template.provider,
             label: template.label,
             secretEnvName: template.secretEnvName,
-            ref: secretRef,
+            ref: resolvedSecretRef,
             indexPath: resolveSecretIndexPath(
               secretIndexOptions(io.secretIndexPath)
             ),
             nextSteps: [
               `switchboard doctor`,
-              `switchboard presets check ${template.id} --profile ${template.defaultProfileName}`,
+              `switchboard presets check ${template.id} --profile ${defaults.profileName}`,
               `switchboard mandate create --from ${template.id}`
-            ]
+            ].map((step) =>
+              rewriteSwitchboardCommand(step, switchboardCommandPrefixForRepo(cwd))
+            )
           };
           writeOut(
             options.json
@@ -1003,13 +1007,14 @@ export function createProgram(io: ProgramIo = {}): Command {
 
         const cwd = resolve(globalOptions.cwd ?? process.cwd());
         const branch = currentGitBranch(cwd);
+        const defaults = repoAwarePresetDefaults(preset, cwd);
         const planOptions = {
           id: preset,
           ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
           ...(branch ? { mandateBranch: branch } : {}),
-          ...(options.profileName ? { profileName: options.profileName } : {}),
-          ...(options.namespace ? { namespace: options.namespace } : {}),
-          ...(options.secretRef ? { secretRef: options.secretRef } : {}),
+          profileName: options.profileName ?? defaults.profileName,
+          namespace: options.namespace ?? defaults.namespace,
+          secretRef: options.secretRef ?? defaults.secretRef,
           ...(options.command ? { command: options.command } : {}),
           ...(options.arg.length > 0 ? { args: options.arg } : {})
         };
@@ -1102,15 +1107,16 @@ export function createProgram(io: ProgramIo = {}): Command {
 
         const cwd = resolve(program.opts<{ cwd?: string }>().cwd ?? process.cwd());
         const branch = currentGitBranch(cwd);
+        const defaults = repoAwarePresetDefaults(preset, cwd);
         const planOptions = {
           id: preset,
           ...(program.opts<{ cwd?: string }>().cwd
             ? { cwd: program.opts<{ cwd?: string }>().cwd }
             : {}),
           ...(branch ? { mandateBranch: branch } : {}),
-          ...(options.profileName ? { profileName: options.profileName } : {}),
-          ...(options.namespace ? { namespace: options.namespace } : {}),
-          ...(options.secretRef ? { secretRef: options.secretRef } : {}),
+          profileName: options.profileName ?? defaults.profileName,
+          namespace: options.namespace ?? defaults.namespace,
+          secretRef: options.secretRef ?? defaults.secretRef,
           ...(options.command ? { command: options.command } : {}),
           ...(options.arg.length > 0 ? { args: options.arg } : {})
         };
@@ -3944,6 +3950,45 @@ function providerAuthCommand(plan: ProviderAddPlan): string {
   return plan.rendered.secretRef === plan.rendered.template.defaultSecretRef
     ? base
     : `${base} --secret-ref ${shellQuoteCommandArg(plan.rendered.secretRef)}`;
+}
+
+function repoAwarePresetDefaults(
+  presetId: string,
+  cwd: string
+): { profileName: string; namespace: string; secretRef: string } {
+  const repoName = safeIdentifierForCommand(basename(cwd));
+  if (presetId === "github-ci") {
+    const profileName = `github_${repoName}_ci`;
+    return {
+      profileName,
+      namespace: profileName,
+      secretRef: `github/${repoName}/dev/token`
+    };
+  }
+  if (presetId === "vercel-preview") {
+    const profileName = `vercel_${repoName}_preview`;
+    return {
+      profileName,
+      namespace: profileName,
+      secretRef: `vercel/${repoName}/preview/token`
+    };
+  }
+
+  const template = getProviderSafetyTemplate(presetId);
+  return {
+    profileName: template?.defaultProfileName ?? safeIdentifierForCommand(presetId),
+    namespace: template?.defaultNamespace ?? safeIdentifierForCommand(presetId),
+    secretRef: template?.defaultSecretRef ?? `${safeIdentifierForCommand(presetId)}/${repoName}/dev/token`
+  };
+}
+
+function safeIdentifierForCommand(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized.length > 0 ? normalized : "repo";
 }
 
 function formatProviderAuth(result: {

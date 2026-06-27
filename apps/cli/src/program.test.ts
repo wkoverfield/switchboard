@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -339,6 +339,8 @@ describe("switchboard CLI program", () => {
         mandateCreate: { command: string; args: string[] };
       };
     };
+    const profileName = githubRepoProfile(root);
+    const secretRef = githubRepoSecretRef(root);
     expect(parsed.schemaVersion).toBe("switchboard.provider-add.v1");
     expect(parsed.action).toBe("create-planned");
     expect(parsed.targetPath).toBe(join(root, ".switchboard.yaml"));
@@ -354,14 +356,14 @@ describe("switchboard CLI program", () => {
     });
     expect(parsed.commands.setup).toEqual({
       command: "switchboard",
-      args: ["setup", "github-ci"]
+      args: ["setup", "github-ci", "--secret-ref", secretRef]
     });
     expect(parsed.commands.auth).toEqual({
       command: "switchboard",
-      args: ["auth", "github-ci"]
+      args: ["auth", "github-ci", "--secret-ref", secretRef]
     });
-    expect(parsed.mandatePolicy.allowedTools).toEqual(["github_ci_*"]);
-    expect(parsed.mandatePolicy.deniedTools).toContain("github_ci_deploy_prod");
+    expect(parsed.mandatePolicy.allowedTools).toEqual([`${profileName}_*`]);
+    expect(parsed.mandatePolicy.deniedTools).toContain(`${profileName}_deploy_prod`);
     expect(parsed.credentialGuidance.minimumScopes).toContain(
       "read checks/statuses"
     );
@@ -382,12 +384,14 @@ describe("switchboard CLI program", () => {
       from: "user"
     });
 
+    const profileName = githubRepoProfile(root);
+    const secretRef = githubRepoSecretRef(root);
     const text = output.join("\n");
     expect(text).toContain("What this prepares:");
-    expect(text).toContain("one github MCP profile: github_ci");
-    expect(text).toContain("Token storage: local token alias github/example/dev/token");
+    expect(text).toContain(`one github MCP profile: ${profileName}`);
+    expect(text).toContain(`Token storage: local token alias ${secretRef}`);
     expect(text).toContain(
-      "one local token alias for GITHUB_PERSONAL_ACCESS_TOKEN: github/example/dev/token"
+      `one local token alias for GITHUB_PERSONAL_ACCESS_TOKEN: ${secretRef}`
     );
     expect(text).toContain(
       "mandate policy: 1 allow pattern(s), 10 approval gate(s), 5 deny pattern(s)"
@@ -397,7 +401,7 @@ describe("switchboard CLI program", () => {
     expect(text).toContain("delete_repo");
     expect(text).toContain("switchboard auth github-ci");
     expect(text).not.toContain(
-      "switchboard secrets set github/example/dev/token --value-stdin"
+      `switchboard secrets set ${secretRef} --value-stdin`
     );
     expect(text.indexOf("What this prepares:")).toBeLessThan(
       text.indexOf("Config preview:")
@@ -435,7 +439,7 @@ describe("switchboard CLI program", () => {
         `pnpm --dir ${sourceRoot} switchboard --cwd ${root} auth vercel-preview`
       );
       expect(text).toContain(
-        `pnpm --dir ${sourceRoot} switchboard --cwd ${root} presets check vercel-preview --profile vercel_preview`
+        `pnpm --dir ${sourceRoot} switchboard --cwd ${root} presets check vercel-preview --profile ${vercelRepoProfile(root)}`
       );
       expect(text).not.toContain("  pnpm switchboard auth vercel-preview");
     } finally {
@@ -1134,16 +1138,16 @@ describe("switchboard CLI program", () => {
       }
     });
 
-    await program.parseAsync(["auth", "github-ci"], { from: "user" });
+    await program.parseAsync(["--cwd", root, "auth", "github-ci"], { from: "user" });
 
-    expect(await store.get("github/example/dev/token")).toBe("ghp_secret");
+    expect(await store.get(githubRepoSecretRef(root))).toBe("ghp_secret");
     expect(prompts).toEqual([
       "Paste GitHub CI token for GITHUB_PERSONAL_ACCESS_TOKEN: "
     ]);
     expect(output.join("\n")).toContain("Stored GitHub CI token");
     expect(output.join("\n")).toContain("switchboard doctor");
     expect(output.join("\n")).toContain(
-      "switchboard presets check github-ci --profile github_ci"
+      `switchboard presets check github-ci --profile ${githubRepoProfile(root)}`
     );
     expect(output.join("\n")).not.toContain("ghp_secret");
   });
@@ -1209,7 +1213,7 @@ describe("switchboard CLI program", () => {
     });
 
     expect(existsSync(join(root, ".switchboard.yaml"))).toBe(true);
-    expect(await store.get("github/example/dev/token")).toBe("ghp_secret");
+    expect(await store.get(githubRepoSecretRef(root))).toBe("ghp_secret");
     expect(prompts).toEqual([
       "Paste GitHub CI token for GITHUB_PERSONAL_ACCESS_TOKEN: "
     ]);
@@ -1217,9 +1221,11 @@ describe("switchboard CLI program", () => {
     expect(text).toContain("Switchboard GitHub CI setup complete");
     expect(text).toContain("Ready: profile created and provider token stored locally.");
     expect(text).toContain("Token: stored locally for GitHub CI");
-    expect(text).toContain("Token alias: github/example/dev/token");
+    expect(text).toContain(`Token alias: ${githubRepoSecretRef(root)}`);
     expect(text).toContain("switchboard doctor");
-    expect(text).toContain("switchboard presets check github-ci --profile github_ci");
+    expect(text).toContain(
+      `switchboard presets check github-ci --profile ${githubRepoProfile(root)}`
+    );
     expect(text).toContain("switchboard mandate create fix-ci --from github-ci");
     expect(text).not.toContain("ghp_secret");
   });
@@ -1251,7 +1257,7 @@ describe("switchboard CLI program", () => {
     expect(parsed.presetId).toBe("vercel-preview");
     expect(parsed.tokenStored).toBe(true);
     expect(parsed.nextSteps).toContain("switchboard doctor");
-    expect(await store.get("vercel/example/preview/token")).toBe("vercel_secret");
+    expect(await store.get(vercelRepoSecretRef(root))).toBe("vercel_secret");
     expect(output.join("\n")).not.toContain("vercel_secret");
   });
 
@@ -6422,6 +6428,29 @@ function makeTempProject(): string {
   );
   mkdirSync(root, { recursive: true });
   return root;
+}
+
+function repoSlug(root: string): string {
+  return basename(root)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function githubRepoProfile(root: string): string {
+  return `github_${repoSlug(root)}_ci`;
+}
+
+function githubRepoSecretRef(root: string): string {
+  return `github/${repoSlug(root)}/dev/token`;
+}
+
+function vercelRepoProfile(root: string): string {
+  return `vercel_${repoSlug(root)}_preview`;
+}
+
+function vercelRepoSecretRef(root: string): string {
+  return `vercel/${repoSlug(root)}/preview/token`;
 }
 
 function initGitRepo(root: string, branch: string): void {

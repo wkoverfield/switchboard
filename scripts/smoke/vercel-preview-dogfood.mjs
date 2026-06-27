@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import process from "node:process";
 
 const repo = resolve(import.meta.dirname, "..", "..");
@@ -13,7 +13,9 @@ const fixtureServerPath = join(
   "packages/mcp-runtime/fixtures/echo-server.mjs"
 );
 const project = mkdtempSync(join(tmpdir(), "switchboard-vercel-preview-"));
-const secretRef = "vercel/example/preview/token";
+const repoSlug = safeIdentifier(basename(project));
+const profileName = `vercel_${repoSlug}_preview`;
+const secretRef = `vercel/${repoSlug}/preview/token`;
 const secretValue = "vercel-preview-secret-do-not-print";
 const secretHash = sha256(secretValue);
 const providerToolNames = [
@@ -56,7 +58,7 @@ try {
     "--arg",
     fixtureServerPath,
     "--arg",
-    "vercel_preview",
+    profileName,
     "--arg",
     "VERCEL_TOKEN",
     "--arg",
@@ -84,7 +86,7 @@ try {
     "check",
     "vercel-preview",
     "--profile",
-    "vercel_preview",
+    profileName,
     "--json"
   );
   assert(check.ok === true, "expected Vercel preview policy to cover fixture tools");
@@ -94,24 +96,24 @@ try {
   assert(check.counts?.allowed === 6, "expected echo, whoami, and read/log tools allowed");
   assert(check.counts?.approvalRequired === 4, "expected deployment write/rollback approval gates");
   assert(check.counts?.denied === 12, "expected production/admin tools denied");
-  assertToolClass(check, "vercel_preview_list_deployments", "allowed");
-  assertToolClass(check, "vercel_preview_get_deployment", "allowed");
-  assertToolClass(check, "vercel_preview_get_deployment_events", "allowed");
-  assertToolClass(check, "vercel_preview_get_runtime_logs", "allowed");
-  assertToolClass(check, "vercel_preview_create_deployment", "approval_required");
-  assertToolClass(check, "vercel_preview_cancel_deployment", "approval_required");
-  assertToolClass(check, "vercel_preview_delete_deployment", "approval_required");
-  assertToolClass(check, "vercel_preview_rollback_deployment", "approval_required");
-  assertToolClass(check, "vercel_preview_deploy_prod", "denied");
-  assertToolClass(check, "vercel_preview_deploy_production", "denied");
-  assertToolClass(check, "vercel_preview_env_list", "denied");
-  assertToolClass(check, "vercel_preview_create_env", "denied");
-  assertToolClass(check, "vercel_preview_environment_update", "denied");
-  assertToolClass(check, "vercel_preview_domains_list", "denied");
-  assertToolClass(check, "vercel_preview_domain_add", "denied");
-  assertToolClass(check, "vercel_preview_secret_status", "denied");
-  assertToolClass(check, "vercel_preview_billing_list", "denied");
-  assertToolClass(check, "vercel_preview_team_members", "denied");
+  assertToolClass(check, `${profileName}_list_deployments`, "allowed");
+  assertToolClass(check, `${profileName}_get_deployment`, "allowed");
+  assertToolClass(check, `${profileName}_get_deployment_events`, "allowed");
+  assertToolClass(check, `${profileName}_get_runtime_logs`, "allowed");
+  assertToolClass(check, `${profileName}_create_deployment`, "approval_required");
+  assertToolClass(check, `${profileName}_cancel_deployment`, "approval_required");
+  assertToolClass(check, `${profileName}_delete_deployment`, "approval_required");
+  assertToolClass(check, `${profileName}_rollback_deployment`, "approval_required");
+  assertToolClass(check, `${profileName}_deploy_prod`, "denied");
+  assertToolClass(check, `${profileName}_deploy_production`, "denied");
+  assertToolClass(check, `${profileName}_env_list`, "denied");
+  assertToolClass(check, `${profileName}_create_env`, "denied");
+  assertToolClass(check, `${profileName}_environment_update`, "denied");
+  assertToolClass(check, `${profileName}_domains_list`, "denied");
+  assertToolClass(check, `${profileName}_domain_add`, "denied");
+  assertToolClass(check, `${profileName}_secret_status`, "denied");
+  assertToolClass(check, `${profileName}_billing_list`, "denied");
+  assertToolClass(check, `${profileName}_team_members`, "denied");
   assertNoSecretText(JSON.stringify(check), "preset check");
 
   const mandate = runCliJson(
@@ -119,17 +121,19 @@ try {
     "create",
     "--from",
     "vercel-preview",
+    "--profiles",
+    profileName,
     "--json"
   );
   assert(mandate.mandate?.id === "inspect-preview", "expected template task id");
   assert(mandate.mandate?.branch === "preview", "expected current branch");
   assert(
-    mandate.mandate?.deniedTools?.includes?.("vercel_preview_deploy_prod"),
+    mandate.mandate?.deniedTools?.includes?.(`${profileName}_deploy_prod`),
     "expected production deploy denied"
   );
   assert(
     mandate.mandate?.approvalGates?.some?.(
-      (gate) => gate.toolPattern === "vercel_preview_create_deployment"
+      (gate) => gate.toolPattern === `${profileName}_create_deployment`
     ),
     "expected create deployment approval gate"
   );
@@ -137,7 +141,7 @@ try {
 
   const tools = runCliJson("tools", "--mandate", "inspect-preview", "--json");
   assert(
-    tools.tools?.some?.((tool) => tool.name === "vercel_preview_echo"),
+    tools.tools?.some?.((tool) => tool.name === `${profileName}_echo`),
     "expected preview tool surface"
   );
   assertNoSecretText(JSON.stringify(tools), "tool surface");
@@ -216,6 +220,15 @@ function assertToolClass(check, toolName, classification) {
 
 function redactSecret(value) {
   return value.replaceAll(secretValue, "[redacted]");
+}
+
+function safeIdentifier(value) {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized.length > 0 ? normalized : "repo";
 }
 
 function sha256(value) {

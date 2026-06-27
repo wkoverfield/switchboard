@@ -7,7 +7,9 @@ import { scanSwitchboardProject } from "./scan.js";
 
 describe("switchboard project scan", () => {
   it("detects git repo, provider hints, env names, and redacts env values", async () => {
-    const root = await mkdtemp(join(tmpdir(), "switchboard-scan-"));
+    const base = await mkdtemp(join(tmpdir(), "switchboard-scan-"));
+    const root = join(base, "stockr");
+    await mkdir(root);
     const homeDir = await mkdtemp(join(tmpdir(), "switchboard-scan-home-"));
     execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
     execFileSync("git", ["checkout", "-b", "feature/scan"], {
@@ -58,6 +60,18 @@ describe("switchboard project scan", () => {
       result.providers.find((provider) => provider.provider === "stripe")?.envVars
     ).toEqual(["STRIPE_SECRET_KEY"]);
     expect(result.runtime.vercelProjectPresent).toBe(true);
+    expect(
+      result.suggestions.find((suggestion) => suggestion.provider === "github")
+    ).toMatchObject({
+      profileName: "github_stockr_ci",
+      namespace: "github_stockr_ci"
+    });
+    expect(
+      result.suggestions.find((suggestion) => suggestion.provider === "vercel")
+    ).toMatchObject({
+      profileName: "vercel_stockr_preview",
+      namespace: "vercel_stockr_preview"
+    });
     expect(result.nextActions).toContain("switchboard setup github-ci");
     expect(result.nextActions).toContain("switchboard setup vercel-preview");
     expect(serialized).not.toContain("sk_live_should_not_print");
