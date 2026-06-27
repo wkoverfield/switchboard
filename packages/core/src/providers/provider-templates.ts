@@ -232,6 +232,119 @@ export const providerSafetyTemplates: ProviderSafetyTemplate[] = [
     ]
   },
   {
+    id: "stripe-test",
+    provider: "stripe",
+    label: "Stripe Test",
+    description:
+      "Stripe test-mode MCP profile shape for inspecting test payments without touching live money.",
+    defaultProfileName: "stripe_test",
+    defaultNamespace: "stripe_test",
+    defaultSecretRef: "stripe/example/test/secret-key",
+    secretEnvName: "STRIPE_API_KEY",
+    defaultCommand: "npx",
+    defaultArgs: ["-y", "@stripe/mcp", "--tools=all"],
+    environment: "test",
+    readOnly: false,
+    mode: "guarded",
+    recommendedMandate: {
+      task: "inspect-test-payments",
+      agent: "implementer",
+      branch: "fix/payments",
+      lease: "2h",
+      allowedTools: ["{namespace}_*"],
+      deniedTools: [
+        "{namespace}_*live*",
+        "{namespace}_*production*",
+        "{namespace}_create_live*",
+        "{namespace}_delete*",
+        "{namespace}_delete_*",
+        "{namespace}_admin_*",
+        "{namespace}_account_*",
+        "{namespace}_payout*",
+        "{namespace}_transfer*",
+        "{namespace}_terminal*",
+        "{namespace}_issuing*",
+        "{namespace}_treasury*",
+        "{namespace}_webhook*",
+        "{namespace}_secret*",
+        "{namespace}_token*"
+      ],
+      approvalGates: [
+        {
+          toolPattern: "{namespace}_create*",
+          reason:
+            "creating Stripe test resources changes payment state and should be intentional",
+          risk: "medium",
+          labels: ["stripe", "test", "write"]
+        },
+        {
+          toolPattern: "{namespace}_update*",
+          reason:
+            "updating Stripe test resources changes payment state and should be intentional",
+          risk: "medium",
+          labels: ["stripe", "test", "write"]
+        },
+        {
+          toolPattern: "{namespace}_refund*",
+          reason:
+            "refund-like Stripe actions affect money-shaped records even in test mode",
+          risk: "high",
+          labels: ["stripe", "test", "money"]
+        },
+        {
+          toolPattern: "{namespace}_cancel*",
+          reason:
+            "cancelling Stripe resources can invalidate test sessions or subscriptions",
+          risk: "medium",
+          labels: ["stripe", "test", "write"]
+        },
+        {
+          toolPattern: "{namespace}_capture*",
+          reason:
+            "capturing payment intents is payment-affecting even in test mode",
+          risk: "high",
+          labels: ["stripe", "test", "money"]
+        },
+        {
+          toolPattern: "{namespace}_confirm*",
+          reason:
+            "confirming payment intents is payment-affecting even in test mode",
+          risk: "high",
+          labels: ["stripe", "test", "money"]
+        }
+      ]
+    },
+    credentialGuidance: {
+      posture:
+        "Use a restricted Stripe test-mode secret key. Never use live keys for this preset.",
+      minimumScopes: [
+        "read test-mode customers",
+        "read test-mode payment intents",
+        "read test-mode charges",
+        "read test-mode subscriptions"
+      ],
+      approvalScopes: [
+        "create or update test-mode customers",
+        "create or update test-mode payment intents",
+        "refund or cancel test-mode payment records"
+      ],
+      avoidScopes: [
+        "live-mode secret keys",
+        "payouts or transfers",
+        "account administration",
+        "webhook secret management"
+      ],
+      notes: [
+        "Stripe test keys start with sk_test; live keys start with sk_live and should not be used with this preset.",
+        "Keep money-affecting write tools approval-gated even when the key is test-mode."
+      ]
+    },
+    notes: [
+      "This preset is for Stripe test-mode only: agents can inspect test payments without touching real money.",
+      "If a live/prod-looking key or tool surface appears, stop and switch to a test-mode key before running unattended work."
+    ]
+  },
+  {
     id: "vercel-preview",
     provider: "vercel",
     label: "Vercel Preview",

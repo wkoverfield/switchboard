@@ -233,6 +233,16 @@ where relevant. Redacted transcripts and summaries are written under
 should remain manual until credentials and network access are intentionally
 available.
 
+## Stripe Test Safety Preset
+
+`stripe-test` is the first deliberately visceral safety preset: agents can
+inspect Stripe test-mode payments without touching real money. The preset is
+guarded, stores a test-mode key behind `secretRef`, allows read/inspection
+tools, denies live/prod/admin/payout/transfer/webhook-secret-shaped tools, and
+requires approval for test-mode create/update/refund/cancel/capture/confirm
+actions. It is a policy/template proof for Stripe test-mode workflows, not a
+full Stripe connector or hosted OAuth integration.
+
 ## Not Yet Contracted
 
 The following JSON outputs are useful for humans and scripts, but are not yet

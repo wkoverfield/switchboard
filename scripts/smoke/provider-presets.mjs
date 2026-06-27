@@ -36,6 +36,10 @@ assert(
   list.templates?.some?.((template) => template.id === "vercel-preview"),
   "vercel-preview listed"
 );
+assert(
+  list.templates?.some?.((template) => template.id === "stripe-test"),
+  "stripe-test listed"
+);
 
 const github = run([
   "presets",
@@ -105,6 +109,30 @@ assert(
 );
 assertNoRawSecret(JSON.stringify(vercel), "vercel preset");
 
+const stripe = run([
+  "presets",
+  "show",
+  "stripe-test",
+  "--namespace",
+  "stripe_findu_test",
+  "--secret-ref",
+  "stripe/findu/test/secret-key",
+  "--json"
+]);
+assert(
+  stripe.mandateCommand.includes("--deny-tool 'stripe_findu_test_*live*'"),
+  "stripe live denied"
+);
+assert(
+  stripe.mandateCommand.includes("--require-approval-labels 'stripe,test,money'"),
+  "stripe money writes approval gated"
+);
+assert(
+  stripe.credentialGuidance?.avoidScopes?.includes?.("live-mode secret keys"),
+  "stripe live keys avoided"
+);
+assertNoRawSecret(JSON.stringify(stripe), "stripe preset");
+
 try {
   mkdirSync(tmpRoot, { recursive: true });
   writeFileSync(join(tmpRoot, ".gitignore"), ".switchboard.local.yaml\n");
@@ -142,6 +170,40 @@ try {
   assert(check.ok === true, "fixture preset check ok");
   assert(check.counts?.allowed === 2, "fixture allowed tools");
   assertNoRawSecret(JSON.stringify(check), "provider check");
+
+  writeFileSync(
+    join(tmpRoot, ".switchboard.yaml"),
+    [
+      "version: 1",
+      "profiles:",
+      "  stripe_test:",
+      "    provider: stripe",
+      "    namespace: stripe_test",
+      "    upstream:",
+      "      type: stdio",
+      `      command: ${JSON.stringify(process.execPath)}`,
+      "      args:",
+      `        - ${JSON.stringify(fixtureServerPath)}`,
+      "        - stripe-test"
+    ].join("\n")
+  );
+  const stripeCheck = run([
+    "--cwd",
+    tmpRoot,
+    "presets",
+    "check",
+    "stripe-test",
+    "--profile",
+    "stripe_test",
+    "--json"
+  ]);
+  assert(
+    stripeCheck.schemaVersion === "switchboard.provider-preset-check.v1",
+    "stripe check schema"
+  );
+  assert(stripeCheck.ok === true, "stripe fixture preset check ok");
+  assert(stripeCheck.counts?.allowed === 2, "stripe fixture allowed tools");
+  assertNoRawSecret(JSON.stringify(stripeCheck), "stripe provider check");
 } finally {
   rmSync(tmpRoot, { recursive: true, force: true });
 }
@@ -151,6 +213,10 @@ function assertNoRawSecret(value, label) {
   assert(
     !value.includes("vercel-token-value"),
     `${label} contains Vercel token-like text`
+  );
+  assert(
+    !value.includes("sk_live_secret"),
+    `${label} contains Stripe live key value text`
   );
 }
 

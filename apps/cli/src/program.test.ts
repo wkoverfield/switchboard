@@ -157,6 +157,7 @@ describe("switchboard CLI program", () => {
     expect(parsed.schemaVersion).toBe("switchboard.provider-preset.v1");
     expect(parsed.templates.map((template) => template.id)).toEqual([
       "github-ci",
+      "stripe-test",
       "vercel-preview"
     ]);
     expect(parsed.templates[0]?.defaultSecretRef).toBe("github/example/dev/token");
@@ -411,6 +412,36 @@ describe("switchboard CLI program", () => {
     );
     expect(text.indexOf("What this prepares:")).toBeLessThan(
       text.indexOf("Config preview:")
+    );
+  });
+
+  it("uses repo-aware defaults for Stripe test provider add", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "main");
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await program.parseAsync(
+      ["--cwd", root, "add", "stripe-test", "--dry-run", "--json"],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      profileName: string;
+      namespace: string;
+      secretRef: string;
+      mandatePolicy: { deniedTools: string[]; approvalGates: unknown[] };
+      credentialGuidance: { posture: string; avoidScopes: string[] };
+    };
+    const profileName = stripeRepoProfile(root);
+    expect(parsed.profileName).toBe(profileName);
+    expect(parsed.namespace).toBe(profileName);
+    expect(parsed.secretRef).toBe(stripeRepoSecretRef(root));
+    expect(parsed.mandatePolicy.deniedTools).toContain(`${profileName}_*live*`);
+    expect(parsed.mandatePolicy.approvalGates.length).toBeGreaterThan(0);
+    expect(parsed.credentialGuidance.posture).toContain("test-mode");
+    expect(parsed.credentialGuidance.avoidScopes).toContain(
+      "live-mode secret keys"
     );
   });
 
@@ -1265,6 +1296,43 @@ describe("switchboard CLI program", () => {
     expect(parsed.nextSteps).toContain("switchboard doctor");
     expect(await store.get(vercelRepoSecretRef(root))).toBe("vercel_secret");
     expect(output.join("\n")).not.toContain("vercel_secret");
+  });
+
+  it("runs guided Stripe test setup with repo-aware secret storage", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    const output: string[] = [];
+    const store = createMemorySecretStore();
+    const program = createProgram({
+      secretStore: store,
+      secretIndexPath: join(root, "state", "secrets", "index.json"),
+      readSecretFromStdin: async () => "sk_test_secret",
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "setup", "stripe-test", "--value-stdin", "--json"],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      action: string;
+      presetId: string;
+      tokenStored: boolean;
+      nextSteps: string[];
+    };
+    expect(parsed.action).toBe("setup");
+    expect(parsed.presetId).toBe("stripe-test");
+    expect(parsed.tokenStored).toBe(true);
+    expect(parsed.nextSteps).toContain(
+      `switchboard presets check stripe-test --profile ${stripeRepoProfile(root)}`
+    );
+    expect(parsed.nextSteps.some((step) =>
+      step.includes("switchboard mandate create inspect-test-payments") &&
+      step.includes(stripeRepoProfile(root))
+    )).toBe(true);
+    expect(await store.get(stripeRepoSecretRef(root))).toBe("sk_test_secret");
+    expect(output.join("\n")).not.toContain("sk_test_secret");
   });
 
   it("does not include raw secrets in generated client config", async () => {
@@ -6651,6 +6719,14 @@ function vercelRepoProfile(root: string): string {
 
 function vercelRepoSecretRef(root: string): string {
   return `vercel/${repoSlug(root)}/preview/token`;
+}
+
+function stripeRepoProfile(root: string): string {
+  return `stripe_${repoSlug(root)}_test`;
+}
+
+function stripeRepoSecretRef(root: string): string {
+  return `stripe/${repoSlug(root)}/test/secret-key`;
 }
 
 function initGitRepo(root: string, branch: string): void {
