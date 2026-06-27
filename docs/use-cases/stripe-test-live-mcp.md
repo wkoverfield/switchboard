@@ -16,6 +16,8 @@ It proves:
 
 - `switchboard add stripe-test --write` creates a repo-aware test profile and
   local `secretRef`
+- the local `@stripe/mcp` process receives the test key through runtime env
+  expansion, not by storing the raw key in repo or client config
 - `presets check stripe-test` classifies read tools as allowed
 - create/update/refund/cancel/capture/confirm-shaped tools require approval
 - live, production, payout, transfer, account, webhook-secret, token, and

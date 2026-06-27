@@ -444,6 +444,7 @@ export interface ProgramIo {
     options?: {
       auditLogger?: AuditLogger;
       mandateId?: string;
+      timeoutMs?: number;
       auditContext?: {
         mandateUid?: string;
         repoPath?: string;
@@ -458,6 +459,7 @@ export interface ProgramIo {
     options?: {
       auditLogger?: AuditLogger;
       mandateId?: string;
+      timeoutMs?: number;
       auditContext?: {
         mandateUid?: string;
         repoPath?: string;
@@ -1490,15 +1492,26 @@ export function createProgram(io: ProgramIo = {}): Command {
     .command("check <id>")
     .description("Check a configured profile's discovered tools against a provider safety template.")
     .requiredOption("--profile <name>", "configured profile name to inspect")
+    .option("--timeout-ms <ms>", "MCP request timeout in milliseconds", "5000")
     .option("--json", "print machine-readable JSON")
     .action(
       async (
         id: string,
         options: {
           profile: string;
+          timeoutMs: string;
           json?: boolean;
         }
       ) => {
+        const timeoutMs = parseTimeoutMs(options.timeoutMs);
+        if (timeoutMs === undefined) {
+          writeCommandError({
+            json: options.json,
+            code: "invalid_timeout",
+            message: "--timeout-ms must be a positive integer"
+          });
+          return;
+        }
         const template = getProviderSafetyTemplate(id);
         if (!template) {
           writeCommandError({
@@ -1574,7 +1587,10 @@ export function createProgram(io: ProgramIo = {}): Command {
         }
 
         try {
-          const tools = await listToolsForProfiles([upstream], { auditLogger });
+          const tools = await listToolsForProfiles([upstream], {
+            auditLogger,
+            timeoutMs
+          });
           const check = checkProviderSafetyTemplateTools(id, {
             namespace: upstream.namespace,
             toolNames: tools.map((tool) => tool.name)
@@ -7927,6 +7943,7 @@ async function listToolsOverProfiles(
   options: {
     auditLogger?: AuditLogger;
     mandateId?: string;
+    timeoutMs?: number;
     auditContext?: {
       mandateUid?: string;
       repoPath?: string;
@@ -7947,7 +7964,9 @@ async function listToolsOverProfiles(
   );
 
   try {
-    return await router.discoverTools();
+    return await router.discoverTools(
+      options.timeoutMs ? { timeout: options.timeoutMs } : undefined
+    );
   } finally {
     await router.close().catch(() => undefined);
   }

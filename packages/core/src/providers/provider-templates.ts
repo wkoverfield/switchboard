@@ -241,8 +241,11 @@ export const providerSafetyTemplates: ProviderSafetyTemplate[] = [
     defaultNamespace: "stripe_test",
     defaultSecretRef: "stripe/example/test/secret-key",
     secretEnvName: "STRIPE_API_KEY",
-    defaultCommand: "npx",
-    defaultArgs: ["-y", "@stripe/mcp", "--tools=all"],
+    defaultCommand: "sh",
+    defaultArgs: [
+      "-c",
+      'exec npx -y @stripe/mcp --api-key="$STRIPE_API_KEY"'
+    ],
     environment: "test",
     readOnly: false,
     mode: "guarded",

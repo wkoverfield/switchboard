@@ -709,6 +709,86 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it("passes provider preset check timeout to tool discovery", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_ci:",
+        "    provider: github",
+        "    namespace: github_ci",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node"
+      ].join("\n")
+    );
+
+    const seenTimeouts: Array<number | undefined> = [];
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      listTools: async (_profiles, options) => {
+        seenTimeouts.push(options?.timeoutMs);
+        return [namespacedTool("github_ci_checks_list")];
+      }
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "presets",
+        "check",
+        "github-ci",
+        "--profile",
+        "github_ci",
+        "--timeout-ms",
+        "60000",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    expect(seenTimeouts).toEqual([60000]);
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      schemaVersion: "switchboard.provider-preset-check.v1"
+    });
+  });
+
+  it("rejects invalid provider preset check timeouts", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".switchboard.yaml"), "version: 1\nprofiles: {}\n");
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "presets",
+        "check",
+        "github-ci",
+        "--profile",
+        "github_ci",
+        "--timeout-ms",
+        "0",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      code: "invalid_timeout",
+      message: "--timeout-ms must be a positive integer"
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
   it("rejects provider preset checks against the wrong provider profile", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");

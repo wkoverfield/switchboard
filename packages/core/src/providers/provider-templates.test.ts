@@ -149,8 +149,11 @@ describe("provider safety templates", () => {
       environment: "test",
       mode: "guarded",
       upstream: {
-        command: "npx",
-        args: ["-y", "@stripe/mcp", "--tools=all"],
+        command: "sh",
+        args: [
+          "-c",
+          'exec npx -y @stripe/mcp --api-key="$STRIPE_API_KEY"'
+        ],
         env: {
           STRIPE_API_KEY: {
             secretRef: "stripe/findu/test/secret-key"

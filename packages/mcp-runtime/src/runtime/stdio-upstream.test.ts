@@ -168,6 +168,23 @@ describe("profileConfigToStdioUpstream", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("includes redacted upstream stderr when MCP requests fail", async () => {
+    await expect(
+      testStdioUpstreamProfile(
+        {
+          profileName: "stderr_hang",
+          namespace: "stderr_hang",
+          command: process.execPath,
+          args: [
+            "-e",
+            "console.error('Unauthorized token=sk_test_should_not_print'); setInterval(() => {}, 1000);"
+          ]
+        },
+        { timeoutMs: 100 }
+      )
+    ).rejects.toThrow(/upstream stderr: Unauthorized token=\[redacted\]/);
+  });
 });
 
 function fixtureProfile(label: string, namespace: string): StdioUpstreamProfile {

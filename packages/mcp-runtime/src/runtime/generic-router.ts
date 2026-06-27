@@ -6,6 +6,7 @@ import {
   type MandateApprovalGate,
   type MandateToolPolicy
 } from "@switchboard-mcp/core";
+import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import {
   namespacedToolName,
   toNamespacedTool,
@@ -59,13 +60,15 @@ export class GenericMcpRouter {
     }
   }
 
-  async discoverTools(): Promise<NamespacedTool[]> {
+  async discoverTools(options?: RequestOptions): Promise<NamespacedTool[]> {
     const tools: NamespacedTool[] = [];
     const routes = new Map<string, ToolRoute>();
 
     for (const profile of this.profiles) {
       const connection = this.connectionForProfile(profile.profileName);
-      const upstreamTools = await connection.listTools();
+      const upstreamTools = options
+        ? await connection.listToolsWithOptions(options)
+        : await connection.listTools();
 
       for (const tool of upstreamTools) {
         const namespacedName = namespacedToolName(profile.namespace, tool.name);

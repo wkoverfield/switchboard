@@ -143,6 +143,8 @@ export class StdioUpstreamConnection {
   private readonly client: Client;
   private readonly transport: StdioClientTransport;
   private connected = false;
+  private stderrBuffer = "";
+  private readonly maxStderrBufferLength = 4_000;
 
   constructor(readonly profile: StdioUpstreamProfile) {
     const serverParameters: StdioServerParameters = {
@@ -166,7 +168,9 @@ export class StdioUpstreamConnection {
     this.transport = new StdioClientTransport(serverParameters);
     const stderr = this.transport.stderr;
     if (stderr instanceof Readable) {
-      stderr.resume();
+      stderr.on("data", (chunk) => {
+        this.appendStderr(String(chunk));
+      });
     }
   }
 
@@ -180,32 +184,71 @@ export class StdioUpstreamConnection {
   }
 
   async listTools(): Promise<UpstreamTool[]> {
-    await this.connect();
-    const result = await this.client.listTools();
-    return result.tools;
+    try {
+      await this.connect();
+      const result = await this.client.listTools();
+      return result.tools;
+    } catch (error) {
+      throw this.withStderrContext(error);
+    }
   }
 
   async listToolsWithOptions(options?: RequestOptions): Promise<UpstreamTool[]> {
-    await this.connect(options);
-    const result = await this.client.listTools(undefined, options);
-    return result.tools;
+    try {
+      await this.connect(options);
+      const result = await this.client.listTools(undefined, options);
+      return result.tools;
+    } catch (error) {
+      throw this.withStderrContext(error);
+    }
   }
 
   async callTool(
     name: string,
     args?: Record<string, unknown>
   ): Promise<UpstreamToolResult> {
-    await this.connect();
-    return this.client.callTool({
-      name,
-      arguments: args
-    });
+    try {
+      await this.connect();
+      return this.client.callTool({
+        name,
+        arguments: args
+      });
+    } catch (error) {
+      throw this.withStderrContext(error);
+    }
   }
 
   async close(): Promise<void> {
     await this.transport.close();
     this.connected = false;
   }
+
+  private appendStderr(chunk: string): void {
+    this.stderrBuffer = `${this.stderrBuffer}${chunk}`;
+    if (this.stderrBuffer.length > this.maxStderrBufferLength) {
+      this.stderrBuffer = this.stderrBuffer.slice(-this.maxStderrBufferLength);
+    }
+  }
+
+  private withStderrContext(error: unknown): Error {
+    const message = error instanceof Error ? error.message : String(error);
+    const stderr = redactSecretLikeText(this.stderrBuffer).trim();
+    if (!stderr) {
+      return error instanceof Error ? error : new Error(message);
+    }
+    return new Error(`${message}; upstream stderr: ${stderr}`);
+  }
+}
+
+function redactSecretLikeText(value: string): string {
+  return value
+    .replace(/\b(sk_(?:live|test)_[A-Za-z0-9_]{8,})\b/g, "[redacted]")
+    .replace(/\b(rk_(?:live|test)_[A-Za-z0-9_]{8,})\b/g, "[redacted]")
+    .replace(/\b(gh[pousr]_[A-Za-z0-9_]{8,})\b/g, "[redacted]")
+    .replace(/\b(xox[baprs]-[A-Za-z0-9-]{8,})\b/g, "[redacted]")
+    .replace(/\b(npm_[A-Za-z0-9]{8,})\b/g, "[redacted]")
+    .replace(/\b(Authorization:\s*Bearer)\s+[^\s]+/gi, "$1 [redacted]")
+    .replace(/\b(token|apiKey|api_key|secret|password)=([^\s]+)/gi, "$1=[redacted]");
 }
 
 export async function testStdioUpstreamProfile(
