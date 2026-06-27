@@ -1,5 +1,12 @@
 #!/usr/bin/env node
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -22,6 +29,9 @@ const secretValue = "github-ci-loop-secret-do-not-print";
 const secretHash = sha256(secretValue);
 const mandateId = "fix-ci";
 const toolName = `${profileName}_secret_status`;
+const fixtureCliPath = join(project, "fixture");
+const unmountedSecretRef = `github/${repoSlug}/dev/unmounted-token`;
+const unmountedSecretValue = "github-ci-unmounted-secret-do-not-print";
 
 if (!existsSync(cliPath)) {
   throw new Error(
@@ -31,6 +41,7 @@ if (!existsSync(cliPath)) {
 
 try {
   writeFileSync(join(project, ".gitignore"), ".switchboard.local.yaml\n");
+  writeFixtureCli();
 
   const add = runCliJson(
     "add",
@@ -51,6 +62,7 @@ try {
   assert(add.action === "created", "expected add to create config");
   assert(add.mandateCommand?.includes(`--profiles ${profileName}`), "expected mandate command");
   assertNoSecretText(JSON.stringify(add), "add output");
+  appendRunModeEnvGuards();
 
   const setSecret = runCli(
     ["secrets", "set", secretRef, "--value-stdin", "--json"],
@@ -58,6 +70,12 @@ try {
   );
   assert(setSecret.status === 0, "expected secrets set to succeed");
   assertNoSecretLeak(setSecret, "secrets set");
+  const setUnmountedSecret = runCli(
+    ["secrets", "set", unmountedSecretRef, "--value-stdin", "--json"],
+    unmountedSecretValue
+  );
+  assert(setUnmountedSecret.status === 0, "expected unmounted secret set to succeed");
+  assertNoSecretLeak(setUnmountedSecret, "unmounted secrets set");
 
   const checkResult = runCli([
     "presets",
@@ -132,17 +150,34 @@ try {
   assertNoSecretText(JSON.stringify(tools), "tool surface");
 
   await assertMandateServeSeesSecret();
+  assertMandateRunSeesSecret();
 
   const logs = runCliJson("logs", "--mandate", mandateId, "--json");
-  assert(
-    logs.entries?.some?.(
-      (entry) =>
-        entry.mandateId === mandateId &&
-        entry.status === "ok" &&
-        entry.toolName === toolName
-    ),
-    "expected mandate-linked audit entry"
+  const toolAudit = logs.entries?.find?.(
+    (entry) =>
+      entry.mandateId === mandateId &&
+      entry.status === "ok" &&
+      entry.toolName === toolName
   );
+  assert(toolAudit, "expected mandate-linked audit entry");
+  const runAudit = logs.entries?.find?.(
+    (entry) =>
+      entry.mandateId === mandateId &&
+      entry.action === "command_run" &&
+      entry.status === "ok" &&
+      entry.command === fixtureCliPath
+  );
+  assert(runAudit, "expected mandate-linked run-mode audit entry");
+  assert(JSON.stringify(runAudit.args) === JSON.stringify(["checks"]), "expected audited run args");
+  assert(runAudit.cwd === project, "expected audited run cwd");
+  assert(runAudit.exitCode === 0, "expected audited run exit code");
+  assert(typeof runAudit.durationMs === "number", "expected audited run duration");
+  assert(
+    JSON.stringify(runAudit.envKeys) === JSON.stringify(["GITHUB_PERSONAL_ACCESS_TOKEN"]),
+    "expected exact audited run env keys"
+  );
+  assert(runAudit.stdoutSnippet?.includes?.("hasGithubToken"), "expected stdout audit snippet");
+  assert(!runAudit.stderrSnippet, "expected no stderr audit snippet");
   assertNoSecretText(JSON.stringify(logs), "logs");
   assertNoSecretText(readAuditLog(), "raw audit log");
 
@@ -211,6 +246,78 @@ async function assertMandateServeSeesSecret() {
   assertNoSecretText(serveStderr, "serve stderr");
 }
 
+function assertMandateRunSeesSecret() {
+  const result = runCliJson(
+    "run",
+    "--mandate",
+    mandateId,
+    "--json",
+    fixtureCliPath,
+    "checks"
+  );
+  assert(result.ok === true, "expected run mode to succeed");
+  assert(
+    JSON.stringify(result.envKeys) === JSON.stringify(["GITHUB_PERSONAL_ACCESS_TOKEN"]),
+    "expected exact scoped GitHub token env key"
+  );
+  const child = JSON.parse(result.stdout);
+  assert(child.hasGithubToken === true, "expected run mode to inject GitHub token");
+  assert(child.rawSecret === null, "expected raw unscoped env to stay absent");
+  assert(child.literalEnv === null, "expected literal profile env to stay absent");
+  assert(child.unmountedGithubToken === null, "expected unmounted profile secret to stay absent");
+  assert(child.argv?.[0] === "checks", "expected fixture CLI argument");
+  assertNoSecretText(JSON.stringify(result), "run mode result");
+  assertNoSecretText(JSON.stringify(result), "run mode result unmounted secret", unmountedSecretValue);
+}
+
+function writeFixtureCli() {
+  writeFileSync(
+    fixtureCliPath,
+    [
+      "#!/bin/sh",
+      "has=false",
+      "[ -n \"$GITHUB_PERSONAL_ACCESS_TOKEN\" ] && has=true",
+      "raw=null",
+      "[ -n \"$RAW_SECRET\" ] && raw='\"present\"'",
+      "literal=null",
+      "[ -n \"$GITHUB_LITERAL_ENV\" ] && literal='\"present\"'",
+      "unmounted=null",
+      "[ -n \"$UNMOUNTED_GITHUB_TOKEN\" ] && unmounted='\"present\"'",
+      "printf '{\"argv\":[\"%s\"],\"hasGithubToken\":%s,\"rawSecret\":%s,\"literalEnv\":%s,\"unmountedGithubToken\":%s}\\n' \"$1\" \"$has\" \"$raw\" \"$literal\" \"$unmounted\""
+    ].join("\n")
+  );
+  chmodSync(fixtureCliPath, 0o755);
+}
+
+function appendRunModeEnvGuards() {
+  const configPath = join(project, ".switchboard.yaml");
+  const existing = readFileSync(configPath, "utf8");
+  const withLiteral = existing.replace(
+    `        GITHUB_PERSONAL_ACCESS_TOKEN:\n          secretRef: ${secretRef}`,
+    [
+      `        GITHUB_PERSONAL_ACCESS_TOKEN:`,
+      `          secretRef: ${secretRef}`,
+      `        GITHUB_LITERAL_ENV: literal_should_not_be_injected`
+    ].join("\n")
+  );
+  const unmountedProfile = [
+    `  github_${repoSlug}_unmounted:`,
+    `    provider: github`,
+    `    namespace: github_${repoSlug}_unmounted`,
+    `    upstream:`,
+    `      type: stdio`,
+    `      command: fixture-unmounted`,
+    `      env:`,
+    `        UNMOUNTED_GITHUB_TOKEN:`,
+    `          secretRef: ${unmountedSecretRef}`,
+    ""
+  ].join("\n");
+  writeFileSync(
+    configPath,
+    withLiteral.replace("workspaces:\n", `${unmountedProfile}workspaces:\n`)
+  );
+}
+
 function smokeEnv() {
   return {
     ...process.env,
@@ -232,14 +339,18 @@ function readAuditLog() {
 function assertNoSecretLeak(result, label) {
   assertNoSecretText(result.stdout, `${label} stdout`);
   assertNoSecretText(result.stderr, `${label} stderr`);
+  assertNoSecretText(result.stdout, `${label} stdout unmounted`, unmountedSecretValue);
+  assertNoSecretText(result.stderr, `${label} stderr unmounted`, unmountedSecretValue);
 }
 
-function assertNoSecretText(value, label) {
-  assert(!value.includes(secretValue), `${label} printed secret value`);
+function assertNoSecretText(value, label, secret = secretValue) {
+  assert(!value.includes(secret), `${label} printed secret value`);
 }
 
 function redactSecret(value) {
-  return value.replaceAll(secretValue, "[redacted]");
+  return value
+    .replaceAll(secretValue, "[redacted]")
+    .replaceAll(unmountedSecretValue, "[redacted]");
 }
 
 function sha256(value) {

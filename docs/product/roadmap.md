@@ -313,6 +313,8 @@ Implemented in the current codebase:
 - `switchboard import --write --cleanup-client --accept-direct <client:server>`
   preserves intentional direct MCP routes as visible accepted risk instead of
   silently removing or hiding them
+- GitHub CI first-loop smoke now proves the authority pack across both MCP
+  routing and `switchboard run` Code Mode-style credential scoping/audit
 
 Not started:
 
