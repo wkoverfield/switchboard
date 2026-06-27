@@ -260,6 +260,11 @@ Implemented in the current codebase:
 - `workspaceLease` launch hardening with `mcpLaunch.env`, runtime context,
   `runLaunch`, capability flags, and `switchboard.mcp-error.v1` runtime
   failures for harnesses
+- additive scan/import `riskFindings` for production env hints, live or
+  ambiguous Stripe payment keys, database write surfaces, and provider admin
+  surfaces
+- `mandate create --from <preset>` infers the only configured matching provider
+  profile when users do not pass `--profiles`
 - structured credential guidance in provider safety templates and provider-add
   output for GitHub CI and Vercel Preview dogfood
 - rendered `mandatePolicy` JSON in provider safety template and provider-add

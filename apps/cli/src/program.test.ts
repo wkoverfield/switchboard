@@ -4218,6 +4218,49 @@ describe("switchboard CLI program", () => {
     ]);
   });
 
+  it("uses the only matching provider profile for preset mandates", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "main");
+    const mandateStorePath = join(root, "state", "mandates.json");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  stripe_stockr_test:",
+        "    provider: stripe",
+        "    namespace: stripe_stockr_test",
+        "    upstream:",
+        "      type: stdio",
+        "      command: stripe"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "create", "--from", "stripe-test", "--json"],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      mandate: { profiles: string[]; allowedTools: string[]; deniedTools: string[] };
+    };
+
+    expect(parsed.mandate).toMatchObject({
+      profiles: ["stripe_stockr_test"],
+      allowedTools: ["stripe_stockr_test_*"],
+      deniedTools: expect.arrayContaining([
+        "stripe_stockr_test_*live*",
+        "stripe_stockr_test_*production*"
+      ])
+    });
+  });
+
   it("rejects mandate create without explicit options or a preset", async () => {
     const root = makeTempProject();
     writeMandateConfig(root);

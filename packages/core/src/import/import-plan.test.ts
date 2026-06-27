@@ -123,6 +123,16 @@ describe("switchboard import plan", () => {
     expect(plan.warnings).toContain(
       "Existing MCP configs reference secret-looking env names; store values behind Switchboard local token aliases before routing agents."
     );
+    expect(plan.riskFindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "live_payment_key_hint",
+          severity: "high",
+          provider: "stripe",
+          evidence: ["STRIPE_SECRET_KEY"]
+        })
+      ])
+    );
     expect(plan.bypassFindings).toHaveLength(2);
     expect(plan.bypassFindings[0]).toMatchObject({
       id: "codex:github",
@@ -173,7 +183,7 @@ describe("switchboard import plan", () => {
 
     expect(plan.bypassFindings).toHaveLength(1);
     expect(plan.bypassFindings[0]).toMatchObject({
-      severity: "high",
+      severity: "critical",
       riskTags: expect.arrayContaining(["broad-filesystem-mount"])
     });
   });

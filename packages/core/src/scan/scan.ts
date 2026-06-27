@@ -10,7 +10,8 @@ import { basename, join, resolve } from "node:path";
 import { loadSwitchboardConfig } from "../config/load-config.js";
 import {
   createSwitchboardImportPlan,
-  type BypassFinding
+  type BypassFinding,
+  type RiskFinding
 } from "../import/import-plan.js";
 import { inspectProjectClientConfigs } from "../install/client-config.js";
 import type { ProjectClientConfigInspection } from "../install/client-config.js";
@@ -79,6 +80,7 @@ export interface SwitchboardScanResult {
     profileNames: string[];
     workspaceNames: string[];
   };
+  riskFindings: RiskFinding[];
   bypassFindings: BypassFinding[];
   suggestions: ScanSuggestion[];
   warnings: string[];
@@ -170,6 +172,7 @@ export async function scanSwitchboardProject(
     ...(options.homeDir ? { homeDir: options.homeDir } : {})
   });
   const bypassFindings = importPlan.bypassFindings;
+  const riskFindings = importPlan.riskFindings;
   const envFiles = scanEnvFiles(root);
   const providers = collectProviderHints({
     root,
@@ -186,6 +189,7 @@ export async function scanSwitchboardProject(
     providers,
     profileNames,
     clients,
+    riskFindings,
     bypassFindings
   });
   const suggestions = buildSuggestions({
@@ -234,6 +238,7 @@ export async function scanSwitchboardProject(
       profileNames,
       workspaceNames
     },
+    riskFindings,
     bypassFindings,
     suggestions,
     warnings,
@@ -534,6 +539,7 @@ function buildWarnings(options: {
   providers: ScanProviderHint[];
   profileNames: string[];
   clients: ProjectClientConfigInspection[];
+  riskFindings: RiskFinding[];
   bypassFindings: BypassFinding[];
 }): string[] {
   const warnings: string[] = [];
@@ -572,13 +578,21 @@ function buildWarnings(options: {
   }
 
   if (options.bypassFindings.length > 0) {
-    const high = options.bypassFindings.filter(
-      (finding) => finding.severity === "high"
+    const highOrCritical = options.bypassFindings.filter(
+      (finding) => finding.severity === "high" || finding.severity === "critical"
     ).length;
     warnings.push(
-      high > 0
-        ? `${options.bypassFindings.length} direct MCP bypass finding(s), including ${high} high-risk finding(s), were detected.`
+      highOrCritical > 0
+        ? `${options.bypassFindings.length} direct MCP bypass finding(s), including ${highOrCritical} high-risk finding(s), were detected.`
         : `${options.bypassFindings.length} direct MCP bypass finding(s) were detected.`
+    );
+  }
+  const highOrCriticalRisks = options.riskFindings.filter(
+    (finding) => finding.severity === "high" || finding.severity === "critical"
+  );
+  if (highOrCriticalRisks.length > 0) {
+    warnings.push(
+      `${highOrCriticalRisks.length} high-risk provider/environment hint(s) were detected.`
     );
   }
 
@@ -659,6 +673,9 @@ function configuredMandatePresetIds(profileNames: string[]): string[] {
   }
   if (hasProfile(profileNames, "vercel")) {
     presetIds.push("vercel-preview");
+  }
+  if (hasProfile(profileNames, "stripe")) {
+    presetIds.push("stripe-test");
   }
   return presetIds;
 }

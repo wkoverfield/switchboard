@@ -48,6 +48,7 @@ export interface SwitchboardImportPlan {
     switchboardProfiles: ImportSwitchboardProfile[];
     envFiles: ImportEnvFileDetection[];
   };
+  riskFindings: RiskFinding[];
   bypassFindings: BypassFinding[];
   cleanupPlan: ImportClientCleanupPlan[];
   actions: ImportPlanAction[];
@@ -112,10 +113,33 @@ export type BypassRiskTag =
   | "token-like-arg"
   | "broad-filesystem-mount";
 
+export type RiskFindingKind =
+  | "prod_env_hint"
+  | "live_payment_key_hint"
+  | "database_write_surface"
+  | "provider_admin_surface";
+
+export type RiskFindingSeverity = "info" | "medium" | "high" | "critical";
+
+export interface RiskFinding {
+  id: string;
+  kind: RiskFindingKind;
+  severity: RiskFindingSeverity;
+  provider: ScanProviderId | "unknown";
+  source: {
+    kind: "env-file" | "client-config";
+    path: string;
+    detail?: string;
+  };
+  evidence: string[];
+  reason: string;
+  nextActions: string[];
+}
+
 export interface BypassFinding {
   id: string;
   status: "unaccepted";
-  severity: "medium" | "high";
+  severity: "medium" | "high" | "critical";
   client: SupportedClient;
   targetPath: string;
   serverName: string;
@@ -209,6 +233,11 @@ export async function createSwitchboardImportPlan(
     clients,
     switchboardProfiles
   });
+  const riskFindings = buildRiskFindings({
+    envFiles,
+    clients,
+    bypassFindings
+  });
   const cleanupPlan = buildClientCleanupPlan(clients);
   const createProfileActions = uniqueServersByProfile(detectedServers)
     .filter((server) => !profileNames.has(server.suggestedProfileName))
@@ -269,6 +298,7 @@ export async function createSwitchboardImportPlan(
     clients,
     envFiles,
     detectedServers,
+    riskFindings,
     bypassFindings
   });
   const safetyNotes = [
@@ -303,6 +333,7 @@ export async function createSwitchboardImportPlan(
       switchboardProfiles,
       envFiles
     },
+    riskFindings,
     bypassFindings,
     cleanupPlan,
     actions,
@@ -765,6 +796,7 @@ function buildWarnings(options: {
   clients: ImportClientDetection[];
   envFiles: ImportEnvFileDetection[];
   detectedServers: ImportDetectedServer[];
+  riskFindings: RiskFinding[];
   bypassFindings?: BypassFinding[];
 }): string[] {
   const warnings: string[] = [];
@@ -802,8 +834,135 @@ function buildWarnings(options: {
       "Direct MCP servers bypass Switchboard authority; review bypass findings before giving agents this repo."
     );
   }
+  const criticalOrHighRisks = options.riskFindings.filter((finding) =>
+    finding.severity === "critical" || finding.severity === "high"
+  );
+  if (criticalOrHighRisks.length > 0) {
+    warnings.push(
+      `${criticalOrHighRisks.length} high-risk provider/environment hint(s) were detected; review risk findings before creating mandates.`
+    );
+  }
 
   return [...new Set(warnings)];
+}
+
+export function buildRiskFindings(options: {
+  envFiles: ImportEnvFileDetection[];
+  clients: ImportClientDetection[];
+  bypassFindings: BypassFinding[];
+}): RiskFinding[] {
+  const findings: RiskFinding[] = [];
+
+  for (const file of options.envFiles) {
+    for (const envKey of file.envKeys) {
+      const provider = providerFromEnvName(envKey);
+      if (looksProductionLikeEnvName(envKey)) {
+        findings.push({
+          id: `env:${file.path}:${envKey}:prod`,
+          kind: "prod_env_hint",
+          severity: "high",
+          provider,
+          source: {
+            kind: "env-file",
+            path: file.path
+          },
+          evidence: [envKey],
+          reason:
+            "This env name looks production/live-scoped; agents should not receive it through a default non-prod mandate.",
+          nextActions: [
+            "Use a non-prod/test token alias for setup.",
+            "Create an explicit production mandate only if this access is intentional."
+          ]
+        });
+      }
+
+      if (provider === "stripe" && looksStripeLiveOrAmbiguousKey(envKey)) {
+        findings.push({
+          id: `env:${file.path}:${envKey}:stripe-live`,
+          kind: "live_payment_key_hint",
+          severity: looksProductionLikeEnvName(envKey) ? "critical" : "high",
+          provider,
+          source: {
+            kind: "env-file",
+            path: file.path
+          },
+          evidence: [envKey],
+          reason:
+            "This Stripe env name is live-looking or mode-ambiguous; stripe-test should use an explicit test-mode secretRef.",
+          nextActions: [
+            "switchboard setup stripe-test",
+            "Store a test-mode Stripe key in the suggested local secretRef."
+          ]
+        });
+      }
+
+      if (provider === "supabase" && /SERVICE[_-]?ROLE|ADMIN|ROOT/i.test(envKey)) {
+        findings.push({
+          id: `env:${file.path}:${envKey}:database-write`,
+          kind: "database_write_surface",
+          severity: "critical",
+          provider,
+          source: {
+            kind: "env-file",
+            path: file.path
+          },
+          evidence: [envKey],
+          reason:
+            "This Supabase env name looks admin/write-capable; future database mandates should not mount it by default.",
+          nextActions: [
+            "Prefer anon/read-only/dev credentials for agent setup.",
+            "Defer production database writes to an explicit approval-gated mandate."
+          ]
+        });
+      }
+    }
+  }
+
+  for (const client of options.clients) {
+    for (const server of client.servers) {
+      if (server.routesThroughSwitchboard) {
+        continue;
+      }
+      const adminEvidence = [
+        ...server.envKeys.filter((key) => /ADMIN|ROOT|SERVICE[_-]?ROLE/i.test(key)),
+        ...server.args.filter((arg) => /--tools=all|admin|service[_-]?role/i.test(arg))
+      ];
+      if (adminEvidence.length === 0) {
+        continue;
+      }
+      findings.push({
+        id: `client:${client.client}:${server.name}:provider-admin`,
+        kind: "provider_admin_surface",
+        severity: "high",
+        provider: server.provider,
+        source: {
+          kind: "client-config",
+          path: client.targetPath,
+          detail: server.name
+        },
+        evidence: [...new Set(adminEvidence)],
+        reason:
+          "This direct MCP server appears to expose broad provider/admin capability outside Switchboard policy.",
+        nextActions: [
+          "switchboard import --dry-run",
+          "switchboard import --write --cleanup-client"
+        ]
+      });
+    }
+  }
+
+  return dedupeRiskFindings(findings);
+}
+
+function dedupeRiskFindings(findings: RiskFinding[]): RiskFinding[] {
+  const seen = new Set<string>();
+  return findings.filter((finding) => {
+    if (seen.has(finding.id)) {
+      return false;
+    }
+    seen.add(finding.id);
+    return true;
+  });
 }
 
 export function buildBypassFindings(options: {
@@ -861,16 +1020,15 @@ export function buildBypassFindings(options: {
           );
         }
 
-        const severity = riskTags.some((tag) =>
-          [
-            "provider-overlap",
-            "secret-env-name",
-            "token-like-arg",
-            "broad-filesystem-mount"
-          ].includes(tag)
-        )
-          ? "high"
-          : "medium";
+        const severity = riskTags.includes("broad-filesystem-mount")
+          ? "critical"
+          : riskTags.some((tag) =>
+              ["provider-overlap", "secret-env-name", "token-like-arg"].includes(
+                tag
+              )
+            )
+            ? "high"
+            : "medium";
 
         return {
           id: `${client.client}:${server.name}`,
@@ -1323,6 +1481,18 @@ function secretRefLeaf(envName: string): string {
 
 function isSecretLikeName(name: string): boolean {
   return /(SECRET|TOKEN|KEY|PASSWORD|PRIVATE)/i.test(name);
+}
+
+function looksProductionLikeEnvName(name: string): boolean {
+  return /(^|[_\-.])(PROD|PRODUCTION|LIVE)([_\-.]|$)/i.test(name);
+}
+
+function looksStripeLiveOrAmbiguousKey(name: string): boolean {
+  return (
+    /(^|[_\-.])(LIVE|PROD|PRODUCTION)([_\-.]|$)/i.test(name) ||
+    /^STRIPE_(SECRET_)?KEY$/i.test(name) ||
+    /^STRIPE_SECRET_KEY$/i.test(name)
+  );
 }
 
 function redactSecretLikeArgs(args: string[]): string[] {

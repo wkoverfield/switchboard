@@ -408,6 +408,9 @@ needs liveness separate from status/readiness polling.
 
 ## Phase 5: Risk Classification Polish
 
+Status: shipped V0 in PR TBD with additive scan/import `riskFindings` and
+single-provider profile inference for preset mandates.
+
 **Why fifth:** this is what makes the marketing visceral. Developers should see
 the risk before they learn Switchboard vocabulary.
 

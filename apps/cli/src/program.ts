@@ -54,6 +54,7 @@ import {
   type SwitchboardImportPlan,
   type WrittenSwitchboardImportPlan,
   type BypassFinding,
+  type RiskFinding,
   planRecommendedNextAction,
   type NextActionCandidate,
   type RecommendedNextAction,
@@ -2418,7 +2419,9 @@ export function createProgram(io: ProgramIo = {}): Command {
             }
 
             const profiles = parseCommaSeparatedList(
-              options.profiles ?? template?.defaultProfileName ?? ""
+              options.profiles ??
+                presetProfileDefaultForConfig(template, loaded.config) ??
+                ""
             );
             const taskName = task ?? template?.recommendedMandate.task;
             const agentRole = options.agent ?? template?.recommendedMandate.agent;
@@ -3584,6 +3587,14 @@ function formatScan(result: SwitchboardScanResult): string {
     );
   }
 
+  if (result.riskFindings.length > 0) {
+    lines.push(
+      "",
+      "Risk findings:",
+      ...result.riskFindings.map(formatRiskFindingLine)
+    );
+  }
+
   const providerSuggestions = result.suggestions.filter(
     (suggestion) => suggestion.kind === "provider-profile"
   );
@@ -3637,6 +3648,9 @@ function rewriteScanCommandsForCurrentInvocation(
       ...suggestion,
       command: rewriteSwitchboardCommand(suggestion.command, prefix)
     })),
+    riskFindings: result.riskFindings.map((finding) =>
+      rewriteRiskFindingCommands(finding, prefix)
+    ),
     recommendedNextAction: rewriteRecommendedNextAction(
       result.recommendedNextAction,
       prefix
@@ -3663,6 +3677,9 @@ function rewriteImportCommandsForCurrentInvocation(
         ? { command: rewriteCommandShape(action.command, prefix) }
         : {})
     })),
+    riskFindings: plan.riskFindings.map((finding) =>
+      rewriteRiskFindingCommands(finding, prefix)
+    ),
     commands: {
       dryRun: rewriteCommandShape(plan.commands.dryRun, prefix),
       writePreview: rewriteCommandShape(plan.commands.writePreview, prefix),
@@ -3885,6 +3902,14 @@ function formatImportPlan(plan: SwitchboardImportPlan): string {
       "",
       "Authority bypasses:",
       ...plan.bypassFindings.map(formatBypassFindingLine)
+    );
+  }
+
+  if (plan.riskFindings.length > 0) {
+    lines.push(
+      "",
+      "Risk findings:",
+      ...plan.riskFindings.map(formatRiskFindingLine)
     );
   }
 
@@ -4345,6 +4370,26 @@ function formatBypassFindingLine(finding: BypassFinding): string {
   return `  ${finding.severity} ${finding.client}:${finding.serverName} (${provider}; ${tags})`;
 }
 
+function formatRiskFindingLine(finding: RiskFinding): string {
+  const provider =
+    finding.provider === "unknown" ? "provider unknown" : finding.provider;
+  const evidence =
+    finding.evidence.length > 0 ? `; ${finding.evidence.join(", ")}` : "";
+  return `  ${finding.severity} ${finding.kind} (${provider}${evidence}) - ${finding.reason}`;
+}
+
+function rewriteRiskFindingCommands(
+  finding: RiskFinding,
+  prefix: string
+): RiskFinding {
+  return {
+    ...finding,
+    nextActions: finding.nextActions.map((action) =>
+      rewriteSwitchboardCommand(action, prefix)
+    )
+  };
+}
+
 function formatDoctorStatus(
   status: "ok" | "setup-incomplete" | "failed"
 ): string {
@@ -4617,6 +4662,24 @@ function repoAwarePresetDefaults(
     namespace: template?.defaultNamespace ?? safeIdentifierForCommand(presetId),
     secretRef: template?.defaultSecretRef ?? `${safeIdentifierForCommand(presetId)}/${repoName}/dev/token`
   };
+}
+
+function presetProfileDefaultForConfig(
+  template: NonNullable<ReturnType<typeof getProviderSafetyTemplate>> | undefined,
+  config: SwitchboardConfig
+): string | undefined {
+  if (!template) {
+    return undefined;
+  }
+  if (config.profiles[template.defaultProfileName]) {
+    return template.defaultProfileName;
+  }
+  const providerProfiles = Object.entries(config.profiles)
+    .filter(([, profile]) => profile.provider === template.provider)
+    .map(([name]) => name);
+  return providerProfiles.length === 1
+    ? providerProfiles[0]
+    : template.defaultProfileName;
 }
 
 function safeIdentifierForCommand(value: string): string {
