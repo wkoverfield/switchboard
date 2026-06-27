@@ -31,6 +31,7 @@
     "smoke:harness-subagent-proof": "node scripts/smoke/harness-subagent-proof.mjs",
     "smoke:mandate-runtime-readiness": "node scripts/smoke/mandate-runtime-readiness.mjs",
     "smoke:stripe-test-dogfood": "node scripts/smoke/stripe-test-dogfood.mjs",
+    "smoke:stripe-test-live-dogfood": "node scripts/smoke/stripe-test-live-dogfood.mjs",
     "smoke:vercel-preview-dogfood": "node scripts/smoke/vercel-preview-dogfood.mjs",
     "smoke:mandate-lifecycle": "node scripts/smoke/mandate-lifecycle.mjs",
     "smoke:install-codex": "tmpdir=$(mktemp -d) && repo=$PWD && outfile=\"$tmpdir/codex.json\" && (cd \"$tmpdir\" && node \"$repo/apps/cli/dist/index.js\" --cwd \"$repo\" install codex --json > \"$outfile\" && node \"$repo/scripts/smoke/assert-install-snippet.mjs\" codex \"$outfile\"); status=$?; rm -rf \"$tmpdir\"; exit $status",
