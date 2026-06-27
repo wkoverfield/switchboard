@@ -282,6 +282,9 @@ Implemented in the current codebase:
 - Bypass Findings V0 in `scan`, `doctor`, and import output, including
   high-risk direct MCP route classification and a failing doctor check for
   unresolved authority bypasses
+- backup-protected `switchboard import --write --cleanup-client` for removing
+  direct Codex/Claude MCP bypass routes from active project client config, with
+  rollback commands and idempotent reruns
 
 Not started:
 

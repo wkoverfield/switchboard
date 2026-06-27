@@ -249,4 +249,114 @@ describe("switchboard import plan", () => {
     expect(config).not.toContain("ghp_write_should_not_print");
     expect(config).toContain("GITHUB_TOKEN=[redacted]");
   });
+
+  it("cleans direct client MCP bypass routes with backups and is idempotent", async () => {
+    const base = await mkdtemp(join(tmpdir(), "switchboard-import-cleanup-"));
+    const root = join(base, "stockr");
+    await mkdir(root);
+    await mkdir(join(root, ".codex"), { recursive: true });
+    await writeFile(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_stockr_ci:",
+        "    provider: github",
+        "    namespace: github_stockr_ci",
+        "    upstream:",
+        "      type: stdio",
+        "      command: docker"
+      ].join("\n"),
+      "utf8"
+    );
+    await writeFile(
+      join(root, ".codex", "config.toml"),
+      [
+        "[mcp_servers.switchboard]",
+        'command = "switchboard"',
+        'args = ["--cwd", "/tmp/example", "mcp"]',
+        "",
+        "[mcp_servers.github]",
+        'command = "docker"',
+        'args = ["run", "GITHUB_TOKEN=ghp_cleanup_should_not_print", "ghcr.io/github/github-mcp-server"]',
+        "[mcp_servers.github.env]",
+        'GITHUB_TOKEN = "ghp_cleanup_should_not_print"'
+      ].join("\n"),
+      "utf8"
+    );
+    await writeFile(
+      join(root, ".mcp.json"),
+      JSON.stringify(
+        {
+          mcpServers: {
+            switchboard: {
+              command: "switchboard",
+              args: ["--cwd", root, "mcp"]
+            },
+            vercel: {
+              command: "npx",
+              args: [
+                "-y",
+                "vercel-platform-mcp-server",
+                "VERCEL_TOKEN=vercel_cleanup_should_not_print"
+              ],
+              env: {
+                VERCEL_TOKEN: "vercel_cleanup_should_not_print"
+              }
+            }
+          }
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const result = await writeSwitchboardImportPlan({
+      cwd: root,
+      cleanupClient: true,
+      now: new Date("2026-02-03T04:05:06.007Z")
+    });
+    const codexConfig = await readFile(join(root, ".codex", "config.toml"), "utf8");
+    const claudeConfig = await readFile(join(root, ".mcp.json"), "utf8");
+    const serialized = JSON.stringify(result);
+
+    expect(result.clientCleanup).toContainEqual(
+      expect.objectContaining({
+        client: "codex",
+        status: "updated",
+        backupPath: join(
+          root,
+          ".codex",
+          "config.toml.switchboard-backup-20260203-040506007Z"
+        ),
+        affectedServerNames: ["github"]
+      })
+    );
+    expect(result.clientCleanup).toContainEqual(
+      expect.objectContaining({
+        client: "claude",
+        status: "updated",
+        backupPath: join(
+          root,
+          ".mcp.json.switchboard-backup-20260203-040506007Z"
+        ),
+        affectedServerNames: ["vercel"]
+      })
+    );
+    expect(codexConfig).toContain("[mcp_servers.switchboard]");
+    expect(codexConfig).not.toContain("[mcp_servers.github]");
+    expect(codexConfig).not.toContain("ghp_cleanup_should_not_print");
+    expect(claudeConfig).toContain("switchboard");
+    expect(claudeConfig).not.toContain("vercel");
+    expect(claudeConfig).not.toContain("vercel_cleanup_should_not_print");
+    expect(serialized).not.toContain("ghp_cleanup_should_not_print");
+    expect(serialized).not.toContain("vercel_cleanup_should_not_print");
+
+    const rerun = await writeSwitchboardImportPlan({
+      cwd: root,
+      cleanupClient: true
+    });
+    expect(rerun.clientCleanup.every((item) => item.status !== "updated")).toBe(true);
+  });
 });

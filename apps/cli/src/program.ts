@@ -564,15 +564,17 @@ export function createProgram(io: ProgramIo = {}): Command {
     .command("import")
     .description("Plan a cleanup of existing project MCP config into Switchboard.")
     .option("--dry-run", "print the import plan without writing")
-    .option("--write", "apply the import plan (planned for a later slice)")
+    .option("--write", "apply the import plan")
+    .option("--cleanup-client", "remove direct MCP bypass routes from active project client config with backups")
     .option("--json", "print machine-readable JSON")
     .action(
-      async (options: { dryRun?: boolean; write?: boolean; json?: boolean }) => {
+      async (options: { dryRun?: boolean; write?: boolean; cleanupClient?: boolean; json?: boolean }) => {
         const globalOptions = program.opts<{ cwd?: string }>();
         if (options.write) {
           try {
             const result = await writeSwitchboardImportPlan({
-              ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
+              ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+              ...(options.cleanupClient ? { cleanupClient: true } : {})
             });
             const displayResult = rewriteWrittenImportCommandsForCurrentInvocation(result);
             writeOut(
@@ -3534,6 +3536,7 @@ function rewriteImportCommandsForCurrentInvocation(
     commands: {
       dryRun: rewriteCommandShape(plan.commands.dryRun, prefix),
       writePreview: rewriteCommandShape(plan.commands.writePreview, prefix),
+      cleanupClient: rewriteCommandShape(plan.commands.cleanupClient, prefix),
       installClients: plan.commands.installClients.map((command) =>
         rewriteCommandShape(command, prefix)
       ),
@@ -3707,6 +3710,22 @@ function formatImportPlan(plan: SwitchboardImportPlan): string {
     );
   }
 
+  if (plan.cleanupPlan.some((item) => item.status === "planned")) {
+    lines.push("", "Client cleanup plan:");
+    for (const item of plan.cleanupPlan.filter(
+      (cleanup) => cleanup.status === "planned"
+    )) {
+      lines.push(
+        `- ${capitalize(item.client)} ${item.targetPath}: remove ${item.affectedServerNames.join(", ")}`
+      );
+      lines.push(`  rollback after write: ${item.rollbackCommand}`);
+      lines.push(`  ${item.acceptedRiskGuidance}`);
+    }
+    lines.push(
+      `  ${formatHumanCommand(renderCommandShape(plan.commands.cleanupClient))}`
+    );
+  }
+
   if (plan.actions.length > 0) {
     lines.push("", "Recommended cleanup:");
     for (const action of plan.actions) {
@@ -3749,13 +3768,17 @@ function formatImportWriteJson(
     targetPath: result.targetPath,
     backupPath: result.backupPath,
     createdProfiles: result.createdProfiles,
+    clientCleanup: result.clientCleanup,
     plan: result.plan,
     nextContent: result.nextContent
   };
 }
 
 function formatImportWrite(result: WrittenSwitchboardImportPlan): string {
-  if (result.action === "noop") {
+  const cleanupUpdated = result.clientCleanup.some(
+    (item) => item.status === "updated"
+  );
+  if (result.action === "noop" && !cleanupUpdated) {
     return [
       `Switchboard import found nothing new for ${result.plan.repo.name}`,
       "No files were written.",
@@ -3775,16 +3798,48 @@ function formatImportWrite(result: WrittenSwitchboardImportPlan): string {
     `Switchboard import ${result.action}`,
     `Target: ${result.targetPath}`,
     ...(result.backupPath ? [`Backup: ${result.backupPath}`] : []),
-    `Profiles: ${result.createdProfiles.join(", ")}`,
+    `Profiles: ${
+      result.createdProfiles.length > 0 ? result.createdProfiles.join(", ") : "none"
+    }`,
+    ...formatClientCleanupWriteLines(result),
     "",
     "What changed:",
     "- Created Switchboard profiles for existing project MCP servers.",
     "- Stored secret-looking env names as local token aliases in config.",
-    "- Left Codex and Claude client config untouched.",
+    result.clientCleanup.some((item) => item.status === "updated")
+      ? "- Removed direct MCP bypass routes from active Codex/Claude project config with backups."
+      : "- Left Codex and Claude client config untouched.",
     "",
     "Next:",
     ...result.plan.nextActions.map((action) => `- ${formatHumanCommand(action)}`)
   ].join("\n");
+}
+
+function formatClientCleanupWriteLines(
+  result: WrittenSwitchboardImportPlan
+): string[] {
+  if (result.clientCleanup.length === 0) {
+    return [];
+  }
+
+  const lines = ["", "Client cleanup:"];
+  for (const item of result.clientCleanup) {
+    lines.push(
+      `- ${capitalize(item.client)} ${item.status}: ${
+        item.affectedServerNames.length > 0
+          ? item.affectedServerNames.join(", ")
+          : "no direct routes"
+      }`
+    );
+    if (item.backupPath) {
+      lines.push(`  Backup: ${item.backupPath}`);
+    }
+    if (item.rollbackCommand) {
+      lines.push(`  Rollback: ${item.rollbackCommand}`);
+    }
+    lines.push(`  ${item.acceptedRiskGuidance}`);
+  }
+  return lines;
 }
 
 function formatImportClientStatus(status: string): string {
