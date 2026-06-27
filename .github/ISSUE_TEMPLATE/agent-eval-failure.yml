@@ -1,0 +1,26 @@
+name: Agent eval failure
+description: A fresh-agent or live-agent eval failed or behaved confusingly.
+title: "Agent eval failure: "
+labels: ["agent-eval", "bug"]
+body:
+  - type: input
+    id: eval
+    attributes:
+      label: Eval command
+      placeholder: "pnpm eval:fresh-agent-github-ci"
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Redacted eval summary
+      description: Paste the JSON summary or the relevant redacted transcript section.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected agent behavior
+    validations:
+      required: true

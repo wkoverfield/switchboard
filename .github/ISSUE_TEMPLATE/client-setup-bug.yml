@@ -1,0 +1,29 @@
+name: Client setup bug
+description: Codex or Claude project MCP install did not work as expected.
+title: "Client setup bug: "
+labels: ["client-setup", "bug"]
+body:
+  - type: dropdown
+    id: client
+    attributes:
+      label: Client
+      options:
+        - Codex
+        - Claude
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: commands
+    attributes:
+      label: Commands run
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Redacted output
+      render: shell
+    validations:
+      required: true
