@@ -81,6 +81,8 @@ try {
     "stripe-test",
     "--profile",
     profileName,
+    "--timeout-ms",
+    "60000",
     "--json"
   ]);
   assertNoSecretText(JSON.stringify(check), "preset check JSON");
