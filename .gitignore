@@ -8,3 +8,4 @@ coverage/
 !.env.example
 .switchboard.local.yaml
 .switchboard.yaml.switchboard-backup-*
+.switchboard-evals/
