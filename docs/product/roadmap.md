@@ -184,6 +184,7 @@ Implemented in the current codebase:
 - conservative approval-required runtime blocking
 - local approval request store
 - `switchboard approvals`
+- `switchboard approvals --watch`
 - `switchboard approve <id>`
 - `switchboard deny <id>`
 - approved approval decisions honored by daemon-routed mandate calls
@@ -315,6 +316,8 @@ Implemented in the current codebase:
   silently removing or hiding them
 - GitHub CI first-loop smoke now proves the authority pack across both MCP
   routing and `switchboard run` Code Mode-style credential scoping/audit
+- bounded approval watch mode with `switchboard.approvals-watch.v1` JSON
+  snapshots for supervisor agents and live human approval queues
 
 Not started:
 
@@ -336,8 +339,8 @@ Remaining roadmap should be grouped into these buckets:
   without help.
 - Approval UX: make pending approval queues, approve/deny actions, stale
   decisions, and escalation copy easier for humans to operate during real
-  agent work. The first human queue polish is shipped; approval watch mode and
-  richer escalation copy remain.
+  agent work. Human queue polish and approval watch mode are shipped; richer
+  escalation copy remains.
 - Harness Contracts: preserve versioned JSON payloads, expand structured
   command objects where useful, and keep parent/child authority flows
   scriptable without making Switchboard the orchestrator. V0 launch payloads

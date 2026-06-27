@@ -194,6 +194,43 @@ try {
         ),
         "expected retry guidance"
       );
+      const approvalsWatchText = runCliText(
+        "approvals",
+        "--mandate",
+        "fix-ci",
+        "--watch",
+        "--timeout",
+        "0"
+      );
+      assert(
+        approvalsWatchText.includes("Approval requests snapshot"),
+        "expected approval watch heading"
+      );
+      assert(
+        approvalsWatchText.includes(`${pendingRequest.id} [pending]`),
+        "expected approval watch pending request"
+      );
+      const approvalsWatchJson = runCliJson(
+        "approvals",
+        "--mandate",
+        "fix-ci",
+        "--watch",
+        "--timeout",
+        "0",
+        "--json"
+      );
+      assert(
+        approvalsWatchJson.schemaVersion === "switchboard.approvals-watch.v1",
+        "expected approval watch schema"
+      );
+      assert(
+        approvalsWatchJson.watch?.snapshots === 1,
+        "expected one bounded approval watch snapshot"
+      );
+      assert(
+        approvalsWatchJson.snapshots?.[0]?.approvals?.counts?.pending === 1,
+        "expected pending approval in watch snapshot"
+      );
 
       const approved = runCliJson(
         "approve",

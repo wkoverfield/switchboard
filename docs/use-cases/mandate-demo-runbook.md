@@ -105,6 +105,18 @@ pnpm --filter @switchboard-mcp/cli switchboard --cwd "$SWITCHBOARD_REPO" approva
 pnpm --filter @switchboard-mcp/cli switchboard --cwd "$SWITCHBOARD_REPO" approvals --mandate "$SWITCHBOARD_DEMO_TASK" --json
 ```
 
+For a live human queue while an MCP call is waiting:
+
+```bash
+pnpm --filter @switchboard-mcp/cli switchboard --cwd "$SWITCHBOARD_REPO" approvals --mandate "$SWITCHBOARD_DEMO_TASK" --watch
+```
+
+For a bounded agent-readable snapshot:
+
+```bash
+pnpm --filter @switchboard-mcp/cli switchboard --cwd "$SWITCHBOARD_REPO" approvals --mandate "$SWITCHBOARD_DEMO_TASK" --watch --timeout 0 --json
+```
+
 Approve or deny a pending request:
 
 ```bash

@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { execFileSync, spawnSync } from "node:child_process";
 import { realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, resolve, sep } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
   type AuditLogEntry,
@@ -110,6 +111,7 @@ const mandateStatusSchemaVersion = "switchboard.mandate-status.v1";
 const mandateReportSchemaVersion = "switchboard.mandate-report.v1";
 const mandateEscalationSchemaVersion = "switchboard.mandate-escalation.v1";
 const approvalRequestsSchemaVersion = "switchboard.approvals.v1";
+const approvalWatchSchemaVersion = "switchboard.approvals-watch.v1";
 const toolSurfaceSchemaVersion = "switchboard.tool-surface.v1";
 const auditLogSchemaVersion = "switchboard.audit-log.v1";
 const secretsSchemaVersion = "switchboard.secrets.v1";
@@ -416,6 +418,29 @@ interface ApprovalRequestsPayload {
   };
   mandates: MandateWithStatus[];
   requests: ApprovalRequestWithStatus[];
+}
+
+interface ApprovalRequestsPayloadOptions {
+  path: string;
+  mandateStorePath: string;
+  repoPath?: string;
+  mandateId?: string | null;
+  includeChildren: boolean;
+  status?: ApprovalRequestWithStatus["runtimeStatus"];
+}
+
+interface ApprovalWatchPayload {
+  schemaVersion: typeof approvalWatchSchemaVersion;
+  generatedAt: string;
+  watch: {
+    intervalMs: number;
+    timeoutMs: number | null;
+    snapshots: number;
+  };
+  snapshots: Array<{
+    observedAt: string;
+    approvals: ApprovalRequestsPayload;
+  }>;
 }
 
 interface AuditLogPayload {
@@ -3217,6 +3242,9 @@ export function createProgram(io: ProgramIo = {}): Command {
       "--status <status>",
       "filter by runtime status: pending, approved, denied, stale, or expired"
     )
+    .option("--watch", "keep watching approval requests until interrupted")
+    .option("--interval <duration>", "watch polling interval, like 2s or 1m")
+    .option("--timeout <duration>", "stop watch mode after a duration, or 0 for one snapshot")
     .action(
       async (options: {
         json?: boolean;
@@ -3224,6 +3252,9 @@ export function createProgram(io: ProgramIo = {}): Command {
         mandate?: string;
         includeChildren?: boolean;
         status?: "pending" | "approved" | "denied" | "stale" | "expired";
+        watch?: boolean;
+        interval?: string;
+        timeout?: string;
       }) => {
         const globalOptions = program.opts<{ cwd?: string }>();
         const repoPath = options.all
@@ -3265,18 +3296,105 @@ export function createProgram(io: ProgramIo = {}): Command {
           });
           return;
         }
+        if (!options.watch && (options.interval || options.timeout)) {
+          writeCommandError({
+            json: options.json,
+            code: "invalid_watch_options",
+            message: "--interval and --timeout require --watch",
+            nextActions: [
+              "Add --watch, or remove --interval and --timeout."
+            ]
+          });
+          return;
+        }
+        const watchInterval = parseWatchDurationForCommand(
+          options.interval,
+          "--interval",
+          { defaultMs: 2_000, minMs: 1_000, maxMs: 60_000, allowZero: false }
+        );
+        if (!watchInterval.ok) {
+          writeCommandError({
+            json: options.json,
+            code: "invalid_watch_duration",
+            message: watchInterval.message,
+            nextActions: watchInterval.nextActions
+          });
+          return;
+        }
+        if (watchInterval.value === null) {
+          writeCommandError({
+            json: options.json,
+            code: "invalid_watch_interval",
+            message: "--interval requires a duration like 2s or 1m",
+            nextActions: ["Pass --interval 2s, or omit --interval."]
+          });
+          return;
+        }
+        const watchTimeout = parseWatchDurationForCommand(
+          options.timeout,
+          "--timeout",
+          { minMs: 0, maxMs: 86_400_000, allowZero: true }
+        );
+        if (!watchTimeout.ok) {
+          writeCommandError({
+            json: options.json,
+            code: "invalid_watch_duration",
+            message: watchTimeout.message,
+            nextActions: watchTimeout.nextActions
+          });
+          return;
+        }
+        if (options.watch && options.json && watchTimeout.value === null) {
+          writeCommandError({
+            json: options.json,
+            code: "missing_watch_timeout",
+            message: "--watch --json requires --timeout so the JSON payload can finish",
+            nextActions: [
+              "Pass --timeout 0 for one JSON snapshot, or a bounded duration like --timeout 30s."
+            ]
+          });
+          return;
+        }
+        if (
+          options.watch &&
+          options.json &&
+          watchTimeout.value !== null &&
+          watchTimeout.value > 600_000
+        ) {
+          writeCommandError({
+            json: options.json,
+            code: "watch_timeout_too_long",
+            message: "--watch --json buffers snapshots and must use --timeout 10m or less",
+            nextActions: [
+              "Use --timeout 0 for one snapshot, or poll with shorter bounded windows."
+            ]
+          });
+          return;
+        }
         const path = io.approvalStorePath ?? resolveApprovalRequestStorePath();
         const mandateStorePath = io.mandateStorePath ?? resolveMandateStorePath();
         try {
-          const result = await createApprovalRequestsPayload({
+          const payloadOptions: ApprovalRequestsPayloadOptions = {
             path,
             mandateStorePath,
             ...(repoPath ? { repoPath } : {}),
             ...(options.mandate ? { mandateId: options.mandate } : {}),
             includeChildren: options.includeChildren ?? false,
             ...(options.status ? { status: options.status } : {})
-          });
+          };
 
+          if (options.watch) {
+            await watchApprovalRequests({
+              payloadOptions,
+              intervalMs: watchInterval.value,
+              timeoutMs: watchTimeout.value,
+              json: options.json ?? false,
+              writeOut
+            });
+            return;
+          }
+
+          const result = await createApprovalRequestsPayload(payloadOptions);
           if (options.json) {
             writeOut(JSON.stringify(result, null, 2));
           } else {
@@ -6307,14 +6425,9 @@ function childrenByParent(
   return result;
 }
 
-async function createApprovalRequestsPayload(options: {
-  path: string;
-  mandateStorePath: string;
-  repoPath?: string;
-  mandateId?: string | null;
-  includeChildren: boolean;
-  status?: ApprovalRequestWithStatus["runtimeStatus"];
-}): Promise<ApprovalRequestsPayload> {
+async function createApprovalRequestsPayload(
+  options: ApprovalRequestsPayloadOptions
+): Promise<ApprovalRequestsPayload> {
   const selectedMandateId = options.mandateId
     ? normalizeMandateId(options.mandateId)
     : undefined;
@@ -6406,6 +6519,68 @@ async function createApprovalRequestsPayload(options: {
     mandates,
     requests
   };
+}
+
+async function watchApprovalRequests(options: {
+  payloadOptions: ApprovalRequestsPayloadOptions;
+  intervalMs: number;
+  timeoutMs: number | null;
+  json: boolean;
+  writeOut: (message: string) => void;
+}): Promise<void> {
+  const startedAt = Date.now();
+  const snapshots: ApprovalWatchPayload["snapshots"] = [];
+  let iteration = 0;
+
+  while (true) {
+    const approvals = await createApprovalRequestsPayload(options.payloadOptions);
+    const observedAt = new Date().toISOString();
+    if (options.json) {
+      snapshots.push({ observedAt, approvals });
+    }
+
+    if (!options.json) {
+      const heading =
+        options.timeoutMs === 0
+          ? "Approval requests snapshot"
+          : iteration === 0
+          ? `Watching approvals every ${formatDurationMs(options.intervalMs)}${
+              options.timeoutMs === null
+                ? ". Press Ctrl+C to stop."
+                : ` for ${formatDurationMs(options.timeoutMs)}.`
+            }`
+          : `Approval requests updated at ${observedAt}`;
+      options.writeOut(`${heading}\n\n${formatApprovalRequests(approvals)}`);
+    }
+
+    iteration += 1;
+    if (options.timeoutMs !== null && Date.now() - startedAt >= options.timeoutMs) {
+      break;
+    }
+
+    const remainingMs =
+      options.timeoutMs === null
+        ? options.intervalMs
+        : Math.max(0, options.timeoutMs - (Date.now() - startedAt));
+    if (remainingMs === 0) {
+      break;
+    }
+    await sleep(Math.min(options.intervalMs, remainingMs));
+  }
+
+  if (options.json) {
+    const payload: ApprovalWatchPayload = {
+      schemaVersion: approvalWatchSchemaVersion,
+      generatedAt: new Date().toISOString(),
+      watch: {
+        intervalMs: options.intervalMs,
+        timeoutMs: options.timeoutMs,
+        snapshots: snapshots.length
+      },
+      snapshots
+    };
+    options.writeOut(JSON.stringify(payload, null, 2));
+  }
 }
 
 function formatMandateStatus(result: {
@@ -7370,6 +7545,85 @@ function parseApprovalWaitDurationForCommand(
   }
 
   return waitMs;
+}
+
+function parseWatchDurationForCommand(
+  value: string | undefined,
+  optionName: "--interval" | "--timeout",
+  constraints: {
+    defaultMs?: number;
+    minMs: number;
+    maxMs: number;
+    allowZero: boolean;
+  }
+):
+  | { ok: true; value: number | null }
+  | { ok: false; message: string; nextActions: string[] } {
+  if (value === undefined) {
+    return { ok: true, value: constraints.defaultMs ?? null };
+  }
+
+  const trimmed = value.trim();
+  if (trimmed === "0") {
+    if (constraints.allowZero) {
+      return { ok: true, value: 0 };
+    }
+    return {
+      ok: false,
+      message: `${optionName} must be at least ${formatDurationMs(constraints.minMs)}`,
+      nextActions: [`Pass ${optionName} ${formatDurationMs(constraints.minMs)} or longer.`]
+    };
+  }
+
+  const match = /^([1-9]\d*)(s|m)$/.exec(trimmed);
+  if (!match) {
+    return {
+      ok: false,
+      message: `${optionName} must use 0 or a duration like 2s or 1m`,
+      nextActions: [`Pass ${optionName} 2s, ${optionName} 1m, or ${optionName} 0 when allowed.`]
+    };
+  }
+
+  const amountText = match[1];
+  const unit = match[2];
+  if (!amountText || !unit) {
+    return {
+      ok: false,
+      message: `${optionName} must use 0 or a duration like 2s or 1m`,
+      nextActions: [`Pass ${optionName} 2s, ${optionName} 1m, or ${optionName} 0 when allowed.`]
+    };
+  }
+
+  const durationMs = Number(amountText) * (unit === "s" ? 1_000 : 60_000);
+  if (durationMs < constraints.minMs) {
+    return {
+      ok: false,
+      message: `${optionName} must be at least ${formatDurationMs(constraints.minMs)}`,
+      nextActions: [`Pass ${optionName} ${formatDurationMs(constraints.minMs)} or longer.`]
+    };
+  }
+  if (durationMs > constraints.maxMs) {
+    return {
+      ok: false,
+      message: `${optionName} must be ${formatDurationMs(constraints.maxMs)} or less`,
+      nextActions: [`Pass ${optionName} ${formatDurationMs(constraints.maxMs)} or shorter.`]
+    };
+  }
+
+  return { ok: true, value: durationMs };
+}
+
+function formatDurationMs(value: number): string {
+  if (value === 0) {
+    return "0";
+  }
+  if (value % 60_000 === 0) {
+    return `${value / 60_000}m`;
+  }
+  if (value % 1_000 === 0) {
+    return `${value / 1_000}s`;
+  }
+  return `${value}ms`;
 }
 
 function validateLoadedConfigForCommand(
