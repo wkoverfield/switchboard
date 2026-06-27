@@ -60,6 +60,16 @@ describe("switchboard project scan", () => {
       result.providers.find((provider) => provider.provider === "stripe")?.envVars
     ).toEqual(["STRIPE_SECRET_KEY"]);
     expect(result.runtime.vercelProjectPresent).toBe(true);
+    expect(result.riskFindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "live_payment_key_hint",
+          severity: "high",
+          provider: "stripe",
+          evidence: ["STRIPE_SECRET_KEY"]
+        })
+      ])
+    );
     expect(
       result.suggestions.find((suggestion) => suggestion.provider === "github")
     ).toMatchObject({
@@ -224,7 +234,13 @@ describe("switchboard project scan", () => {
         "    namespace: vercel_preview",
         "    upstream:",
         "      type: stdio",
-        "      command: vercel"
+        "      command: vercel",
+        "  stripe_test:",
+        "    provider: stripe",
+        "    namespace: stripe_test",
+        "    upstream:",
+        "      type: stdio",
+        "      command: stripe"
       ].join("\n"),
       "utf8"
     );
@@ -233,6 +249,9 @@ describe("switchboard project scan", () => {
 
     expect(result.nextActions).toContain(
       "switchboard mandate create --from vercel-preview"
+    );
+    expect(result.nextActions).toContain(
+      "switchboard mandate create --from stripe-test"
     );
     expect(result.nextActions).not.toContain(
       "switchboard mandate create --from github-ci"
