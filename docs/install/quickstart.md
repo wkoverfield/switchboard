@@ -8,16 +8,25 @@ task-scoped authority.
 
 Canonical alpha flow:
 
-For a normal alpha install:
+For a pre-public alpha install from source:
+
+```bash
+git clone https://github.com/woverfield/switchboard.git
+cd switchboard
+pnpm install
+pnpm build
+```
+
+After the first public package publish, the normal alpha install will be:
 
 ```bash
 npm install -g @switchboard-mcp/cli
 ```
 
-From a packaged install, use `switchboard ...`. From a source checkout, run
-`pnpm build` once and use `pnpm switchboard ...` for the same commands. For
-one-off experiments or harnesses, `npx -y @switchboard-mcp/cli@latest ...`
-runs the same binary without a global install.
+From a packaged install, use `switchboard ...`. From a source checkout, use
+`pnpm switchboard ...` for the same commands. After publish, one-off
+experiments or harnesses can use `npx -y @switchboard-mcp/cli@latest ...`
+without a global install.
 
 Start by scanning the repo. This is read-only and local: it reports repo,
 client, provider, and environment hints by name without printing secret values.

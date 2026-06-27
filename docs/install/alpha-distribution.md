@@ -6,6 +6,9 @@ local CLI before a non-Wilson user test.
 
 ## Packaged Alpha Install
 
+The package is not published to npm yet. Current alpha testers should use the
+source install below, or a tarball produced by the package pack check.
+
 Once the alpha package is published, a normal tester should start with:
 
 ```bash
@@ -21,6 +24,14 @@ npx -y @switchboard-mcp/cli@latest --help
 
 The package name is `@switchboard-mcp/cli`; the binary it exposes is always
 `switchboard`.
+
+To verify publish readiness before npm publish:
+
+```bash
+pnpm build
+pnpm smoke:package-pack
+pnpm smoke:package-install
+```
 
 ## Source Install
 

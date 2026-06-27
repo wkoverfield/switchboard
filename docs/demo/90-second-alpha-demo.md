@@ -13,6 +13,16 @@ pnpm eval:fresh-agent-expired-mandate
 pnpm eval:fresh-agent-subagent
 ```
 
+Before public alpha, verify npm publish status:
+
+```bash
+npm view @switchboard-mcp/cli version
+```
+
+If this returns `404 Not Found`, use the source install and package-install
+smoke above. Do not send testers to `npm install -g @switchboard-mcp/cli` until
+the package is actually published.
+
 Narration:
 
 1. `scan/import` sees existing MCP setup and produces a cleanup plan without
