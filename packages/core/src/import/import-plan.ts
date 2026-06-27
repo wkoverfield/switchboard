@@ -8,6 +8,11 @@ import { resolveRepoConfigPaths } from "../config/paths.js";
 import { resolveProjectClientConfigPath } from "../install/client-config.js";
 import type { SupportedClient } from "../install/client-config.js";
 import { normalizeNamespace } from "../namespaces/namespaces.js";
+import {
+  planRecommendedNextAction,
+  type NextActionCandidate,
+  type RecommendedNextAction
+} from "../next-actions/next-actions.js";
 import type { ScanProviderId } from "../scan/scan.js";
 import {
   type SwitchboardConfig,
@@ -55,6 +60,7 @@ export interface SwitchboardImportPlan {
   };
   warnings: string[];
   safetyNotes: string[];
+  recommendedNextAction: RecommendedNextAction;
   nextActions: string[];
 }
 
@@ -274,8 +280,18 @@ export async function createSwitchboardImportPlan(
   const nextActions = [
     "switchboard import --dry-run",
     ...secretCommands.map((command) => renderCommand(command)),
+    ...(cleanupPlan.some((item) => item.status === "planned")
+      ? ["switchboard import --write --cleanup-client"]
+      : []),
     ...installClients.map((command) => renderCommand(command))
   ];
+  const recommendedNextAction = planRecommendedNextAction(
+    importNextActionCandidates({
+      secretCommands,
+      cleanupPlan,
+      installClients
+    })
+  );
 
   return {
     ok: true,
@@ -302,8 +318,44 @@ export async function createSwitchboardImportPlan(
     },
     warnings,
     safetyNotes,
+    recommendedNextAction,
     nextActions: [...new Set(nextActions)]
   };
+}
+
+function importNextActionCandidates(options: {
+  secretCommands: CommandShape[];
+  cleanupPlan: ImportClientCleanupPlan[];
+  installClients: CommandShape[];
+}): NextActionCandidate[] {
+  const candidates: NextActionCandidate[] = [];
+  for (const command of options.secretCommands) {
+    candidates.push({
+      kind: "missing-secret",
+      command: renderCommand(command),
+      reason: "Store the token behind a local secretRef before routing agents."
+    });
+  }
+  if (options.cleanupPlan.some((item) => item.status === "planned")) {
+    candidates.push({
+      kind: "bypass-cleanup",
+      command: "switchboard import --write --cleanup-client",
+      reason: "Remove direct MCP bypass routes from active client config with backups."
+    });
+  }
+  for (const command of options.installClients) {
+    candidates.push({
+      kind: "client-install",
+      command: renderCommand(command),
+      reason: "Route this project client through Switchboard MCP."
+    });
+  }
+  candidates.push({
+    kind: "info",
+    command: "switchboard import --dry-run",
+    reason: "Review the import plan without writing files."
+  });
+  return candidates;
 }
 
 export async function writeSwitchboardImportPlan(

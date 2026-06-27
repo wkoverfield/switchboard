@@ -74,6 +74,9 @@ describe("switchboard project scan", () => {
     });
     expect(result.nextActions).toContain("switchboard setup github-ci");
     expect(result.nextActions).toContain("switchboard setup vercel-preview");
+    expect(result.recommendedNextAction.primary).toMatchObject({
+      command: "switchboard setup github-ci"
+    });
     expect(serialized).not.toContain("sk_live_should_not_print");
     expect(serialized).not.toContain("phc_should_not_print");
     expect(serialized).not.toContain("vercel_should_not_print");
@@ -173,6 +176,10 @@ describe("switchboard project scan", () => {
     });
     expect(result.warnings.some((warning) => warning.includes("direct MCP bypass"))).toBe(true);
     expect(result.nextActions[0]).toBe("switchboard import --dry-run");
+    expect(result.recommendedNextAction.primary).toMatchObject({
+      kind: "bypass-cleanup",
+      command: "switchboard import --dry-run"
+    });
     expect(serialized).not.toContain("ghp_scan_should_not_print");
   });
 

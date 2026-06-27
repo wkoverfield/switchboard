@@ -96,6 +96,7 @@ describe("switchboard CLI program", () => {
       schemaVersion: string;
       repo: { remote: { owner: string; repo: string } };
       providers: Array<{ provider: string; envVars: string[] }>;
+      recommendedNextAction: { primary: { command: string } | null };
       nextActions: string[];
     };
     const serialized = output.join("\n");
@@ -111,6 +112,9 @@ describe("switchboard CLI program", () => {
       "vercel"
     );
     expect(parsed.nextActions).toContain("switchboard setup github-ci");
+    expect(parsed.recommendedNextAction.primary?.command).toBe(
+      "switchboard setup github-ci"
+    );
     expect(serialized).not.toContain("sk_test_should_not_print");
     expect(serialized).not.toContain("vercel_should_not_print");
     expect(serialized).not.toContain("prj_should_not_print");
@@ -137,9 +141,37 @@ describe("switchboard CLI program", () => {
     expect(text).toContain("GitHub: wkoverfield/stockr");
     expect(text).toContain("Provider hints:");
     expect(text).toContain("STRIPE_SECRET_KEY");
+    expect(text).toContain("Recommended next:");
     expect(text).toContain("switchboard setup github-ci");
     expect(text).toContain("switchboard install codex --write");
     expect(text).not.toContain("secret\n");
+  });
+
+  it("prints the recommended next action as JSON", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "main");
+    execFileSync(
+      "git",
+      ["remote", "add", "origin", "git@github.com:wkoverfield/stockr.git"],
+      { cwd: root, stdio: "ignore" }
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "next", "--json"], {
+      from: "user"
+    });
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: true,
+      schemaVersion: "switchboard.next-action.v1",
+      recommendedNextAction: {
+        primary: {
+          kind: "provider-setup",
+          command: "switchboard setup github-ci"
+        }
+      }
+    });
   });
 
   it("lists provider safety templates as JSON", async () => {

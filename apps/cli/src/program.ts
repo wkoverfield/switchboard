@@ -54,6 +54,9 @@ import {
   type SwitchboardImportPlan,
   type WrittenSwitchboardImportPlan,
   type BypassFinding,
+  planRecommendedNextAction,
+  type NextActionCandidate,
+  type RecommendedNextAction,
   type RenderedProviderSafetyTemplate,
   type ProviderAddPlan,
   type WrittenProviderAddPlan,
@@ -791,93 +794,10 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--json", "print machine-readable JSON")
     .action(async (options: { json?: boolean }) => {
       const globalOptions = program.opts<{ cwd?: string }>();
-      const configOptions = optionsFromCwd(globalOptions.cwd);
-      const loaded = loadSwitchboardConfig(configOptions);
-      const localIgnore = checkLocalConfigIgnored(globalOptions.cwd);
-      const cwd = configCwdBase(loaded, globalOptions.cwd);
-      const launch = resolveInstallLaunch({ commandArgs: [] });
-      const clientConfigs = await inspectProjectClientConfigs({
-        cwd,
-        command: launch.command,
-        commandArgs: launch.commandArgs
-      });
-      const clientLaunches = await checkInstalledClientLaunches(clientConfigs);
-      const missingSecrets = await findMissingSecretRefs(
-        loaded.config,
+      const result = await createDoctorResult({
+        cwd: globalOptions.cwd,
         secretStore
-      );
-      const importPlan = await createSwitchboardImportPlan({
-        cwd,
-        env: process.env
       });
-      const bypassFindings = importPlan.bypassFindings;
-      const checks = [
-        {
-          name: "config-schema",
-          ok: !loaded.diagnostics.some((item) => item.level === "error"),
-          message: "Config files parse and match the Switchboard schema."
-        },
-        {
-          name: "namespace-collisions",
-          ok: loaded.namespaceCollisions.length === 0,
-          message: "Profile namespaces are unique after normalization."
-        },
-        {
-          name: "local-config-gitignore",
-          ok: localIgnore.ok,
-          message: localIgnore.message
-        },
-        {
-          name: "client-configs",
-          ok: clientConfigs.every((item) => item.status !== "invalid"),
-          message: clientConfigSummary(clientConfigs)
-        },
-        {
-          name: "client-launch",
-          ok: clientLaunches.every((item) => item.ok),
-          message: clientLaunchSummary(clientLaunches)
-        },
-        {
-          name: "secrets",
-          ok: missingSecrets.length === 0,
-          message: secretCheckSummary(missingSecrets)
-        },
-        {
-          name: "direct-mcp-bypass",
-          ok: bypassFindings.length === 0,
-          message: bypassCheckSummary(bypassFindings)
-        }
-      ];
-
-      const ok = checks.every((check) => check.ok);
-      const nextSteps = doctorNextSteps({
-        ok,
-        loaded,
-        localIgnoreOk: localIgnore.ok,
-        clientConfigs,
-        clientLaunches,
-        missingSecrets,
-        bypassFindings,
-        cwd: globalOptions.cwd
-      }).map((step) =>
-        rewriteSwitchboardCommand(step, switchboardCommandPrefixForRepo(cwd))
-      );
-      const status = doctorStatus({ ok, nextSteps });
-      const result = {
-        ok,
-        status,
-        checks,
-        diagnostics: loaded.diagnostics,
-        namespaceCollisions: loaded.namespaceCollisions,
-        clientConfigs,
-        clientLaunches,
-        secrets: {
-          usages: collectSecretRefUsages(loaded.config),
-          missing: missingSecrets
-        },
-        bypassFindings,
-        nextSteps
-      };
 
       if (options.json) {
         writeOut(JSON.stringify(result, null, 2));
@@ -885,9 +805,37 @@ export function createProgram(io: ProgramIo = {}): Command {
         writeOut(formatDoctor(result));
       }
 
-      if (!ok) {
+      if (!result.ok) {
         process.exitCode = 1;
       }
+    });
+
+  program
+    .command("next")
+    .description("Print the single recommended next Switchboard action for this repo.")
+    .option("--json", "print machine-readable JSON")
+    .action(async (options: { json?: boolean }) => {
+      const globalOptions = program.opts<{ cwd?: string }>();
+      const result = await createNextActionResult({
+        cwd: globalOptions.cwd,
+        secretStore
+      });
+      const payload = {
+        ok: result.primary !== null,
+        schemaVersion: "switchboard.next-action.v1",
+        recommendedNextAction: result,
+        nextSteps: [
+          ...(result.primary ? [result.primary.command] : []),
+          ...result.alternatives.map((item) => item.command)
+        ]
+      };
+
+      if (options.json) {
+        writeOut(JSON.stringify(payload, null, 2));
+        return;
+      }
+
+      writeOut(formatNextAction(payload.recommendedNextAction));
     });
 
   const secrets = program
@@ -3629,6 +3577,14 @@ function formatScan(result: SwitchboardScanResult): string {
     );
   }
 
+  if (result.recommendedNextAction.primary) {
+    lines.push("", "Recommended next:");
+    lines.push(
+      `- ${formatHumanCommand(result.recommendedNextAction.primary.command)}`
+    );
+    lines.push(`  ${result.recommendedNextAction.primary.reason}`);
+  }
+
   if (result.warnings.length > 0) {
     lines.push("", "Warnings:", ...result.warnings.map((warning) => `- ${warning}`));
   }
@@ -3660,6 +3616,10 @@ function rewriteScanCommandsForCurrentInvocation(
       ...suggestion,
       command: rewriteSwitchboardCommand(suggestion.command, prefix)
     })),
+    recommendedNextAction: rewriteRecommendedNextAction(
+      result.recommendedNextAction,
+      prefix
+    ),
     nextActions: result.nextActions.map((action) =>
       rewriteSwitchboardCommand(action, prefix)
     )
@@ -3693,6 +3653,10 @@ function rewriteImportCommandsForCurrentInvocation(
         rewriteCommandShape(command, prefix)
       )
     },
+    recommendedNextAction: rewriteRecommendedNextAction(
+      plan.recommendedNextAction,
+      prefix
+    ),
     nextActions: plan.nextActions.map((action) =>
       rewriteSwitchboardCommand(action, prefix)
     )
@@ -3721,6 +3685,50 @@ function rewriteCommandShape(
     command: parts[0] ?? command.command,
     args: [...parts.slice(1), ...command.args]
   };
+}
+
+function rewriteRecommendedNextAction(
+  action: RecommendedNextAction,
+  prefix: string
+): RecommendedNextAction {
+  return {
+    primary: action.primary
+      ? {
+          ...action.primary,
+          command: rewriteSwitchboardCommand(action.primary.command, prefix)
+        }
+      : null,
+    alternatives: action.alternatives.map((item) => ({
+      ...item,
+      command: rewriteSwitchboardCommand(item.command, prefix)
+    }))
+  };
+}
+
+async function createNextActionResult(options: {
+  cwd?: string | undefined;
+  secretStore: SecretStore;
+}): Promise<RecommendedNextAction> {
+  const doctor = await createDoctorResult(options);
+  const scan = rewriteScanCommandsForCurrentInvocation(
+    await scanSwitchboardProject({
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+      ...resolveInstallLaunch({ commandArgs: [] })
+    })
+  );
+  return planRecommendedNextAction([
+    ...recommendedNextActionCandidates(scan.recommendedNextAction),
+    ...recommendedNextActionCandidates(doctor.recommendedNextAction)
+  ]);
+}
+
+function recommendedNextActionCandidates(
+  action: RecommendedNextAction
+): NextActionCandidate[] {
+  return [
+    ...(action.primary ? [action.primary] : []),
+    ...action.alternatives
+  ];
 }
 
 function splitCommandPrefix(prefix: string): string[] {
@@ -3886,6 +3894,14 @@ function formatImportPlan(plan: SwitchboardImportPlan): string {
     }
   }
 
+  if (plan.recommendedNextAction.primary) {
+    lines.push("", "Recommended next:");
+    lines.push(
+      `- ${formatHumanCommand(plan.recommendedNextAction.primary.command)}`
+    );
+    lines.push(`  ${plan.recommendedNextAction.primary.reason}`);
+  }
+
   if (plan.warnings.length > 0) {
     lines.push("", "Warnings:", ...plan.warnings.map((warning) => `- ${warning}`));
   }
@@ -4005,6 +4021,188 @@ function renderCommandShape(command: { command: string; args: string[] }): strin
   return [command.command, ...command.args.map(shellQuoteCommandArg)].join(" ");
 }
 
+async function createDoctorResult(options: {
+  cwd?: string | undefined;
+  secretStore: SecretStore;
+}): Promise<{
+  ok: boolean;
+  status: "ok" | "setup-incomplete" | "failed";
+  checks: Array<{ name: string; ok: boolean; message: string }>;
+  diagnostics: ReturnType<typeof loadSwitchboardConfig>["diagnostics"];
+  namespaceCollisions: ReturnType<typeof loadSwitchboardConfig>["namespaceCollisions"];
+  clientConfigs: ProjectClientConfigInspection[];
+  clientLaunches: ClientLaunchCheck[];
+  secrets: {
+    usages: ReturnType<typeof collectSecretRefUsages>;
+    missing: MissingSecretRef[];
+  };
+  bypassFindings: BypassFinding[];
+  recommendedNextAction: RecommendedNextAction;
+  nextSteps: string[];
+}> {
+  const configOptions = optionsFromCwd(options.cwd);
+  const loaded = loadSwitchboardConfig(configOptions);
+  const localIgnore = checkLocalConfigIgnored(options.cwd);
+  const cwd = configCwdBase(loaded, options.cwd);
+  const launch = resolveInstallLaunch({ commandArgs: [] });
+  const clientConfigs = await inspectProjectClientConfigs({
+    cwd,
+    command: launch.command,
+    commandArgs: launch.commandArgs
+  });
+  const clientLaunches = await checkInstalledClientLaunches(clientConfigs);
+  const missingSecrets = await findMissingSecretRefs(
+    loaded.config,
+    options.secretStore
+  );
+  const importPlan = await createSwitchboardImportPlan({
+    cwd,
+    env: process.env
+  });
+  const bypassFindings = importPlan.bypassFindings;
+  const checks = [
+    {
+      name: "config-schema",
+      ok: !loaded.diagnostics.some((item) => item.level === "error"),
+      message: "Config files parse and match the Switchboard schema."
+    },
+    {
+      name: "namespace-collisions",
+      ok: loaded.namespaceCollisions.length === 0,
+      message: "Profile namespaces are unique after normalization."
+    },
+    {
+      name: "local-config-gitignore",
+      ok: localIgnore.ok,
+      message: localIgnore.message
+    },
+    {
+      name: "client-configs",
+      ok: clientConfigs.every((item) => item.status !== "invalid"),
+      message: clientConfigSummary(clientConfigs)
+    },
+    {
+      name: "client-launch",
+      ok: clientLaunches.every((item) => item.ok),
+      message: clientLaunchSummary(clientLaunches)
+    },
+    {
+      name: "secrets",
+      ok: missingSecrets.length === 0,
+      message: secretCheckSummary(missingSecrets)
+    },
+    {
+      name: "direct-mcp-bypass",
+      ok: bypassFindings.length === 0,
+      message: bypassCheckSummary(bypassFindings)
+    }
+  ];
+  const ok = checks.every((check) => check.ok);
+  const nextSteps = doctorNextSteps({
+    ok,
+    loaded,
+    localIgnoreOk: localIgnore.ok,
+    clientConfigs,
+    clientLaunches,
+    missingSecrets,
+    bypassFindings,
+    cwd: options.cwd
+  }).map((step) =>
+    rewriteSwitchboardCommand(step, switchboardCommandPrefixForRepo(cwd))
+  );
+  const status = doctorStatus({ ok, nextSteps });
+  const recommendedNextAction = rewriteRecommendedNextAction(
+    planRecommendedNextAction(
+      doctorNextActionCandidates({
+        loaded,
+        localIgnoreOk: localIgnore.ok,
+        clientConfigs,
+        clientLaunches,
+        missingSecrets,
+        bypassFindings,
+        nextSteps
+      })
+    ),
+    switchboardCommandPrefixForRepo(cwd)
+  );
+
+  return {
+    ok,
+    status,
+    checks,
+    diagnostics: loaded.diagnostics,
+    namespaceCollisions: loaded.namespaceCollisions,
+    clientConfigs,
+    clientLaunches,
+    secrets: {
+      usages: collectSecretRefUsages(loaded.config),
+      missing: missingSecrets
+    },
+    bypassFindings,
+    recommendedNextAction,
+    nextSteps
+  };
+}
+
+function doctorNextActionCandidates(options: {
+  loaded: ReturnType<typeof loadSwitchboardConfig>;
+  localIgnoreOk: boolean;
+  clientConfigs: ProjectClientConfigInspection[];
+  clientLaunches: ClientLaunchCheck[];
+  missingSecrets: MissingSecretRef[];
+  bypassFindings: BypassFinding[];
+  nextSteps: string[];
+}): NextActionCandidate[] {
+  const candidates: NextActionCandidate[] = [];
+  if (options.loaded.diagnostics.some((diagnostic) => diagnostic.level === "error")) {
+    candidates.push({
+      kind: "invalid-config",
+      command: "switchboard doctor",
+      reason: "Fix config diagnostics before granting agent authority."
+    });
+  }
+  for (const missing of options.missingSecrets) {
+    candidates.push({
+      kind: "missing-secret",
+      command: `switchboard secrets set ${missing.ref} --value-stdin`,
+      reason: `Set ${missing.ref} before launching agents.`
+    });
+  }
+  if (options.bypassFindings.length > 0) {
+    candidates.push({
+      kind: "bypass-cleanup",
+      command: "switchboard import --write --cleanup-client",
+      reason: "Remove direct MCP bypass routes from active client config."
+    });
+  }
+  for (const config of options.clientConfigs) {
+    if (config.status === "missing" || config.status === "stale") {
+      candidates.push({
+        kind: "client-install",
+        command: `switchboard install ${config.client} --write`,
+        reason: `Route ${config.client} through Switchboard MCP.`
+      });
+    }
+  }
+  for (const launch of options.clientLaunches) {
+    if (!launch.ok) {
+      candidates.push({
+        kind: "client-install",
+        command: `switchboard install ${launch.client} --write`,
+        reason: launch.message
+      });
+    }
+  }
+  for (const step of options.nextSteps) {
+    candidates.push({
+      kind: step.includes("mandate create") ? "mandate-create" : "info",
+      command: step,
+      reason: "Doctor suggested this follow-up."
+    });
+  }
+  return candidates;
+}
+
 function formatDoctor(result: {
   ok: boolean;
   status: "ok" | "setup-incomplete" | "failed";
@@ -4017,6 +4215,7 @@ function formatDoctor(result: {
     missing: MissingSecretRef[];
   };
   bypassFindings?: BypassFinding[];
+  recommendedNextAction?: RecommendedNextAction;
   nextSteps: string[];
 }): string {
   const lines = [`Switchboard doctor: ${formatDoctorStatus(result.status)}`];
@@ -4076,11 +4275,43 @@ function formatDoctor(result: {
     }
   }
 
+  if (result.recommendedNextAction?.primary) {
+    lines.push("", "Recommended next:");
+    lines.push(
+      `  ${formatHumanCommand(result.recommendedNextAction.primary.command)}`
+    );
+    lines.push(`  ${result.recommendedNextAction.primary.reason}`);
+  }
+
   if (result.nextSteps.length > 0) {
     lines.push("", "Next steps:");
     for (const step of result.nextSteps) {
       lines.push(`  ${formatHumanCommand(step)}`);
     }
+  }
+
+  return lines.join("\n");
+}
+
+function formatNextAction(action: RecommendedNextAction): string {
+  if (!action.primary) {
+    return "No recommended next action. Switchboard did not find a concrete setup step.";
+  }
+
+  const lines = [
+    "Recommended next:",
+    `  ${formatHumanCommand(action.primary.command)}`,
+    `  ${action.primary.reason}`
+  ];
+
+  if (action.alternatives.length > 0) {
+    lines.push(
+      "",
+      "Alternatives:",
+      ...action.alternatives.map(
+        (item) => `  ${formatHumanCommand(item.command)} - ${item.reason}`
+      )
+    );
   }
 
   return lines.join("\n");

@@ -289,6 +289,9 @@ Implemented in the current codebase:
   authority: validates mandate/runtime scope, injects mounted `secretRef` env
   values, denies shell/script wrappers by default, and audits redacted command
   execution metadata
+- shared recommended-next-action planner plus `switchboard next`, surfaced in
+  `scan`, `doctor`, and import output as one primary action with structured
+  alternatives
 
 Not started:
 
