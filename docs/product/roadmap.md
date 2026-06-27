@@ -276,6 +276,9 @@ Implemented in the current codebase:
 - deterministic `pnpm smoke:stripe-test-dogfood` fixture proof for Stripe
   test-mode policy coverage, approval gates, denied live/admin tools, mandate
   creation, reports, and token redaction
+- guarded `pnpm smoke:stripe-test-live-dogfood` harness for manual real
+  Stripe test-mode dogfood with explicit opt-in, live-key refusal, and local
+  redacted summary output
 - npm-packable alpha package metadata and `pnpm smoke:package-pack` for
   `@switchboard-mcp/core`, `@switchboard-mcp/mcp-runtime`, and
   `@switchboard-mcp/cli`

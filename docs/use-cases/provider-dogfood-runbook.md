@@ -93,6 +93,17 @@ pnpm smoke:stripe-test-dogfood
 Then run real Stripe test-mode dogfood only with a restricted test key:
 
 ```bash
+SWITCHBOARD_LIVE_PROVIDER_DOGFOOD=1 \
+SWITCHBOARD_STRIPE_TEST_KEY=<restricted sk_test_ or rk_test_ key> \
+pnpm smoke:stripe-test-live-dogfood
+```
+
+The live harness skips unless explicitly enabled, refuses live-mode keys, and
+writes a redacted local summary to `.switchboard-live-dogfood/`.
+
+The manual equivalent is:
+
+```bash
 switchboard setup stripe-test
 switchboard doctor
 switchboard presets check stripe-test --profile stripe_test --json

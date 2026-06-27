@@ -17,7 +17,7 @@ report to keep. Do not commit synthetic reports as proof.
 ## Summary
 
 - Date:
-- Provider preset: `github-ci` or `vercel-preview`
+- Provider preset: `github-ci`, `vercel-preview`, or `stripe-test`
 - Repo:
 - Runner:
 - Agent client or harness:
@@ -96,6 +96,11 @@ For Vercel Preview, include preview/log inspection. Production promotion,
 environment variable, domain, secret/token, billing, and team administration
 tools should be denied or absent. Deploy and rollback-shaped tools should be
 approval-gated.
+
+For Stripe Test, include test-mode read/inspection. Live, production, account,
+payout, transfer, webhook-secret, token, and secret-shaped tools should be
+denied or absent. Create/update/refund/cancel/capture/confirm-shaped test tools
+should be approval-gated.
 
 ## Approval Evidence
 

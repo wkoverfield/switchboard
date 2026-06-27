@@ -32,6 +32,20 @@ authority plumbing without touching real Stripe data.
 Run this only with a restricted Stripe test-mode secret key. Do not use live
 keys.
 
+The repeatable manual harness is:
+
+```bash
+SWITCHBOARD_LIVE_PROVIDER_DOGFOOD=1 \
+SWITCHBOARD_STRIPE_TEST_KEY=<restricted sk_test_ or rk_test_ key> \
+pnpm smoke:stripe-test-live-dogfood
+```
+
+Without `SWITCHBOARD_LIVE_PROVIDER_DOGFOOD=1`, the command skips. With the flag
+enabled, it refuses `sk_live_` / `rk_live_` keys and writes a redacted local JSON
+summary under `.switchboard-live-dogfood/`, which is ignored by git.
+
+The underlying flow is:
+
 ```bash
 switchboard setup stripe-test
 switchboard doctor
