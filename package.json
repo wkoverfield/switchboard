@@ -39,7 +39,11 @@
     "smoke:daemon-list-tools": "node scripts/smoke/daemon-list-tools.mjs",
     "smoke:daemon-mcp-list-tools": "pnpm --filter @switchboard-mcp/mcp-runtime smoke:daemon-mcp-list-tools",
     "smoke:mandate-walkthrough": "pnpm --filter @switchboard-mcp/mcp-runtime smoke:mandate-walkthrough",
-    "smoke:mcp-serve-session": "pnpm --filter @switchboard-mcp/mcp-runtime smoke:serve-session"
+    "smoke:mcp-serve-session": "pnpm --filter @switchboard-mcp/mcp-runtime smoke:serve-session",
+    "eval:fresh-agent-import": "node scripts/evals/fresh-agent.mjs import",
+    "eval:fresh-agent-github-ci": "node scripts/evals/fresh-agent.mjs github-ci",
+    "eval:fresh-agent-expired-mandate": "node scripts/evals/fresh-agent.mjs expired-mandate",
+    "eval:fresh-agent-subagent": "node scripts/evals/fresh-agent.mjs subagent"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

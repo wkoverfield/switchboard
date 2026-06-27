@@ -213,6 +213,26 @@ These checks are runtime awareness, not sandboxing. Switchboard can detect and
 deny mismatched local authority before launching or routing tools, but it does
 not provision an isolated filesystem, network boundary, or VM.
 
+## Fresh-Agent Eval Proof
+
+The deterministic fresh-agent evals exercise Switchboard from minimal prompts
+in isolated fixture repos:
+
+```bash
+pnpm eval:fresh-agent-import
+pnpm eval:fresh-agent-github-ci
+pnpm eval:fresh-agent-expired-mandate
+pnpm eval:fresh-agent-subagent
+```
+
+Each eval scores whether the simulated fresh agent chose the Switchboard path,
+avoided raw secrets, used mandate-scoped MCP/tool-surface commands, recovered
+from errors through `nextActions`, and produced a report or handoff surface
+where relevant. Redacted transcripts and summaries are written under
+`.switchboard-evals/`, which is ignored by git. Live-token provider evals
+should remain manual until credentials and network access are intentionally
+available.
+
 ## Not Yet Contracted
 
 The following JSON outputs are useful for humans and scripts, but are not yet
