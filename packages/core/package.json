@@ -4,6 +4,9 @@
   "type": "module",
   "description": "Core config, mandate, approval, provider-template, install, audit, and secret primitives for Switchboard.",
   "license": "UNLICENSED",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/woverfield/switchboard.git",
