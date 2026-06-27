@@ -17,6 +17,8 @@ That breaks into three user-visible jobs:
 
 The 2026-06-27 adversarial published-alpha review is captured in
 `docs/product/adversarial-alpha-eval-2026-06-27.md`.
+The resulting build plan is captured in
+`docs/product/alpha-authority-architecture-plan.md`.
 
 ## Eval Layers
 
@@ -52,6 +54,9 @@ agent reviews:
 
 Each reviewer should report exact commands, adoption likelihood, bounce points,
 and the top five changes that would make Switchboard more useful.
+
+After bypass cleanup, code-mode execution, or harness launch-contract changes,
+rerun the same three personas and compare against the 2026-06-27 findings.
 
 ### Human Alpha Tests
 
