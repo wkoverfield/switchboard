@@ -70,6 +70,7 @@ switchboard scan
 switchboard scan --json
 switchboard import --dry-run
 switchboard import --json
+switchboard import --write
 switchboard init
 switchboard setup <github-ci|vercel-preview>
 switchboard add <github-ci|vercel-preview>

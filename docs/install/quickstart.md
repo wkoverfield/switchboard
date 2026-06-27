@@ -43,7 +43,9 @@ guarantee.
 `switchboard import --dry-run` is read-only. Use it when a repo already has
 Codex or Claude MCP config; it reports existing servers, env variable names,
 recommended Switchboard profiles, local token aliases, and cleanup actions
-without writing config or reading secret values.
+without writing config or reading secret values. When the plan looks right,
+`switchboard import --write` applies the repo `.switchboard.yaml` profile
+changes with a backup and leaves existing Codex/Claude client config untouched.
 
 If you want to inspect each step before writing, use the manual flow:
 

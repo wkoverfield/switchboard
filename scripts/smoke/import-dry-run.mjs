@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync
 } from "node:fs";
@@ -79,11 +80,30 @@ try {
   assert(human.includes("github_stockr"), "expected github profile in human output");
   assertNoRawSecret(human, "human plan");
 
-  const write = spawnSync(process.execPath, [cliPath, "--cwd", project, "import", "--write", "--json"], {
-    encoding: "utf8"
-  });
-  assert(write.status !== 0, "write should not be shipped in dry-run PR");
-  assert(write.stdout.includes("import_write_not_supported"), "expected write error envelope");
+  const beforeCodex = readFileSync(join(project, ".codex", "config.toml"), "utf8");
+  const beforeClaude = readFileSync(join(project, ".mcp.json"), "utf8");
+  const written = runCli("import", "--write", "--json");
+  assert(written.action === "created", "expected import write to create config");
+  assert(
+    written.createdProfiles.includes("github_stockr"),
+    "expected github profile to be written"
+  );
+  assert(existsSync(join(project, ".switchboard.yaml")), "expected repo config write");
+  const config = readFileSync(join(project, ".switchboard.yaml"), "utf8");
+  assert(config.includes("secretRef: github/stockr/dev/token"), "expected secretRef");
+  assert(
+    readFileSync(join(project, ".codex", "config.toml"), "utf8") === beforeCodex,
+    "codex config must not be mutated"
+  );
+  assert(
+    readFileSync(join(project, ".mcp.json"), "utf8") === beforeClaude,
+    "claude config must not be mutated"
+  );
+  assertNoRawSecret(JSON.stringify(written), "write json");
+  assertNoRawSecret(config, "written config");
+
+  const second = runCli("import", "--write", "--json");
+  assert(second.action === "noop", "second write should be a noop");
 } finally {
   rmSync(projectRoot, { force: true, recursive: true });
 }
