@@ -23,17 +23,27 @@ state, and a harness-friendly MCP launch payload.
 
 ## Install
 
-Alpha package install:
+Public npm install will be the normal path after the first package publish:
 
 ```bash
 npm install -g @switchboard-mcp/cli
 switchboard --help
 ```
 
-For one-off or harness use without a global install:
+For one-off or harness use without a global install after publish:
 
 ```bash
 npx -y @switchboard-mcp/cli@latest --help
+```
+
+Current pre-public alpha users should install from source:
+
+```bash
+git clone https://github.com/woverfield/switchboard.git
+cd switchboard
+pnpm install
+pnpm build
+pnpm switchboard --help
 ```
 
 Then run the repo setup flow from the project you want agents to work in:
