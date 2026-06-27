@@ -70,6 +70,7 @@ describe("switchboard project scan", () => {
         })
       ])
     );
+    expect(result.authorityStatus.status).toBe("bypass-present");
     expect(
       result.suggestions.find((suggestion) => suggestion.provider === "github")
     ).toMatchObject({
@@ -128,6 +129,7 @@ describe("switchboard project scan", () => {
 
     expect(result.switchboard.profileNames).toEqual(["github_ci"]);
     expect(result.switchboard.workspaceNames).toEqual(["default"]);
+    expect(result.authorityStatus.status).toBe("partial-control");
     expect(result.nextActions).not.toContain("switchboard setup github-ci");
     expect(result.nextActions).toContain("switchboard install codex --write");
     expect(result.nextActions).toContain("switchboard install claude --write");
@@ -173,6 +175,13 @@ describe("switchboard project scan", () => {
     const serialized = JSON.stringify(result);
 
     expect(result.bypassFindings).toHaveLength(1);
+    expect(result.authorityStatus).toMatchObject({
+      status: "bypass-present",
+      recommendedAction: {
+        command: "switchboard",
+        args: ["import", "--write", "--cleanup-client"]
+      }
+    });
     expect(result.bypassFindings[0]).toMatchObject({
       id: "codex:github",
       severity: "high",

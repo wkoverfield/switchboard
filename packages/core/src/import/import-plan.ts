@@ -3,6 +3,10 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import {
+  planAuthorityStatus,
+  type AuthorityStatus
+} from "../authority/authority-status.js";
 import { deepMerge, loadSwitchboardConfig } from "../config/load-config.js";
 import { resolveRepoConfigPaths } from "../config/paths.js";
 import { resolveProjectClientConfigPath } from "../install/client-config.js";
@@ -32,6 +36,7 @@ export interface SwitchboardImportPlanOptions {
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
   cleanupClient?: boolean;
+  acceptDirect?: string[];
   now?: Date;
 }
 
@@ -50,6 +55,7 @@ export interface SwitchboardImportPlan {
   };
   riskFindings: RiskFinding[];
   bypassFindings: BypassFinding[];
+  authorityStatus: AuthorityStatus;
   cleanupPlan: ImportClientCleanupPlan[];
   actions: ImportPlanAction[];
   commands: {
@@ -114,10 +120,12 @@ export type BypassRiskTag =
   | "broad-filesystem-mount";
 
 export type RiskFindingKind =
+  | "secret_env_hint"
   | "prod_env_hint"
   | "live_payment_key_hint"
   | "database_write_surface"
-  | "provider_admin_surface";
+  | "provider_admin_surface"
+  | "duplicate_provider_route";
 
 export type RiskFindingSeverity = "info" | "medium" | "high" | "critical";
 
@@ -138,7 +146,7 @@ export interface RiskFinding {
 
 export interface BypassFinding {
   id: string;
-  status: "unaccepted";
+  status: "unaccepted" | "accepted";
   severity: "medium" | "high" | "critical";
   client: SupportedClient;
   targetPath: string;
@@ -151,6 +159,7 @@ export interface BypassFinding {
   riskTags: BypassRiskTag[];
   reasons: string[];
   nextActions: string[];
+  acceptedRiskGuidance: string;
 }
 
 export interface ImportClientCleanupPlan {
@@ -227,18 +236,23 @@ export async function createSwitchboardImportPlan(
   const detectedServers = clients.flatMap((client) =>
     client.servers.filter((server) => server.name !== "switchboard")
   );
+  const acceptedDirect = collectAcceptedDirectRiskIds({
+    configured: loaded.config.acceptedRisks.directMcp.map((risk) => risk.id),
+    requested: options.acceptDirect ?? []
+  });
   const bypassFindings = buildBypassFindings({
     cwd,
     ...(options.homeDir ? { homeDir: options.homeDir } : {}),
     clients,
-    switchboardProfiles
+    switchboardProfiles,
+    acceptedDirect
   });
   const riskFindings = buildRiskFindings({
     envFiles,
     clients,
     bypassFindings
   });
-  const cleanupPlan = buildClientCleanupPlan(clients);
+  const cleanupPlan = buildClientCleanupPlan(clients, acceptedDirect);
   const createProfileActions = uniqueServersByProfile(detectedServers)
     .filter((server) => !profileNames.has(server.suggestedProfileName))
     .map((server) => createProfileAction(server));
@@ -322,6 +336,17 @@ export async function createSwitchboardImportPlan(
       installClients
     })
   );
+  const authorityStatus = planAuthorityStatus({
+    diagnostics: loaded.diagnostics,
+    invalidClientConfigs: clients.some((client) => client.status === "invalid"),
+    bypassFindings,
+    riskFindings,
+    switchboardConfigured: switchboardProfiles.length > 0,
+    switchboardInstalled: clients.some((client) =>
+      client.servers.some((server) => server.routesThroughSwitchboard)
+    ),
+    recommendedNextAction
+  });
 
   return {
     ok: true,
@@ -335,6 +360,7 @@ export async function createSwitchboardImportPlan(
     },
     riskFindings,
     bypassFindings,
+    authorityStatus,
     cleanupPlan,
     actions,
     commands: {
@@ -408,27 +434,45 @@ export async function writeSwitchboardImportPlan(
       )
     )
   );
+  const acceptedDirectRisks = plan.bypassFindings.filter(
+    (finding) =>
+      finding.status === "accepted" &&
+      (options.acceptDirect ?? []).includes(finding.id)
+  );
 
   if (importableServers.length === 0) {
+    const acceptedRiskWrite =
+      acceptedDirectRisks.length > 0
+        ? await writeAcceptedDirectRisks(targetPath, acceptedDirectRisks, options.now)
+        : { backupPath: null, nextContent: null };
     const clientCleanup = options.cleanupClient
       ? await writeClientCleanupPlan(plan, options.now)
       : [];
+    const refreshedPlan = await createSwitchboardImportPlan({
+      cwd,
+      ...(options.env ? { env: options.env } : {}),
+      ...(options.homeDir ? { homeDir: options.homeDir } : {})
+    });
     return {
       ok: true,
       schemaVersion: importPlanSchemaVersion,
-      action: "noop",
+      action: acceptedRiskWrite.nextContent ? "updated" : "noop",
       targetPath,
-      backupPath: null,
-      plan,
+      backupPath: acceptedRiskWrite.backupPath,
+      plan: refreshedPlan,
       createdProfiles: [],
       clientCleanup,
-      nextContent: null
+      nextContent: acceptedRiskWrite.nextContent
     };
   }
 
   assertNoNamespaceCollisions(plan, importableServers);
   const existing = await readOptionalTextFileAsync(targetPath);
-  const nextContent = renderMergedImportConfig(existing, importableServers);
+  const nextContent = renderMergedImportConfig(
+    existing,
+    importableServers,
+    acceptedDirectRisks
+  );
   await mkdir(dirname(targetPath), { recursive: true });
   const backupPath = existing
     ? await backupExistingFile(targetPath, options.now)
@@ -438,6 +482,11 @@ export async function writeSwitchboardImportPlan(
   const clientCleanup = options.cleanupClient
     ? await writeClientCleanupPlan(plan, options.now)
     : [];
+  const refreshedPlan = await createSwitchboardImportPlan({
+    cwd,
+    ...(options.env ? { env: options.env } : {}),
+    ...(options.homeDir ? { homeDir: options.homeDir } : {})
+  });
 
   return {
     ok: true,
@@ -445,7 +494,7 @@ export async function writeSwitchboardImportPlan(
     action: existing ? "updated" : "created",
     targetPath,
     backupPath,
-    plan,
+    plan: refreshedPlan,
     createdProfiles: importableServers.map((server) => server.suggestedProfileName),
     clientCleanup,
     nextContent
@@ -485,14 +534,20 @@ function assertNoNamespaceCollisions(
 
 function renderMergedImportConfig(
   existingContent: string | null,
-  servers: ImportDetectedServer[]
+  servers: ImportDetectedServer[],
+  acceptedRisks: BypassFinding[] = []
 ): string {
-  const rendered = renderImportConfig(servers);
+  const existing = existingContent?.trim()
+    ? parseConfigYaml(existingContent, ".switchboard.yaml")
+    : {};
+  const rendered = renderImportConfig(
+    servers,
+    mergeAcceptedDirectRisks(existing, acceptedRisks)
+  );
   if (!existingContent?.trim()) {
     return `${stringifyYaml(rendered, { lineWidth: 0 })}`;
   }
 
-  const existing = parseConfigYaml(existingContent, ".switchboard.yaml");
   const merged = deepMerge(existing, rendered);
   const parsed = switchboardConfigSchema.safeParse(merged);
   if (!parsed.success) {
@@ -504,7 +559,54 @@ function renderMergedImportConfig(
   })}`;
 }
 
-function renderImportConfig(servers: ImportDetectedServer[]): SwitchboardConfig {
+function mergeAcceptedDirectRisks(
+  existing: Record<string, unknown>,
+  acceptedRisks: BypassFinding[]
+): BypassFinding[] {
+  const byId = new Map<string, BypassFinding>();
+  const existingRisks = isRecord(existing.acceptedRisks)
+    ? existing.acceptedRisks
+    : {};
+  const directMcp = Array.isArray(existingRisks.directMcp)
+    ? existingRisks.directMcp
+    : [];
+  for (const risk of directMcp) {
+    if (
+      isRecord(risk) &&
+      typeof risk.id === "string" &&
+      (risk.client === "codex" || risk.client === "claude") &&
+      typeof risk.serverName === "string"
+    ) {
+      byId.set(risk.id, {
+        id: risk.id,
+        status: "accepted",
+        severity: "medium",
+        client: risk.client,
+        targetPath: "",
+        serverName: risk.serverName,
+        provider: "unknown",
+        command: null,
+        args: [],
+        envKeys: [],
+        suggestedProfileName: "",
+        riskTags: ["direct-mcp-server"],
+        reasons: [],
+        nextActions: [],
+        acceptedRiskGuidance:
+          "This direct route is marked as accepted risk; it remains visible and prevents controlled authority status."
+      });
+    }
+  }
+  for (const risk of acceptedRisks) {
+    byId.set(risk.id, risk);
+  }
+  return [...byId.values()];
+}
+
+function renderImportConfig(
+  servers: ImportDetectedServer[],
+  acceptedRisks: BypassFinding[] = []
+): Record<string, unknown> {
   const profiles = Object.fromEntries(
     servers.map((server) => [
       server.suggestedProfileName,
@@ -524,18 +626,50 @@ function renderImportConfig(servers: ImportDetectedServer[]): SwitchboardConfig 
     ])
   );
 
-  return {
+  const config: Record<string, unknown> = {
     version: 1,
     defaults: {},
     profiles,
-    workspaces: {
+    policies: {}
+  };
+
+  if (servers.length > 0) {
+    config.workspaces = {
       default: {
         paths: ["."],
         profiles: servers.map((server) => server.suggestedProfileName)
       }
-    },
-    policies: {}
-  };
+    };
+  }
+
+  if (acceptedRisks.length > 0) {
+    config.acceptedRisks = {
+      directMcp: acceptedRisks.map((risk) => ({
+        id: risk.id,
+        client: risk.client,
+        serverName: risk.serverName
+      }))
+    };
+  }
+
+  return config;
+}
+
+async function writeAcceptedDirectRisks(
+  targetPath: string,
+  acceptedRisks: BypassFinding[],
+  now?: Date
+): Promise<{ backupPath: string | null; nextContent: string | null }> {
+  const existing = await readOptionalTextFileAsync(targetPath);
+  const nextContent = renderMergedImportConfig(existing, [], acceptedRisks);
+  if (existing === nextContent) {
+    return { backupPath: null, nextContent: null };
+  }
+
+  await mkdir(dirname(targetPath), { recursive: true });
+  const backupPath = existing ? await backupExistingFile(targetPath, now) : null;
+  await writeFile(targetPath, nextContent, "utf8");
+  return { backupPath, nextContent };
 }
 
 function renderImportedEnv(
@@ -852,6 +986,11 @@ export function buildRiskFindings(options: {
   bypassFindings: BypassFinding[];
 }): RiskFinding[] {
   const findings: RiskFinding[] = [];
+  const acceptedBypassIds = new Set(
+    options.bypassFindings
+      .filter((finding) => finding.status === "accepted")
+      .map((finding) => finding.id)
+  );
 
   for (const file of options.envFiles) {
     for (const envKey of file.envKeys) {
@@ -872,6 +1011,26 @@ export function buildRiskFindings(options: {
           nextActions: [
             "Use a non-prod/test token alias for setup.",
             "Create an explicit production mandate only if this access is intentional."
+          ]
+        });
+      }
+
+      if (isSecretLikeName(envKey)) {
+        findings.push({
+          id: `env:${file.path}:${envKey}:secret`,
+          kind: "secret_env_hint",
+          severity: "medium",
+          provider,
+          source: {
+            kind: "env-file",
+            path: file.path
+          },
+          evidence: [envKey],
+          reason:
+            "This env name looks secret-like; agents should receive it only through an intentional profile secretRef.",
+          nextActions: [
+            "Review whether this value belongs in an agent profile.",
+            "Store agent-needed values with switchboard secrets set <ref> --value-stdin."
           ]
         });
       }
@@ -923,6 +1082,9 @@ export function buildRiskFindings(options: {
       if (server.routesThroughSwitchboard) {
         continue;
       }
+      if (acceptedBypassIds.has(`${client.client}:${server.name}`)) {
+        continue;
+      }
       const adminEvidence = [
         ...server.envKeys.filter((key) => /ADMIN|ROOT|SERVICE[_-]?ROLE/i.test(key)),
         ...server.args.filter((arg) => /--tools=all|admin|service[_-]?role/i.test(arg))
@@ -951,6 +1113,40 @@ export function buildRiskFindings(options: {
     }
   }
 
+  const providerRoutes = new Map<string, Array<{ client: string; server: string }>>();
+  for (const client of options.clients) {
+    for (const server of client.servers) {
+      if (server.routesThroughSwitchboard || server.provider === "unknown") {
+        continue;
+      }
+      const routes = providerRoutes.get(server.provider) ?? [];
+      routes.push({ client: client.client, server: server.name });
+      providerRoutes.set(server.provider, routes);
+    }
+  }
+  for (const [provider, routes] of providerRoutes) {
+    if (routes.length < 2) {
+      continue;
+    }
+    findings.push({
+      id: `client:${provider}:duplicate-direct-route`,
+      kind: "duplicate_provider_route",
+      severity: "medium",
+      provider: provider as ScanProviderId,
+      source: {
+        kind: "client-config",
+        path: routes.map((route) => `${route.client}:${route.server}`).join(", ")
+      },
+      evidence: routes.map((route) => `${route.client}:${route.server}`),
+      reason:
+        "Multiple direct MCP routes expose the same provider outside one repo-scoped Switchboard authority path.",
+      nextActions: [
+        "switchboard import --dry-run",
+        "switchboard import --write --cleanup-client"
+      ]
+    });
+  }
+
   return dedupeRiskFindings(findings);
 }
 
@@ -970,6 +1166,7 @@ export function buildBypassFindings(options: {
   homeDir?: string;
   clients: ImportClientDetection[];
   switchboardProfiles: ImportSwitchboardProfile[];
+  acceptedDirect?: Set<string>;
 }): BypassFinding[] {
   const hasSwitchboardClientRoute = options.clients.some((client) =>
     client.servers.some((server) => server.routesThroughSwitchboard)
@@ -1030,9 +1227,11 @@ export function buildBypassFindings(options: {
             ? "high"
             : "medium";
 
+        const id = `${client.client}:${server.name}`;
+        const accepted = options.acceptedDirect?.has(id) ?? false;
         return {
-          id: `${client.client}:${server.name}`,
-          status: "unaccepted" as const,
+          id,
+          status: accepted ? "accepted" as const : "unaccepted" as const,
           severity,
           client: client.client,
           targetPath: client.targetPath,
@@ -1049,9 +1248,23 @@ export function buildBypassFindings(options: {
             server.suggestedSecretRefs.length > 0
               ? `switchboard secrets set ${server.suggestedSecretRefs[0]?.ref ?? "<ref>"} --value-stdin`
               : `switchboard import --write`
-          ]
+          ],
+          acceptedRiskGuidance: accepted
+            ? "This direct route is marked as accepted risk; it remains visible and prevents controlled authority status."
+            : `If this direct route is intentional, rerun with --accept-direct ${id} to preserve it as accepted risk.`
         };
       })
+  );
+}
+
+function collectAcceptedDirectRiskIds(options: {
+  configured: string[];
+  requested: string[];
+}): Set<string> {
+  return new Set(
+    [...options.configured, ...options.requested]
+      .map((value) => value.trim())
+      .filter((value) => /^[a-z]+:[^:\s]+$/.test(value))
   );
 }
 
@@ -1097,15 +1310,29 @@ function looksLikeBroadFilesystemMount(
 }
 
 function buildClientCleanupPlan(
-  clients: ImportClientDetection[]
+  clients: ImportClientDetection[],
+  acceptedDirect: Set<string>
 ): ImportClientCleanupPlan[] {
   return clients.map((client) => {
     const affectedServerNames = client.servers
-      .filter((server) => !server.routesThroughSwitchboard)
+      .filter(
+        (server) =>
+          !server.routesThroughSwitchboard &&
+          !acceptedDirect.has(`${client.client}:${server.name}`)
+      )
+      .map((server) => server.name);
+    const acceptedServerNames = client.servers
+      .filter(
+        (server) =>
+          !server.routesThroughSwitchboard &&
+          acceptedDirect.has(`${client.client}:${server.name}`)
+      )
       .map((server) => server.name);
     const acceptedRiskGuidance =
-      affectedServerNames.length > 0
-        ? `If any direct route is intentional, leave it in place for now and document the accepted risk; accepted-risk persistence is planned after cleanup V0.`
+      acceptedServerNames.length > 0
+        ? `Accepted direct route(s) preserved: ${acceptedServerNames.join(", ")}. They remain visible and keep authority status at partial-control.`
+        : affectedServerNames.length > 0
+          ? `If any direct route is intentional, rerun with --accept-direct <client:server> to preserve it as accepted risk.`
         : "No direct MCP routes need accepted-risk handling.";
 
     if (client.status === "missing") {

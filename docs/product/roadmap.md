@@ -306,6 +306,13 @@ Implemented in the current codebase:
 - shared recommended-next-action planner plus `switchboard next`, surfaced in
   `scan`, `doctor`, and import output as one primary action with structured
   alternatives
+- additive `authorityStatus` in `scan`, `doctor`, and import output with
+  `controlled`, `partial-control`, `bypass-present`, and `invalid` states
+- import/cleanup human output now frames existing direct MCP access as a
+  before/after cleanup plan with backups, rollback, and next actions
+- `switchboard import --write --cleanup-client --accept-direct <client:server>`
+  preserves intentional direct MCP routes as visible accepted risk instead of
+  silently removing or hiding them
 
 Not started:
 
@@ -316,7 +323,8 @@ Not started:
 - global/user-scope client installers
 - Supabase, PostHog, or Sentry integrations
 - real Stripe test-mode MCP dogfood against an observed live `@stripe/mcp` tool
-  surface beyond the fixture-backed `stripe-test` safety proof
+  surface beyond the fixture-backed `stripe-test` safety proof; current blocker
+  is an MCP-authorized restricted Stripe test key
 
 Remaining roadmap should be grouped into these buckets:
 

@@ -1,25 +1,35 @@
 # Switchboard
 
-Safe, repo-aware tool access for coding agents.
+Clean up repo-scoped agent tool access, then give coding agents bounded
+authority.
 
-Switchboard looks at a repo, imports or sets up the MCP tools that belong
-there, and gives agents bounded workspace authority instead of your whole
-developer environment.
+Switchboard looks at a repo, finds scattered Claude/Codex MCP config, imports
+or sets up the tools that belong there, and gives agents bounded workspace
+authority instead of permanent mystery access to your whole developer
+environment.
 
 The first aha should be simple:
 
 ```bash
 switchboard scan
 switchboard import --dry-run
+switchboard import --write --cleanup-client
+switchboard doctor
 switchboard setup github-ci
 switchboard mandate create --from github-ci --json
-switchboard mcp --mandate fix-ci
 ```
 
-Setup/import is the front door. Mandates and workspace leases are the deeper
-layer: temporary, task-scoped records that bind repo, worktree, branch, agent
-role, profiles, allowed/denied tools, approval gates, lease expiry, audit
-state, and a harness-friendly MCP launch payload.
+Import/cleanup is the front door: one project Switchboard endpoint, local
+`secretRef`s, backups, rollback commands, and clear authority status. Mandates
+and workspace leases are the deeper layer: temporary, task-scoped records that
+bind repo, worktree, branch, agent role, profiles, allowed/denied tools,
+approval gates, lease expiry, audit state, and a harness-friendly MCP launch
+payload.
+
+Switchboard is not a sandbox. It controls routed Switchboard MCP and
+`switchboard run` paths. Direct MCP routes, raw env vars, browser sessions,
+provider CLIs, and unrestricted shell access can bypass it unless you clean
+them up or intentionally mark them as accepted risk.
 
 ## Install
 
@@ -51,8 +61,9 @@ Then run the repo setup flow from the project you want agents to work in:
 ```bash
 switchboard scan
 switchboard import --dry-run
-switchboard setup github-ci
+switchboard import --write --cleanup-client
 switchboard doctor
+switchboard setup github-ci
 switchboard install codex --write
 switchboard mandate create --from github-ci
 ```
@@ -114,6 +125,8 @@ switchboard scan --json
 switchboard import --dry-run
 switchboard import --json
 switchboard import --write
+switchboard import --write --cleanup-client
+switchboard import --write --cleanup-client --accept-direct <client:server>
 switchboard init
 switchboard setup <github-ci|vercel-preview|stripe-test>
 switchboard add <github-ci|vercel-preview|stripe-test>

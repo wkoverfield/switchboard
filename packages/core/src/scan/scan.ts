@@ -7,6 +7,10 @@ import {
   statSync
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import {
+  planAuthorityStatus,
+  type AuthorityStatus
+} from "../authority/authority-status.js";
 import { loadSwitchboardConfig } from "../config/load-config.js";
 import {
   createSwitchboardImportPlan,
@@ -82,6 +86,7 @@ export interface SwitchboardScanResult {
   };
   riskFindings: RiskFinding[];
   bypassFindings: BypassFinding[];
+  authorityStatus: AuthorityStatus;
   suggestions: ScanSuggestion[];
   warnings: string[];
   recommendedNextAction: RecommendedNextAction;
@@ -210,6 +215,15 @@ export async function scanSwitchboardProject(
       nextActions
     })
   );
+  const authorityStatus = planAuthorityStatus({
+    diagnostics: loaded.diagnostics,
+    invalidClientConfigs: clients.some((client) => client.status === "invalid"),
+    bypassFindings,
+    riskFindings,
+    switchboardConfigured: profileNames.length > 0,
+    switchboardInstalled: clients.some((client) => client.status === "installed"),
+    recommendedNextAction
+  });
 
   return {
     schemaVersion: scanSchemaVersion,
@@ -240,6 +254,7 @@ export async function scanSwitchboardProject(
     },
     riskFindings,
     bypassFindings,
+    authorityStatus,
     suggestions,
     warnings,
     recommendedNextAction,
