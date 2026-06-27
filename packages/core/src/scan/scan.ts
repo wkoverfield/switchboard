@@ -8,6 +8,10 @@ import {
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { loadSwitchboardConfig } from "../config/load-config.js";
+import {
+  createSwitchboardImportPlan,
+  type BypassFinding
+} from "../import/import-plan.js";
 import { inspectProjectClientConfigs } from "../install/client-config.js";
 import type { ProjectClientConfigInspection } from "../install/client-config.js";
 
@@ -70,6 +74,7 @@ export interface SwitchboardScanResult {
     profileNames: string[];
     workspaceNames: string[];
   };
+  bypassFindings: BypassFinding[];
   suggestions: ScanSuggestion[];
   warnings: string[];
   nextActions: string[];
@@ -153,6 +158,12 @@ export async function scanSwitchboardProject(
     ...(options.command ? { command: options.command } : {}),
     ...(options.commandArgs ? { commandArgs: options.commandArgs } : {})
   });
+  const importPlan = await createSwitchboardImportPlan({
+    cwd: root,
+    ...(options.env ? { env: options.env } : {}),
+    ...(options.homeDir ? { homeDir: options.homeDir } : {})
+  });
+  const bypassFindings = importPlan.bypassFindings;
   const envFiles = scanEnvFiles(root);
   const providers = collectProviderHints({
     root,
@@ -165,7 +176,12 @@ export async function scanSwitchboardProject(
     devcontainerPresent: existsSync(join(root, ".devcontainer", "devcontainer.json")),
     vercelProjectPresent: existsSync(join(root, ".vercel", "project.json"))
   } as const;
-  const warnings = buildWarnings({ providers, profileNames, clients });
+  const warnings = buildWarnings({
+    providers,
+    profileNames,
+    clients,
+    bypassFindings
+  });
   const suggestions = buildSuggestions({
     providers,
     profileNames,
@@ -200,9 +216,13 @@ export async function scanSwitchboardProject(
       profileNames,
       workspaceNames
     },
+    bypassFindings,
     suggestions,
     warnings,
-    nextActions: nextActionsFromSuggestions(suggestions)
+    nextActions: [
+      ...(bypassFindings.length > 0 ? ["switchboard import --dry-run"] : []),
+      ...nextActionsFromSuggestions(suggestions)
+    ]
   };
 }
 
@@ -455,6 +475,7 @@ function buildWarnings(options: {
   providers: ScanProviderHint[];
   profileNames: string[];
   clients: ProjectClientConfigInspection[];
+  bypassFindings: BypassFinding[];
 }): string[] {
   const warnings: string[] = [];
   const installedClients = options.clients.filter(
@@ -488,6 +509,17 @@ function buildWarnings(options: {
   if (options.profileNames.length > 0 && installedClients.length === 0) {
     warnings.push(
       "Switchboard profiles are configured, but Codex/Claude project config is not installed yet."
+    );
+  }
+
+  if (options.bypassFindings.length > 0) {
+    const high = options.bypassFindings.filter(
+      (finding) => finding.severity === "high"
+    ).length;
+    warnings.push(
+      high > 0
+        ? `${options.bypassFindings.length} direct MCP bypass finding(s), including ${high} high-risk finding(s), were detected.`
+        : `${options.bypassFindings.length} direct MCP bypass finding(s) were detected.`
     );
   }
 

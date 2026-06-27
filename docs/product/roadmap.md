@@ -279,6 +279,9 @@ Implemented in the current codebase:
   `@switchboard-mcp/mcp-runtime@0.1.1`, and
   `@switchboard-mcp/cli@0.1.1`
 - `pnpm eval:published-alpha` for public-package install/usefulness checks
+- Bypass Findings V0 in `scan`, `doctor`, and import output, including
+  high-risk direct MCP route classification and a failing doctor check for
+  unresolved authority bypasses
 
 Not started:
 

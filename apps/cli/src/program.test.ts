@@ -1488,6 +1488,63 @@ describe("switchboard CLI program", () => {
     expect(parsed.nextSteps).toContain("switchboard install codex --write");
   });
 
+  it("fails doctor when direct MCP bypass routes coexist with Switchboard", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      join(root, ".codex", "config.toml"),
+      [
+        "[mcp_servers.switchboard]",
+        'command = "switchboard"',
+        `args = ["--cwd", "${root}", "mcp"]`,
+        "",
+        "[mcp_servers.github]",
+        'command = "docker"',
+        'args = ["run", "GITHUB_TOKEN=ghp_doctor_should_not_print", "ghcr.io/github/github-mcp-server"]',
+        'env = { GITHUB_TOKEN = "ghp_doctor_should_not_print" }'
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "doctor", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      status: string;
+      checks: Array<{ name: string; ok: boolean }>;
+      bypassFindings: Array<{
+        id: string;
+        severity: string;
+        riskTags: string[];
+      }>;
+      nextSteps: string[];
+    };
+    const serialized = JSON.stringify(parsed);
+
+    expect(parsed.ok).toBe(false);
+    expect(parsed.status).toBe("failed");
+    expect(parsed.checks).toContainEqual(
+      expect.objectContaining({ name: "direct-mcp-bypass", ok: false })
+    );
+    expect(parsed.bypassFindings).toContainEqual(
+      expect.objectContaining({
+        id: "codex:github",
+        severity: "high",
+        riskTags: expect.arrayContaining([
+          "switchboard-coexists",
+          "secret-env-name",
+          "token-like-arg"
+        ])
+      })
+    );
+    expect(parsed.nextSteps).toContain("switchboard import --dry-run");
+    expect(serialized).not.toContain("ghp_doctor_should_not_print");
+  });
+
   it("reports installed client configs with missing launch commands", async () => {
     const root = makeTempProject();
     writeStdioConfig(root);
