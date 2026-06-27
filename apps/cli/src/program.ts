@@ -4088,6 +4088,14 @@ function repoAwarePresetDefaults(
       secretRef: `vercel/${repoName}/preview/token`
     };
   }
+  if (presetId === "stripe-test") {
+    const profileName = `stripe_${repoName}_test`;
+    return {
+      profileName,
+      namespace: profileName,
+      secretRef: `stripe/${repoName}/test/secret-key`
+    };
+  }
 
   const template = getProviderSafetyTemplate(presetId);
   return {
@@ -6720,7 +6728,9 @@ function providerAuthCommandForMissingSecret(
       ? getProviderSafetyTemplate("github-ci")
       : profile.provider === "vercel"
         ? getProviderSafetyTemplate("vercel-preview")
-        : undefined;
+        : profile.provider === "stripe"
+          ? getProviderSafetyTemplate("stripe-test")
+          : undefined;
   if (!preset) {
     return undefined;
   }
@@ -6747,6 +6757,11 @@ function providerTemplateDoctorNextSteps(
         `switchboard presets check vercel-preview --profile ${profileName}`
       );
       steps.push("switchboard mandate create --from vercel-preview");
+    }
+
+    if (profile.provider === "stripe") {
+      steps.push(`switchboard presets check stripe-test --profile ${profileName}`);
+      steps.push("switchboard mandate create --from stripe-test");
     }
   }
 

@@ -13,11 +13,15 @@ describe("provider safety templates", () => {
   it("lists built-in provider templates without raw secret values", () => {
     expect(listProviderSafetyTemplates().map((template) => template.id)).toEqual([
       "github-ci",
+      "stripe-test",
       "vercel-preview"
     ]);
     expect(JSON.stringify(listProviderSafetyTemplates())).not.toContain("ghp_");
     expect(JSON.stringify(listProviderSafetyTemplates())).not.toContain(
       "vercel-token-value"
+    );
+    expect(JSON.stringify(listProviderSafetyTemplates())).not.toContain(
+      "sk_live_secret"
     );
   });
 
@@ -131,6 +135,116 @@ describe("provider safety templates", () => {
     expect(rendered.credentialGuidance.avoidScopes).toContain(
       "production promotion"
     );
+  });
+
+  it("renders Stripe test policy with test-mode credential guidance", () => {
+    const rendered = renderProviderSafetyTemplate("stripe-test", {
+      namespace: "stripe_findu_test",
+      secretRef: "stripe/findu/test/secret-key"
+    });
+    const parsed = switchboardConfigSchema.parse(parseYaml(rendered.configYaml));
+
+    expect(parsed.profiles.stripe_test).toMatchObject({
+      provider: "stripe",
+      environment: "test",
+      mode: "guarded",
+      upstream: {
+        command: "npx",
+        args: ["-y", "@stripe/mcp", "--tools=all"],
+        env: {
+          STRIPE_API_KEY: {
+            secretRef: "stripe/findu/test/secret-key"
+          }
+        }
+      }
+    });
+    expect(rendered.mandateCommand).toContain(
+      "--deny-tool 'stripe_findu_test_*live*'"
+    );
+    expect(rendered.mandateCommand).toContain(
+      "--deny-tool 'stripe_findu_test_payout*'"
+    );
+    expect(rendered.mandateCommand).toContain(
+      "--require-approval-labels 'stripe,test,money'"
+    );
+    expect(rendered.credentialGuidance.posture).toContain("test-mode");
+    expect(rendered.credentialGuidance.avoidScopes).toContain(
+      "live-mode secret keys"
+    );
+    expect(rendered.notes.join(" ")).toContain("real money");
+    expect(rendered.configYaml).not.toContain("sk_live");
+  });
+
+  it("classifies Stripe test live and payment-affecting tools safely", () => {
+    const result = checkProviderSafetyTemplateTools("stripe-test", {
+      namespace: "stripe_test",
+      toolNames: [
+        "stripe_test_list_customers",
+        "stripe_test_get_payment_intent",
+        "stripe_test_search_charges",
+        "stripe_test_create_customer",
+        "stripe_test_update_subscription",
+        "stripe_test_refund_charge",
+        "stripe_test_cancel_subscription",
+        "stripe_test_capture_payment_intent",
+        "stripe_test_confirm_payment_intent",
+        "stripe_test_live_charges",
+        "stripe_test_production_balance",
+        "stripe_test_payout_create",
+        "stripe_test_transfer_create",
+        "stripe_test_account_update",
+        "stripe_test_webhook_secret_create",
+        "stripe_test_token_create",
+        "github_findu_checks_list"
+      ]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.counts).toMatchObject({
+      tools: 17,
+      allowed: 3,
+      approvalRequired: 6,
+      denied: 7,
+      allowedSensitive: 0,
+      notAllowed: 1
+    });
+    expect(result.tools).toMatchObject([
+      { toolName: "stripe_test_list_customers", classification: "allowed" },
+      { toolName: "stripe_test_get_payment_intent", classification: "allowed" },
+      { toolName: "stripe_test_search_charges", classification: "allowed" },
+      {
+        toolName: "stripe_test_create_customer",
+        classification: "approval_required"
+      },
+      {
+        toolName: "stripe_test_update_subscription",
+        classification: "approval_required"
+      },
+      {
+        toolName: "stripe_test_refund_charge",
+        classification: "approval_required"
+      },
+      {
+        toolName: "stripe_test_cancel_subscription",
+        classification: "approval_required"
+      },
+      {
+        toolName: "stripe_test_capture_payment_intent",
+        classification: "approval_required"
+      },
+      {
+        toolName: "stripe_test_confirm_payment_intent",
+        classification: "approval_required"
+      },
+      { toolName: "stripe_test_live_charges", classification: "denied" },
+      { toolName: "stripe_test_production_balance", classification: "denied" },
+      { toolName: "stripe_test_payout_create", classification: "denied" },
+      { toolName: "stripe_test_transfer_create", classification: "denied" },
+      { toolName: "stripe_test_account_update", classification: "denied" },
+      { toolName: "stripe_test_webhook_secret_create", classification: "denied" },
+      { toolName: "stripe_test_token_create", classification: "denied" },
+      { toolName: "github_findu_checks_list", classification: "not_allowed" }
+    ]);
   });
 
   it("reports unknown templates", () => {
