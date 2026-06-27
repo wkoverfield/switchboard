@@ -14,6 +14,11 @@ import {
 } from "../import/import-plan.js";
 import { inspectProjectClientConfigs } from "../install/client-config.js";
 import type { ProjectClientConfigInspection } from "../install/client-config.js";
+import {
+  planRecommendedNextAction,
+  type NextActionCandidate,
+  type RecommendedNextAction
+} from "../next-actions/next-actions.js";
 
 export const scanSchemaVersion = "switchboard.scan.v1";
 
@@ -77,6 +82,7 @@ export interface SwitchboardScanResult {
   bypassFindings: BypassFinding[];
   suggestions: ScanSuggestion[];
   warnings: string[];
+  recommendedNextAction: RecommendedNextAction;
   nextActions: string[];
 }
 
@@ -188,6 +194,18 @@ export async function scanSwitchboardProject(
     clients,
     repoName: basename(root)
   });
+  const nextActions = [
+    ...(bypassFindings.length > 0 ? ["switchboard import --dry-run"] : []),
+    ...nextActionsFromSuggestions(suggestions)
+  ];
+  const recommendedNextAction = planRecommendedNextAction(
+    scanNextActionCandidates({
+      diagnostics: loaded.diagnostics,
+      bypassFindings,
+      suggestions,
+      nextActions
+    })
+  );
 
   return {
     schemaVersion: scanSchemaVersion,
@@ -219,11 +237,52 @@ export async function scanSwitchboardProject(
     bypassFindings,
     suggestions,
     warnings,
-    nextActions: [
-      ...(bypassFindings.length > 0 ? ["switchboard import --dry-run"] : []),
-      ...nextActionsFromSuggestions(suggestions)
-    ]
+    recommendedNextAction,
+    nextActions
   };
+}
+
+function scanNextActionCandidates(options: {
+  diagnostics: Array<{ level: string }>;
+  bypassFindings: BypassFinding[];
+  suggestions: ScanSuggestion[];
+  nextActions: string[];
+}): NextActionCandidate[] {
+  const candidates: NextActionCandidate[] = [];
+  if (options.diagnostics.some((diagnostic) => diagnostic.level === "error")) {
+    candidates.push({
+      kind: "invalid-config",
+      command: "switchboard doctor",
+      reason: "Switchboard config has diagnostics that should be fixed first."
+    });
+  }
+  if (options.bypassFindings.length > 0) {
+    candidates.push({
+      kind: "bypass-cleanup",
+      command: "switchboard import --dry-run",
+      reason: "Direct MCP routes can bypass Switchboard authority."
+    });
+  }
+  for (const suggestion of options.suggestions) {
+    candidates.push({
+      kind:
+        suggestion.kind === "client-install"
+          ? "client-install"
+          : suggestion.kind === "mandate"
+            ? "mandate-create"
+            : "provider-setup",
+      command: suggestion.command,
+      reason: suggestion.reason
+    });
+  }
+  for (const action of options.nextActions) {
+    candidates.push({
+      kind: "info",
+      command: action,
+      reason: "Additional setup command suggested by scan."
+    });
+  }
+  return candidates;
 }
 
 function gitOutput(cwd: string, args: string[]): string | null {

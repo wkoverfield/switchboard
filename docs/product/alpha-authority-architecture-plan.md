@@ -302,12 +302,16 @@ Add to workspace lease:
 product should make the next step obvious. Humans need one recommendation,
 while agents/harnesses need structured alternatives.
 
+Recommended Next Action V0 is shipped. `scan`, `doctor`, import output, and
+`switchboard next` use a shared planner that returns one primary action plus
+structured alternatives.
+
 ### Build
 
 - Add a planner function in core that ranks repo state into one recommended
   next action.
 - Surface it in `scan`, `doctor`, and import output.
-- Optional command:
+- Add command:
 
 ```bash
 switchboard next

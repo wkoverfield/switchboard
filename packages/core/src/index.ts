@@ -8,6 +8,7 @@ export * from "./install/client-config.js";
 export * from "./import/import-plan.js";
 export * from "./mandates/mandates.js";
 export * from "./namespaces/namespaces.js";
+export * from "./next-actions/next-actions.js";
 export * from "./onboarding/init-config.js";
 export * from "./providers/provider-templates.js";
 export * from "./providers/provider-add.js";
