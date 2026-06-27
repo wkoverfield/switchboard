@@ -8,15 +8,15 @@ import process from "node:process";
 const packages = [
   {
     filter: "@switchboard-mcp/core",
-    tarball: "switchboard-mcp-core-0.1.0.tgz"
+    tarball: "switchboard-mcp-core-0.1.1.tgz"
   },
   {
     filter: "@switchboard-mcp/mcp-runtime",
-    tarball: "switchboard-mcp-mcp-runtime-0.1.0.tgz"
+    tarball: "switchboard-mcp-mcp-runtime-0.1.1.tgz"
   },
   {
     filter: "@switchboard-mcp/cli",
-    tarball: "switchboard-mcp-cli-0.1.0.tgz"
+    tarball: "switchboard-mcp-cli-0.1.1.tgz"
   }
 ];
 
@@ -43,18 +43,18 @@ try {
         dependencies: {
           "@switchboard-mcp/cli": `file:${join(
             packDir,
-            "switchboard-mcp-cli-0.1.0.tgz"
+            "switchboard-mcp-cli-0.1.1.tgz"
           )}`
         },
         pnpm: {
           overrides: {
             "@switchboard-mcp/core": `file:${join(
               packDir,
-              "switchboard-mcp-core-0.1.0.tgz"
+              "switchboard-mcp-core-0.1.1.tgz"
             )}`,
             "@switchboard-mcp/mcp-runtime": `file:${join(
               packDir,
-              "switchboard-mcp-mcp-runtime-0.1.0.tgz"
+              "switchboard-mcp-mcp-runtime-0.1.1.tgz"
             )}`
           }
         }

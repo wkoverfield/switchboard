@@ -96,7 +96,7 @@ import {
   type StopDaemonResult
 } from "./daemon-runtime.js";
 
-const version = "0.1.0";
+const version = "0.1.1";
 const mandateMcpLaunchSchemaVersion = "switchboard.mcp-launch.v1";
 const workspaceLeaseSchemaVersion = "switchboard.workspace-lease.v1";
 const mandateStatusSchemaVersion = "switchboard.mandate-status.v1";

@@ -9,17 +9,17 @@ const packages = [
   {
     filter: "@switchboard-mcp/core",
     name: "@switchboard-mcp/core",
-    tarball: "switchboard-mcp-core-0.1.0.tgz"
+    tarball: "switchboard-mcp-core-0.1.1.tgz"
   },
   {
     filter: "@switchboard-mcp/mcp-runtime",
     name: "@switchboard-mcp/mcp-runtime",
-    tarball: "switchboard-mcp-mcp-runtime-0.1.0.tgz"
+    tarball: "switchboard-mcp-mcp-runtime-0.1.1.tgz"
   },
   {
     filter: "@switchboard-mcp/cli",
     name: "@switchboard-mcp/cli",
-    tarball: "switchboard-mcp-cli-0.1.0.tgz"
+    tarball: "switchboard-mcp-cli-0.1.1.tgz"
   }
 ];
 

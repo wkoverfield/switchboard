@@ -2,7 +2,7 @@
   "name": "switchboard",
   "private": true,
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "packageManager": "pnpm@10.28.2",
   "description": "Local-first MCP profile router for multiple accounts, projects, environments, and AI coding agents.",
   "scripts": {

@@ -1,6 +1,6 @@
 {
   "name": "@switchboard-mcp/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Local-first MCP profile router for multiple accounts, projects, environments, and AI coding agents.",
   "license": "UNLICENSED",

@@ -274,6 +274,10 @@ Implemented in the current codebase:
   `@switchboard-mcp/core@0.1.0`,
   `@switchboard-mcp/mcp-runtime@0.1.0`, and
   `@switchboard-mcp/cli@0.1.0`
+- redaction patch release in progress for
+  `@switchboard-mcp/core@0.1.1`,
+  `@switchboard-mcp/mcp-runtime@0.1.1`, and
+  `@switchboard-mcp/cli@0.1.1`
 - `pnpm eval:published-alpha` for public-package install/usefulness checks
 
 Not started:

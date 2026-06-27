@@ -20,7 +20,7 @@ Verify npm publish status:
 npm view @switchboard-mcp/cli version
 ```
 
-This should return `0.1.0` or newer. The published-package eval installs
+This should return `0.1.1` or newer. The published-package eval installs
 `@switchboard-mcp/cli` from npm in a clean temp directory, then checks the
 three launch claims: MCP cleanup, scoped provider setup, and harness-ready
 workspace leases.
