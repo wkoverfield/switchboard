@@ -133,7 +133,15 @@ describe("daemon runtime mandate context", () => {
       id: "req-secret",
       ok: false,
       error: expect.stringContaining('secretRef "github/findu/dev/token"'),
-      nextActions: ["switchboard secrets set github/findu/dev/token --value-stdin"]
+      nextActions: ["switchboard secrets set github/findu/dev/token --value-stdin"],
+      mcpError: {
+        schemaVersion: "switchboard.mcp-error.v1",
+        code: "missing_secret",
+        message: expect.stringContaining('secretRef "github/findu/dev/token"'),
+        nextActions: [
+          "switchboard secrets set github/findu/dev/token --value-stdin"
+        ]
+      }
     });
   });
 
@@ -274,7 +282,15 @@ describe("daemon runtime mandate context", () => {
     ).resolves.toMatchObject({
       id: "call",
       ok: false,
-      error: 'tool "github_findu_whoami" is not allowed by mandate policy'
+      error: 'tool "github_findu_whoami" is not allowed by mandate policy',
+      mcpError: {
+        schemaVersion: "switchboard.mcp-error.v1",
+        code: "denied",
+        message: 'tool "github_findu_whoami" is not allowed by mandate policy',
+        nextActions: [],
+        mandateId: "fix-ci",
+        toolName: "github_findu_whoami"
+      }
     });
   });
 
@@ -297,6 +313,18 @@ describe("daemon runtime mandate context", () => {
       ok: false,
       error:
         'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 is pending; inspect it with: switchboard approvals --mandate fix-ci; approve it with: switchboard approve approval-1 --reason "<why this is safe>"; or deny it with: switchboard deny approval-1 --reason "<why this should not run>"; then retry the original github_findu_echo tool call if approved',
+      mcpError: {
+        schemaVersion: "switchboard.mcp-error.v1",
+        code: "approval_required",
+        mandateId: "fix-ci",
+        toolName: "github_findu_echo",
+        approvalRequestId: "approval-1",
+        nextActions: [
+          "switchboard approvals --mandate fix-ci",
+          'switchboard approve approval-1 --reason "<why this is safe>"',
+          'switchboard deny approval-1 --reason "<why this should not run>"'
+        ]
+      },
       approvalRequired: {
         approvalRequestId: "approval-1",
         mandateId: "fix-ci",
@@ -400,7 +428,14 @@ describe("daemon runtime mandate context", () => {
       id: "call",
       ok: false,
       error:
-        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 was denied.'
+        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 was denied.',
+      mcpError: {
+        schemaVersion: "switchboard.mcp-error.v1",
+        code: "approval_denied",
+        mandateId: "fix-ci",
+        toolName: "github_findu_echo",
+        approvalRequestId: "approval-1"
+      }
     });
     expect(response).not.toHaveProperty("approvalRequired");
     await denial;

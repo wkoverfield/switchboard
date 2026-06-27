@@ -338,6 +338,9 @@ switchboard next --json
 
 ## Phase 4: Harness Launch Hardening
 
+Status: shipped V0 in PR TBD as an additive `switchboard.workspace-lease.v1`
+contract update.
+
 **Why fourth:** advanced users validated `workspaceLease`, but need richer
 launch context and machine-readable errors to build control loops.
 
@@ -364,6 +367,9 @@ switchboard mandate heartbeat <id> --json
 switchboard mandate status <id> --json
 ```
 
+V0 shipped `mandate status`; heartbeat remains deferred until a real harness
+needs liveness separate from status/readiness polling.
+
 ### Error Shape
 
 ```json
@@ -373,10 +379,9 @@ switchboard mandate status <id> --json
   "mandateId": "fix-ci",
   "approvalRequestId": "approval-1",
   "nextActions": [
-    {
-      "command": "switchboard",
-      "args": ["approve", "approval-1"]
-    }
+    "switchboard approvals --mandate fix-ci",
+    "switchboard approve approval-1 --reason \"<why this is safe>\"",
+    "switchboard deny approval-1 --reason \"<why this should not run>\""
   ]
 }
 ```
@@ -388,7 +393,7 @@ switchboard mandate status <id> --json
   - `mcpLaunch.env`
   - `runLaunch`
   - `structuredMcpErrors`
-  - `heartbeat`
+  - `daemonRuntimeDir`
 - Only introduce `switchboard.workspace-lease.v2` if required fields or existing
   meanings change.
 - Structured MCP error payloads use their own schema version:

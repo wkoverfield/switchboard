@@ -135,6 +135,10 @@ interface MandateMcpLaunchPayload {
   transport: "stdio";
   mandateId: string;
   cwd: string;
+  runtimeDir: string | null;
+  env: Record<string, string>;
+  approvalWaitMs: number;
+  daemonIsolation: "repo-runtime-dir" | "default";
   command: "switchboard";
   args: string[];
   commandCandidates: MandateMcpLaunchCommandCandidate[];
@@ -201,8 +205,25 @@ interface WorkspaceLeasePayload {
     status: MandateWithStatus["runtimeStatus"];
   };
   mcpLaunch: MandateMcpLaunchPayload;
+  runLaunch: WorkspaceLeaseRunLaunch;
+  capabilities: WorkspaceLeaseCapabilities;
   commands: MandateMcpLaunchCommands;
   limits: string[];
+}
+
+interface WorkspaceLeaseRunLaunch {
+  schemaVersion: "switchboard.run-launch.v1";
+  command: "switchboard";
+  args: string[];
+  env: Record<string, string>;
+  note: string;
+}
+
+interface WorkspaceLeaseCapabilities {
+  mcpLaunchEnv: true;
+  runLaunch: true;
+  structuredMcpErrors: true;
+  daemonRuntimeDir: boolean;
 }
 
 interface MandateMcpLaunchCommandCandidate {
@@ -5267,11 +5288,17 @@ function createMandateMcpLaunchPayload(
   mandate: MandateWithStatus
 ): MandateMcpLaunchPayload {
   const args = ["--cwd", mandate.repoPath, "mcp", "--mandate", mandate.id];
+  const env = createLaunchEnv();
+  const runtimeDir = env.SWITCHBOARD_RUNTIME_DIR ?? null;
   return {
     schemaVersion: mandateMcpLaunchSchemaVersion,
     transport: "stdio",
     mandateId: mandate.id,
     cwd: mandate.repoPath,
+    runtimeDir,
+    env,
+    approvalWaitMs: 0,
+    daemonIsolation: runtimeDir ? "repo-runtime-dir" : "default",
     command: "switchboard",
     args,
     commandCandidates: createMandateMcpLaunchCommandCandidates(args),
@@ -5330,6 +5357,13 @@ function createWorkspaceLeasePayload(
       status: mandate.runtimeStatus
     },
     mcpLaunch,
+    runLaunch: createWorkspaceLeaseRunLaunch(mandate, mcpLaunch.env),
+    capabilities: {
+      mcpLaunchEnv: true,
+      runLaunch: true,
+      structuredMcpErrors: true,
+      daemonRuntimeDir: Boolean(mcpLaunch.runtimeDir)
+    },
     commands: mcpLaunch.commands,
     limits: [
       "local authority contract only; this is not a sandbox",
@@ -5337,6 +5371,35 @@ function createWorkspaceLeasePayload(
       "authority expires at lease.expiresAt"
     ]
   };
+}
+
+function createWorkspaceLeaseRunLaunch(
+  mandate: MandateWithStatus,
+  env: Record<string, string>
+): WorkspaceLeaseRunLaunch {
+  return {
+    schemaVersion: "switchboard.run-launch.v1",
+    command: "switchboard",
+    args: ["--cwd", mandate.repoPath, "run", "--mandate", mandate.id, "--"],
+    env,
+    note:
+      "Append the provider CLI command after --. Run mode scopes mounted profile credentials and audits execution; it is not a filesystem or network sandbox."
+  };
+}
+
+function createLaunchEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of [
+    "SWITCHBOARD_RUNTIME_DIR",
+    "XDG_STATE_HOME",
+    "XDG_CONFIG_HOME"
+  ]) {
+    const value = process.env[key];
+    if (value) {
+      env[key] = value;
+    }
+  }
+  return env;
 }
 
 function envClassFromMandate(
