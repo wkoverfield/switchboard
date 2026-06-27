@@ -320,6 +320,7 @@ export async function handleDaemonRequest(
   tools?: NamespacedTool[];
   result?: unknown;
   error?: string;
+  nextActions?: string[];
   approvalRequired?: DaemonApprovalRequired;
 }> {
   try {
@@ -435,13 +436,15 @@ async function listConfiguredTools(
   version?: string;
   tools?: NamespacedTool[];
   error?: string;
+  nextActions?: string[];
 }> {
   const routerResult = await routerForConfiguredProfiles(context, mandateId);
   if (!routerResult.ok) {
     return {
       id,
       ok: false,
-      error: routerResult.error
+      error: routerResult.error,
+      nextActions: routerResult.nextActions ?? []
     };
   }
 
@@ -455,10 +458,12 @@ async function listConfiguredTools(
       tools: await router.discoverTools()
     };
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     return {
       id,
       ok: false,
-      error: error instanceof Error ? error.message : String(error)
+      error: message,
+      nextActions: daemonRecoveryNextActions(message)
     };
   } finally {
     await router.close().catch(() => undefined);
@@ -480,6 +485,7 @@ async function callConfiguredTool(
   version?: string;
   result?: unknown;
   error?: string;
+  nextActions?: string[];
   approvalRequired?: DaemonApprovalRequired;
 }> {
   const routerResult = await routerForConfiguredProfiles(context, mandateId);
@@ -487,7 +493,8 @@ async function callConfiguredTool(
     return {
       id,
       ok: false,
-      error: routerResult.error
+      error: routerResult.error,
+      nextActions: routerResult.nextActions ?? []
     };
   }
 
@@ -847,17 +854,34 @@ async function delay(ms: number, signal?: AbortSignal): Promise<boolean> {
   });
 }
 
+function daemonRecoveryNextActions(message: string): string[] {
+  const expired = /^mandate "([^"]+)" is expired$/.exec(message);
+  if (expired?.[1]) {
+    return [
+      `switchboard mandate renew ${expired[1]} --lease 2h`,
+      `switchboard mandate status ${expired[1]}`
+    ];
+  }
+
+  const secretRef = /secretRef "([^"]+)"/.exec(message)?.[1];
+  if (secretRef) {
+    return [`switchboard secrets set ${secretRef} --value-stdin`];
+  }
+
+  return [];
+}
+
 async function routerForConfiguredProfiles(
   context: DaemonSocketContext,
   mandateId?: string
 ): Promise<
   | { ok: true; router: GenericMcpRouter; mandate: MandateWithStatus | undefined }
-  | { ok: false; error: string }
+  | { ok: false; error: string; nextActions?: string[] }
 > {
   const loaded = loadSwitchboardConfig(optionsFromCwd(context.cwd));
   const validationError = loadedConfigError(loaded);
   if (validationError) {
-    return { ok: false, error: validationError };
+    return { ok: false, error: validationError, nextActions: ["Run switchboard doctor."] };
   }
 
   let mandate: MandateWithStatus | undefined;
@@ -872,27 +896,50 @@ async function routerForConfiguredProfiles(
       if (gitBinding && gitBinding.branch !== mandate.branch) {
         return {
           ok: false,
-          error: `mandate "${mandate.id}" is scoped to branch "${mandate.branch}", but current git branch is "${gitBinding.branch}" in ${gitBinding.worktreePath}`
+          error: `mandate "${mandate.id}" is scoped to branch "${mandate.branch}", but current git branch is "${gitBinding.branch}" in ${gitBinding.worktreePath}`,
+          nextActions: [
+            `git switch ${mandate.branch}`,
+            `switchboard mandate status ${mandate.id}`
+          ]
         };
       }
     } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        ok: false,
+        error: message,
+        nextActions: daemonRecoveryNextActions(message)
+      };
     }
   }
 
-  const profiles = await stdioProfilesFromConfig(
-    mandate
-      ? Object.fromEntries(
-          Object.entries(loaded.config.profiles).filter(([profileName]) =>
-            mandate.profiles.includes(profileName)
+  let profiles: StdioUpstreamProfile[];
+  try {
+    profiles = await stdioProfilesFromConfig(
+      mandate
+        ? Object.fromEntries(
+            Object.entries(loaded.config.profiles).filter(([profileName]) =>
+              mandate.profiles.includes(profileName)
+            )
           )
-        )
-      : loaded.config.profiles,
-    configCwdBase(loaded, context.cwd),
-    secretStore
-  );
+        : loaded.config.profiles,
+      configCwdBase(loaded, context.cwd),
+      secretStore
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      error: message,
+      nextActions: daemonRecoveryNextActions(message)
+    };
+  }
   if (profiles.length === 0) {
-    return { ok: false, error: "No stdio upstream profiles are configured." };
+    return {
+      ok: false,
+      error: "No stdio upstream profiles are configured.",
+      nextActions: ["Run switchboard setup <preset> or switchboard import --dry-run."]
+    };
   }
 
   return {

@@ -26,6 +26,12 @@ const fixtureServerPath = fileURLToPath(
   )
 );
 
+interface MandateStatusReadinessTestPayload {
+  blockers: string[];
+  nextActions: string[];
+  mandates: Record<string, { blockers: string[]; nextActions: string[] }>;
+}
+
 describe("switchboard CLI program", () => {
   afterEach(() => {
     process.exitCode = undefined;
@@ -2852,7 +2858,7 @@ describe("switchboard CLI program", () => {
       schemaVersion: "switchboard.error.v1",
       code: "mandate_not_found",
       message: `mandate "missing" was not found for ${root}`,
-      nextActions: []
+      nextActions: ["Run switchboard mandate status to list mandates for this repo."]
     });
     expect(process.exitCode).toBe(1);
   });
@@ -4671,7 +4677,7 @@ describe("switchboard CLI program", () => {
               mandateUid: "fix-ci:2026-06-19T16:00:00.000Z",
               task: "fix-ci",
               repoPath: root,
-              worktreePath: root,
+              worktreePath: realpathSync(root),
               branch: "fix/ci",
               agentRole: "lead",
               profiles: ["github_findu"],
@@ -4697,7 +4703,7 @@ describe("switchboard CLI program", () => {
                 "rerun-checks:2026-06-19T16:10:00.000Z"
               ],
               repoPath: root,
-              worktreePath: root,
+              worktreePath: realpathSync(root),
               branch: "fix/ci",
               agentRole: "worker",
               profiles: ["github_findu"],
@@ -4716,7 +4722,7 @@ describe("switchboard CLI program", () => {
               mandateUid: "fix-ci:2026-06-19T18:00:00.000Z",
               task: "fix-ci",
               repoPath: root,
-              worktreePath: root,
+              worktreePath: realpathSync(root),
               branch: "fix/ci",
               agentRole: "lead",
               profiles: ["github_findu"],
@@ -5605,21 +5611,27 @@ describe("switchboard CLI program", () => {
         schemaVersion: "switchboard.error.v1",
         code: "mandate_not_found",
         message: 'mandate "missing" was not found',
-        nextActions: []
+        nextActions: [
+          "Run switchboard mandate status to list mandates for this repo."
+        ]
       },
       {
         ok: false,
         schemaVersion: "switchboard.error.v1",
         code: "mandate_not_found",
         message: 'mandate "missing" was not found',
-        nextActions: []
+        nextActions: [
+          "Run switchboard mandate status to list mandates for this repo."
+        ]
       },
       {
         ok: false,
         schemaVersion: "switchboard.error.v1",
         code: "mandate_not_found",
         message: 'mandate "missing" was not found',
-        nextActions: []
+        nextActions: [
+          "Run switchboard mandate status to list mandates for this repo."
+        ]
       }
     ]);
     expect(process.exitCode).toBe(1);
@@ -5664,9 +5676,148 @@ describe("switchboard CLI program", () => {
       schemaVersion: "switchboard.error.v1",
       code: "mandate_not_found",
       message: 'mandate "missing" was not found',
-      nextActions: []
+      nextActions: ["Run switchboard mandate status to list mandates for this repo."]
     });
     expect(process.exitCode).toBe(1);
+  });
+
+  it("reports mandate runtime readiness blockers with exact next actions", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "main");
+    writeMandateSecretConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    mkdirSync(join(root, "state"), { recursive: true });
+    writeFileSync(
+      mandateStorePath,
+      JSON.stringify(
+        {
+          version: 1,
+          mandates: [
+            {
+              version: 1,
+              id: "fix-ci",
+              mandateUid: "fix-ci:2026-06-22T20:00:00.000Z",
+              task: "fix-ci",
+              repoPath: root,
+              worktreePath: realpathSync(root),
+              branch: "fix/ci",
+              agentRole: "worker",
+              profiles: ["vercel_preview"],
+              lease: "30m",
+              createdAt: "2026-06-22T20:00:00.000Z",
+              expiresAt: "2026-06-22T20:30:00.000Z",
+              allowedTools: [],
+              deniedTools: [],
+              approvalGates: [],
+              handoffState: "open"
+            }
+          ]
+        },
+        null,
+        2
+      ) + "\n"
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath,
+      secretStore: createMemorySecretStore({
+        "github/findu/dev/token": "ghp_secret"
+      })
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "status", "fix-ci", "--json"],
+      { from: "user" }
+    );
+    await program.parseAsync(["--cwd", root, "mandate", "status", "fix-ci"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      readiness: MandateStatusReadinessTestPayload;
+    };
+    expect(parsed.readiness).toMatchObject({
+      blockers: [
+        'mandate "fix-ci" is expired',
+        'mandate "fix-ci" is scoped to branch "fix/ci", but current git branch is "main"',
+        'secretRef "vercel/preview/token" is missing'
+      ],
+      nextActions: [
+        "switchboard mandate renew fix-ci --lease 30m",
+        "git switch fix/ci",
+        "switchboard secrets set vercel/preview/token --value-stdin"
+      ],
+      mandates: {
+        "fix-ci": {
+          blockers: [
+            'mandate "fix-ci" is expired',
+            'mandate "fix-ci" is scoped to branch "fix/ci", but current git branch is "main"',
+            'secretRef "vercel/preview/token" is missing'
+          ]
+        }
+      }
+    });
+    expect(output[1]).toContain("Runtime blockers:");
+    expect(output[1]).toContain("switchboard mandate renew fix-ci --lease 30m");
+    expect(output[1]).not.toContain("ghp_secret");
+  });
+
+  it("renews an expired open mandate lease", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "fix/ci");
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    mkdirSync(join(root, "state"), { recursive: true });
+    writeFileSync(
+      mandateStorePath,
+      JSON.stringify(
+        {
+          version: 1,
+          mandates: [
+            {
+              version: 1,
+              id: "fix-ci",
+              mandateUid: "fix-ci:2026-06-22T20:00:00.000Z",
+              task: "fix-ci",
+              repoPath: root,
+              worktreePath: realpathSync(root),
+              branch: "fix/ci",
+              agentRole: "worker",
+              profiles: ["github_findu"],
+              lease: "30m",
+              createdAt: "2026-06-22T20:00:00.000Z",
+              expiresAt: "2026-06-22T20:30:00.000Z",
+              allowedTools: [],
+              deniedTools: [],
+              approvalGates: [],
+              handoffState: "open"
+            }
+          ]
+        },
+        null,
+        2
+      ) + "\n"
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "renew", "fix-ci", "--lease", "2h", "--json"],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      mandate: { lease: string; runtimeStatus: string; expiresAt: string };
+    };
+    expect(parsed.mandate.lease).toBe("2h");
+    expect(parsed.mandate.runtimeStatus).toBe("active");
+    expect(Date.parse(parsed.mandate.expiresAt)).toBeGreaterThan(Date.now());
   });
 
   it("prints a JSON error envelope when mandate status cannot read state", async () => {

@@ -139,6 +139,14 @@ export interface CreateMandateOptions {
   now?: () => Date;
 }
 
+export interface RenewMandateOptions {
+  id: string;
+  repoPath: string;
+  lease: string;
+  path?: string;
+  now?: () => Date;
+}
+
 export interface CreateChildMandateOptions {
   parentId: string;
   task: string;
@@ -466,6 +474,56 @@ export async function updateMandateHandoff(
     await writeMandateStore(store, { path });
 
     return withRuntimeStatus(updatedMandate, handedOffAt);
+  });
+}
+
+export async function renewMandate(
+  options: RenewMandateOptions
+): Promise<MandateWithStatus> {
+  const id = normalizeMandateId(options.id);
+  if (!id) {
+    throw new Error("mandate id is required");
+  }
+  const repoPath = resolve(options.repoPath);
+  const leaseMs = parseMandateLease(options.lease);
+  const now = options.now ?? (() => new Date());
+  const renewedAt = now();
+  if (!Number.isFinite(renewedAt.getTime())) {
+    throw new Error("mandate renewal time is invalid");
+  }
+  const path = options.path ?? resolveMandateStorePath();
+
+  return withMandateStoreLock(path, async () => {
+    const store = await readMandateStore({ path });
+    const mandateIndex = findLatestMandateIndex(store.mandates, id, repoPath);
+    if (mandateIndex === -1) {
+      throw new Error(`mandate "${id}" was not found for ${repoPath}`);
+    }
+
+    const mandate = store.mandates[mandateIndex];
+    if (!mandate) {
+      throw new Error(`mandate "${id}" was not found for ${repoPath}`);
+    }
+    if (mandate.handoffState !== "open") {
+      throw new Error(
+        `mandate "${id}" is closed with handoff state "${mandate.handoffState}"`
+      );
+    }
+
+    const expiresAt = new Date(renewedAt.getTime() + leaseMs).toISOString();
+    if (mandate.maxLeaseExpiresAt && Date.parse(expiresAt) > Date.parse(mandate.maxLeaseExpiresAt)) {
+      throw new Error("mandate renewal cannot outlive parent mandate lease");
+    }
+
+    const renewedMandate = {
+      ...mandate,
+      lease: options.lease.trim(),
+      expiresAt
+    };
+    store.mandates[mandateIndex] = renewedMandate;
+    await writeMandateStore(store, { path });
+
+    return withRuntimeStatus(renewedMandate, renewedAt);
   });
 }
 
