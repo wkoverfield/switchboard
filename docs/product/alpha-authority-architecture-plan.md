@@ -79,7 +79,7 @@ portable contract that agents and harnesses consume.
 
 **Why first:** PR #107 fixed import redaction for token-like command args in
 main, but the public `0.1.0` npm package can still expose this trust break.
-Ship the safety patch before broader architecture work.
+Ship `0.1.1` as the safety patch before broader architecture work.
 
 ### Build
 

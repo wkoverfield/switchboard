@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import process from "node:process";
 
-const packageSpec = process.argv[2] ?? "@switchboard-mcp/cli@0.1.0";
+const packageSpec = process.argv[2] ?? "@switchboard-mcp/cli@0.1.1";
 const repo = resolve(import.meta.dirname, "..", "..");
 const outputRoot = join(repo, ".switchboard-evals");
 const root = mkdtempSync(join(tmpdir(), "switchboard-published-alpha-"));
@@ -29,7 +29,7 @@ try {
   installPublishedCli();
   const cliPath = join(installDir, "node_modules", ".bin", "switchboard");
   score("published CLI installed", existsSync(cliPath));
-  score("published CLI reports version", runCli(["--version"]).stdout.trim() === "0.1.0");
+  score("published CLI reports version", runCli(["--version"]).stdout.trim() === "0.1.1");
 
   const cleanRepo = createRepo("clean", "main");
   const cleanScan = runCliJson(["--cwd", cleanRepo, "scan", "--json"]);
@@ -106,7 +106,7 @@ try {
     "switchboard",
     "--version"
   ]).stdout.trim();
-  score("npx/npm exec works", npxVersion === "0.1.0");
+  score("npx/npm exec works", npxVersion === "0.1.1");
 
   score("transcript avoids raw secret", !transcriptText().includes(rawSecret));
 
