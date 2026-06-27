@@ -138,6 +138,13 @@ tools were repository creation and file deletion. Approval-gated examples
 included comments, Copilot assignment, branch/file/PR creation, issue writes,
 PR review writes, pushes, updates, and merge.
 
+Deterministic alpha proof now also exercises GitHub CI through both authority
+paths: MCP routing under `switchboard serve --mandate fix-ci` and Code
+Mode-style command execution under `switchboard run --mandate fix-ci -- ...`.
+The run-mode proof verifies that only the mounted GitHub profile secretRef env
+key is injected, raw env values stay absent, and the command run is audited
+under the mandate id.
+
 ### `vercel-preview`
 
 Purpose: inspect preview deployment/log state while production-impacting actions

@@ -20,6 +20,7 @@ switchboard presets check github-ci --profile github_ci
 switchboard install codex --write
 switchboard mandate create --from github-ci
 switchboard mcp --mandate fix-ci
+switchboard run --mandate fix-ci -- gh run list
 switchboard mandate report fix-ci --json
 ```
 
@@ -70,6 +71,15 @@ After `switchboard mcp --mandate fix-ci`:
 - The local daemon starts when needed.
 - Only the mandate-mounted profiles and policy-filtered tools are exposed.
 - Approval-required tools remain visible, but execution is gated.
+
+After `switchboard run --mandate fix-ci -- gh run list`:
+
+- Switchboard validates the mandate lease, repo, worktree, branch, profile, and
+  secret readiness before launching the command.
+- Only mounted profile `secretRef` values are injected as env vars.
+- The command run is audited with mandate id, cwd, command, args, env key names,
+  exit code, duration, and redacted output snippets.
+- This is credential scoping plus audit, not a filesystem or network sandbox.
 
 When an agent tries an approval-required tool:
 
