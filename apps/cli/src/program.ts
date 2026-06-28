@@ -792,7 +792,14 @@ export function createProgram(io: ProgramIo = {}): Command {
                 ? { acceptDirect: options.acceptDirect }
                 : {})
             });
-            const displayResult = rewriteWrittenImportCommandsForCurrentInvocation(result);
+            const postWriteNextAction = await createPostWriteNextAction({
+              cwd: result.plan.repo.cwd,
+              secretStore
+            });
+            const displayResult = formatWrittenImportForDisplay(
+              rewriteWrittenImportCommandsForCurrentInvocation(result),
+              postWriteNextAction
+            );
             writeOut(
               options.json
                 ? JSON.stringify(formatImportWriteJson(displayResult), null, 2)
@@ -3954,6 +3961,23 @@ function recommendedNextActionCandidates(
   ];
 }
 
+function nextActionCommands(action: RecommendedNextAction): string[] {
+  return uniqueStrings(
+    recommendedNextActionCandidates(action).map((candidate) => candidate.command)
+  );
+}
+
+async function createPostWriteNextAction(options: {
+  cwd: string;
+  secretStore: SecretStore;
+}): Promise<RecommendedNextAction | undefined> {
+  try {
+    return await createNextActionResult(options);
+  } catch {
+    return undefined;
+  }
+}
+
 function splitCommandPrefix(prefix: string): string[] {
   const matches = [
     ...prefix.matchAll(/'([^']*(?:'\\''[^']*)*)'|("[^"]*")|(\S+)/g)
@@ -4002,9 +4026,11 @@ function formatScanRuntime(result: SwitchboardScanResult): string {
 function formatScanDetected(result: SwitchboardScanResult): string[] {
   const lines: string[] = [];
   for (const client of result.clients) {
-    lines.push(`${capitalize(client.client)} project MCP config ${client.status}`);
+    lines.push(formatScanClientRoute(client));
     for (const name of client.otherServerNames) {
-      lines.push(`${capitalize(client.client)} also has MCP server "${name}"`);
+      lines.push(
+        `${capitalize(client.client)} direct MCP server "${name}" detected`
+      );
     }
   }
   if (result.switchboard.profileNames.length > 0) {
@@ -4029,6 +4055,26 @@ function formatScanDetected(result: SwitchboardScanResult): string[] {
     }
   }
   return [...new Set(lines)];
+}
+
+function formatScanClientRoute(client: {
+  client: "codex" | "claude";
+  status: string;
+}): string {
+  const name = capitalize(client.client);
+  if (client.status === "missing") {
+    return `${name} Switchboard route missing`;
+  }
+  if (client.status === "installed") {
+    return `${name} Switchboard route installed`;
+  }
+  if (client.status === "stale") {
+    return `${name} Switchboard route stale`;
+  }
+  if (client.status === "invalid") {
+    return `${name} project MCP config invalid`;
+  }
+  return `${name} project MCP config ${client.status}`;
 }
 
 function formatImportPlan(plan: SwitchboardImportPlan): string {
@@ -4170,8 +4216,36 @@ function formatImportPlan(plan: SwitchboardImportPlan): string {
   return lines.join("\n");
 }
 
+type ImportWriteDisplayResult = WrittenSwitchboardImportPlan & {
+  postWriteNextActions?: string[];
+};
+
+function formatWrittenImportForDisplay(
+  result: WrittenSwitchboardImportPlan,
+  postWriteNextAction: RecommendedNextAction | undefined
+): ImportWriteDisplayResult {
+  if (!postWriteNextAction) {
+    return result;
+  }
+
+  const postWriteNextActions = nextActionCommands(postWriteNextAction);
+  return {
+    ...result,
+    plan: {
+      ...result.plan,
+      recommendedNextAction: postWriteNextAction,
+      nextActions: postWriteNextActions
+    },
+    postWriteNextActions
+  };
+}
+
+function importWriteNextActions(result: ImportWriteDisplayResult): string[] {
+  return result.postWriteNextActions ?? result.plan.nextActions;
+}
+
 function formatImportWriteJson(
-  result: WrittenSwitchboardImportPlan
+  result: ImportWriteDisplayResult
 ): Record<string, unknown> {
   return {
     ok: true,
@@ -4182,14 +4256,16 @@ function formatImportWriteJson(
     createdProfiles: result.createdProfiles,
     clientCleanup: result.clientCleanup,
     plan: result.plan,
+    nextActions: importWriteNextActions(result),
     nextContent: result.nextContent
   };
 }
 
-function formatImportWrite(result: WrittenSwitchboardImportPlan): string {
+function formatImportWrite(result: ImportWriteDisplayResult): string {
   const cleanupUpdated = result.clientCleanup.some(
     (item) => item.status === "updated"
   );
+  const nextActions = importWriteNextActions(result);
   if (result.action === "noop" && !cleanupUpdated) {
     return [
       `Switchboard import found nothing new for ${result.plan.repo.name}`,
@@ -4202,7 +4278,7 @@ function formatImportWrite(result: WrittenSwitchboardImportPlan): string {
       ),
       "",
       "Next:",
-      ...result.plan.nextActions.map((action) => `- ${formatHumanCommand(action)}`)
+      ...nextActions.map((action) => `- ${formatHumanCommand(action)}`)
     ].join("\n");
   }
 
@@ -4227,7 +4303,7 @@ function formatImportWrite(result: WrittenSwitchboardImportPlan): string {
     "- Kept raw secret values out of repo and client config.",
     "",
     "Next:",
-    ...result.plan.nextActions.map((action) => `- ${formatHumanCommand(action)}`)
+    ...nextActions.map((action) => `- ${formatHumanCommand(action)}`)
   ].join("\n");
 }
 
