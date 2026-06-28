@@ -283,6 +283,10 @@ interface MandateReportReadiness {
     mandateUid: string | null;
     toolName: string;
     approvalGateId: string;
+    approvalGateReason?: string;
+    approvalGateRisk?: ApprovalRequestWithStatus["approvalGateRisk"];
+    approvalGateLabels?: string[];
+    expiresAt: string;
   }>;
   missingSecretRefs: Array<{
     ref: string;
@@ -392,9 +396,14 @@ interface MandateEscalationItem {
   approvalRequestId?: string;
   toolName?: string;
   approvalGateId?: string;
+  approvalGateReason?: string;
+  approvalGateRisk?: ApprovalRequestWithStatus["approvalGateRisk"];
+  approvalGateLabels?: string[];
+  expiresAt?: string;
   state?: Exclude<MandateWithStatus["handoffState"], "open">;
   summary?: string | null;
   nextSteps?: string[];
+  nextActions?: string[];
   artifacts?: string[];
 }
 
@@ -6049,7 +6058,17 @@ function mandateReportReadiness(options: {
       mandateId: request.mandateId,
       mandateUid: request.mandateUid ?? null,
       toolName: request.toolName,
-      approvalGateId: request.approvalGateId
+      approvalGateId: request.approvalGateId,
+      ...(request.approvalGateReason
+        ? { approvalGateReason: request.approvalGateReason }
+        : {}),
+      ...(request.approvalGateRisk
+        ? { approvalGateRisk: request.approvalGateRisk }
+        : {}),
+      ...(request.approvalGateLabels && request.approvalGateLabels.length > 0
+        ? { approvalGateLabels: request.approvalGateLabels }
+        : {}),
+      expiresAt: request.expiresAt
     }));
   const selectedProfileNames = new Set(
     selectedSubtree.flatMap((mandate) => mandate.profiles)
@@ -6186,12 +6205,20 @@ function createMandateEscalationPayload(
       approvalRequestId: request.id,
       toolName: request.toolName,
       approvalGateId: request.approvalGateId,
-      title: `Approval request ${request.id} is pending`,
-      detail: `Tool ${request.toolName} is waiting on approval gate ${request.approvalGateId}.`,
-      commands: [
-        `switchboard approve ${request.id}`,
-        `switchboard deny ${request.id}`
-      ]
+      ...(request.approvalGateReason
+        ? { approvalGateReason: request.approvalGateReason }
+        : {}),
+      ...(request.approvalGateRisk
+        ? { approvalGateRisk: request.approvalGateRisk }
+        : {}),
+      ...(request.approvalGateLabels && request.approvalGateLabels.length > 0
+        ? { approvalGateLabels: request.approvalGateLabels }
+        : {}),
+      expiresAt: request.expiresAt,
+      title: `Approval request ${request.id} needs a decision`,
+      detail: approvalEscalationDetail(request),
+      commands: approvalEscalationCommands(request),
+      nextActions: approvalEscalationNextActions(request)
     }));
   const openChildItems: MandateEscalationItem[] =
     report.readiness.openChildMandates.map((mandate) => ({
@@ -6276,6 +6303,41 @@ function createMandateEscalationPayload(
     copyText,
     items
   };
+}
+
+function approvalEscalationDetail(
+  request: MandateReportReadiness["pendingApprovalRequests"][number]
+): string {
+  const parts = [
+    `Tool ${request.toolName} is waiting on approval gate ${request.approvalGateId}`,
+    ...(request.approvalGateRisk ? [`risk:${request.approvalGateRisk}`] : []),
+    ...(request.approvalGateLabels && request.approvalGateLabels.length > 0
+      ? [`labels:${request.approvalGateLabels.join(",")}`]
+      : []),
+    ...(request.approvalGateReason ? [`reason:${request.approvalGateReason}`] : []),
+    `expires:${request.expiresAt}`
+  ];
+  return `${parts.join(" ")}.`;
+}
+
+function approvalEscalationCommands(
+  request: MandateReportReadiness["pendingApprovalRequests"][number]
+): string[] {
+  return [
+    `switchboard approvals --mandate ${request.mandateId} --json`,
+    `switchboard approve ${request.id}`,
+    `switchboard deny ${request.id}`
+  ];
+}
+
+function approvalEscalationNextActions(
+  request: MandateReportReadiness["pendingApprovalRequests"][number]
+): string[] {
+  return [
+    `decide whether ${request.toolName} is safe for mandate ${request.mandateId}`,
+    `use --reason when approving or denying to preserve decision context`,
+    `retry the original ${request.toolName} tool call after approval`
+  ];
 }
 
 function formatMandateEscalationCopyText(
@@ -6851,8 +6913,26 @@ function formatMandateEscalation(escalation: MandateEscalationPayload): string {
   for (const item of escalation.items) {
     lines.push(`  ${item.type} ${item.mandateId}: ${item.title}`);
     lines.push(`    ${item.detail}`);
+    if (item.approvalRequestId) {
+      lines.push(`    approval: ${item.approvalRequestId}`);
+    }
+    if (item.approvalGateRisk) {
+      lines.push(`    risk: ${item.approvalGateRisk}`);
+    }
+    if (item.approvalGateLabels && item.approvalGateLabels.length > 0) {
+      lines.push(`    labels: ${item.approvalGateLabels.join(", ")}`);
+    }
+    if (item.approvalGateReason) {
+      lines.push(`    reason: ${item.approvalGateReason}`);
+    }
+    if (item.expiresAt) {
+      lines.push(`    expires: ${item.expiresAt}`);
+    }
     if (item.nextSteps && item.nextSteps.length > 0) {
       lines.push(`    Next: ${item.nextSteps.join("; ")}`);
+    }
+    if (item.nextActions && item.nextActions.length > 0) {
+      lines.push(`    Actions: ${item.nextActions.join("; ")}`);
     }
     if (item.artifacts && item.artifacts.length > 0) {
       lines.push(`    Artifacts: ${item.artifacts.join(", ")}`);

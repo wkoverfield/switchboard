@@ -151,7 +151,11 @@ mandates over time.
 plan from the report data without calling a remote approval service. The payload
 includes pending approval decisions, open child mandates, blocked/cancelled
 handoffs, missing scoped `secretRef` setup blockers, suggested local commands,
-and copy text suitable for a human handoff. Harnesses should treat escalation
+and copy text suitable for a human handoff. Approval escalation items include
+the pending request id, tool, gate id, optional reason/risk/labels, expiry, and
+executable approve/deny commands plus non-command `nextActions` for retry and
+decision guidance, so supervisor agents can display a decision prompt without
+scraping the human queue. Harnesses should treat escalation
 `items[].type` and `items[].priority` as extensible and ignore unknown item
 kinds.
 

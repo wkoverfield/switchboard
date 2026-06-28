@@ -5503,6 +5503,7 @@ describe("switchboard CLI program", () => {
       delegationPath: string[];
       delegationUids: string[];
     };
+    const approvalExpiresAt = new Date(Date.now() + 3_600_000).toISOString();
     await createApprovalRequest({
       path: approvalStorePath,
       now: () => new Date("2026-06-19T16:22:00.000Z"),
@@ -5517,7 +5518,10 @@ describe("switchboard CLI program", () => {
       toolName: "github_findu_checks_rerun",
       approvalGateId: "gate-1",
       approvalGatePattern: "github_findu_checks_rerun",
-      expiresAt: new Date(Date.now() + 3_600_000).toISOString()
+      approvalGateReason: "rerunning checks changes remote GitHub state",
+      approvalGateRisk: "high",
+      approvalGateLabels: ["ci", "remote-state"],
+      expiresAt: approvalExpiresAt
     });
 
     await program.parseAsync(
@@ -5551,7 +5555,11 @@ describe("switchboard CLI program", () => {
             mandateId: "rerun-checks",
             mandateUid: child.mandateUid,
             toolName: "github_findu_checks_rerun",
-            approvalGateId: "gate-1"
+            approvalGateId: "gate-1",
+            approvalGateReason: "rerunning checks changes remote GitHub state",
+            approvalGateRisk: "high",
+            approvalGateLabels: ["ci", "remote-state"],
+            expiresAt: approvalExpiresAt
           }
         ],
         blockers: [
@@ -5576,6 +5584,7 @@ describe("switchboard CLI program", () => {
         cancelledHandoffs: 0
       },
       nextCommands: [
+        "switchboard approvals --mandate rerun-checks --json",
         "switchboard approve approval-1",
         "switchboard deny approval-1",
         "switchboard mandate report rerun-checks --json",
@@ -5589,7 +5598,21 @@ describe("switchboard CLI program", () => {
           mandateUid: child.mandateUid,
           approvalRequestId: "approval-1",
           toolName: "github_findu_checks_rerun",
-          approvalGateId: "gate-1"
+          approvalGateId: "gate-1",
+          approvalGateReason: "rerunning checks changes remote GitHub state",
+          approvalGateRisk: "high",
+          approvalGateLabels: ["ci", "remote-state"],
+          expiresAt: approvalExpiresAt,
+          commands: [
+            "switchboard approvals --mandate rerun-checks --json",
+            "switchboard approve approval-1",
+            "switchboard deny approval-1"
+          ],
+          nextActions: [
+            "decide whether github_findu_checks_rerun is safe for mandate rerun-checks",
+            "use --reason when approving or denying to preserve decision context",
+            "retry the original github_findu_checks_rerun tool call after approval"
+          ]
         },
         {
           type: "open_child_mandate",
@@ -5602,11 +5625,18 @@ describe("switchboard CLI program", () => {
     expect(JSON.parse(output[3] ?? "{}").copyText).toContain(
       "Switchboard escalation for mandate fix-ci"
     );
+    expect(JSON.parse(output[3] ?? "{}").copyText).toContain(
+      "rerunning checks changes remote GitHub state"
+    );
     expect(output[4]).toContain("Switchboard mandate escalation");
     expect(output[4]).toContain("Status: needs_attention");
     expect(output[4]).toContain("approval_request rerun-checks");
+    expect(output[4]).toContain("risk: high");
+    expect(output[4]).toContain("labels: ci, remote-state");
+    expect(output[4]).toContain("reason: rerunning checks changes remote GitHub state");
     expect(output[4]).toContain("open_child_mandate rerun-checks");
     expect(output[4]).toContain("switchboard approve approval-1");
+    expect(output[4]).toContain("use --reason when approving or denying");
   });
 
   it("reports scoped missing secret refs as mandate readiness blockers", async () => {
