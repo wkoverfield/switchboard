@@ -1350,7 +1350,7 @@ export function createProgram(io: ProgramIo = {}): Command {
         };
 
         try {
-          const written = await writeProviderAddPlan(planOptions);
+          const plan = await createProviderAddPlan(planOptions);
           const value = options.valueStdin
             ? await readSecretFromStdin()
             : await readSecretFromPrompt(
@@ -1368,11 +1368,26 @@ export function createProgram(io: ProgramIo = {}): Command {
             return;
           }
 
-          await secretStore.set(written.plan.rendered.secretRef, value);
-          await rememberSecretRef(
-            written.plan.rendered.secretRef,
-            secretIndexOptions(io.secretIndexPath)
-          );
+          let written: WrittenProviderAddPlan;
+          let tokenStored = false;
+          try {
+            await secretStore.set(plan.rendered.secretRef, value);
+            tokenStored = true;
+            await rememberSecretRef(
+              plan.rendered.secretRef,
+              secretIndexOptions(io.secretIndexPath)
+            );
+            written = await writeProviderAddPlan(planOptions);
+          } catch (error) {
+            if (tokenStored) {
+              await secretStore.delete(plan.rendered.secretRef).catch(() => undefined);
+              await forgetSecretRef(
+                plan.rendered.secretRef,
+                secretIndexOptions(io.secretIndexPath)
+              ).catch(() => undefined);
+            }
+            throw error;
+          }
           const result = {
             ok: true,
             schemaVersion: providerAddSchemaVersion,
@@ -4950,8 +4965,26 @@ function presetProfileDefaultForConfig(
   if (!template) {
     return undefined;
   }
+  const defaultWorkspaceProfiles = config.workspaces.default?.profiles ?? [];
+  const defaultWorkspacePresetProfiles = defaultWorkspaceProfiles.filter((name) => {
+    const profile = config.profiles[name];
+    return profile?.provider === template.provider &&
+      profileMatchesTemplatePreset(template.id, name, profile.namespace);
+  });
+  if (defaultWorkspacePresetProfiles.length === 1) {
+    return defaultWorkspacePresetProfiles[0];
+  }
   if (config.profiles[template.defaultProfileName]) {
     return template.defaultProfileName;
+  }
+  const presetProfiles = Object.entries(config.profiles)
+    .filter(([name, profile]) =>
+      profile.provider === template.provider &&
+      profileMatchesTemplatePreset(template.id, name, profile.namespace)
+    )
+    .map(([name]) => name);
+  if (presetProfiles.length === 1) {
+    return presetProfiles[0];
   }
   const providerProfiles = Object.entries(config.profiles)
     .filter(([, profile]) => profile.provider === template.provider)
@@ -4959,6 +4992,33 @@ function presetProfileDefaultForConfig(
   return providerProfiles.length === 1
     ? providerProfiles[0]
     : template.defaultProfileName;
+}
+
+function profileMatchesTemplatePreset(
+  presetId: string,
+  profileName: string,
+  namespace?: string
+): boolean {
+  const identifiers = [profileName, namespace ?? ""].map(safeIdentifierForCommand);
+  if (presetId === "github-ci") {
+    return identifiers.some((identifier) =>
+      identifier === "github_ci" ||
+      (identifier.startsWith("github_") && identifier.endsWith("_ci"))
+    );
+  }
+  if (presetId === "vercel-preview") {
+    return identifiers.some((identifier) =>
+      identifier === "vercel_preview" ||
+      (identifier.startsWith("vercel_") && identifier.endsWith("_preview"))
+    );
+  }
+  if (presetId === "stripe-test") {
+    return identifiers.some((identifier) =>
+      identifier === "stripe_test" ||
+      (identifier.startsWith("stripe_") && identifier.endsWith("_test"))
+    );
+  }
+  return identifiers.some((identifier) => identifier === safeIdentifierForCommand(presetId));
 }
 
 function safeIdentifierForCommand(value: string): string {
