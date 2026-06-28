@@ -8384,10 +8384,32 @@ function resolveInstallLaunch(options: {
     };
   }
 
+  const localBinary = localPackageBinaryEntrypoint();
+  if (localBinary) {
+    return {
+      command: localBinary,
+      commandArgs: []
+    };
+  }
+
   return {
     command: "switchboard",
     commandArgs: []
   };
+}
+
+function localPackageBinaryEntrypoint(): string | null {
+  const entrypoint = process.argv[1];
+  if (
+    !entrypoint ||
+    !isAbsolute(entrypoint) ||
+    basename(entrypoint) !== "switchboard" ||
+    !entrypoint.includes(`${sep}.bin${sep}`)
+  ) {
+    return null;
+  }
+
+  return entrypoint;
 }
 
 function sourceCheckoutEntrypoint(): string | null {

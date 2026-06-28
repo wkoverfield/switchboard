@@ -20,8 +20,9 @@ const packages = [
   }
 ];
 
-const packDir = mkdtempSync(join(tmpdir(), "switchboard-package-install-pack-"));
-const projectDir = mkdtempSync(join(tmpdir(), "switchboard-package-install-project-"));
+const tempRoot = tmpdir();
+const packDir = mkdtempSync(join(tempRoot, "switchboard-package-install-pack-"));
+const projectDir = mkdtempSync(join(tempRoot, "switchboard-package-install-project-"));
 
 try {
   for (const packageSpec of packages) {
@@ -41,22 +42,18 @@ try {
         private: true,
         type: "module",
         dependencies: {
+          "@switchboard-mcp/core": `file:${join(
+            packDir,
+            "switchboard-mcp-core-0.1.1.tgz"
+          )}`,
+          "@switchboard-mcp/mcp-runtime": `file:${join(
+            packDir,
+            "switchboard-mcp-mcp-runtime-0.1.1.tgz"
+          )}`,
           "@switchboard-mcp/cli": `file:${join(
             packDir,
             "switchboard-mcp-cli-0.1.1.tgz"
           )}`
-        },
-        pnpm: {
-          overrides: {
-            "@switchboard-mcp/core": `file:${join(
-              packDir,
-              "switchboard-mcp-core-0.1.1.tgz"
-            )}`,
-            "@switchboard-mcp/mcp-runtime": `file:${join(
-              packDir,
-              "switchboard-mcp-mcp-runtime-0.1.1.tgz"
-            )}`
-          }
         }
       },
       null,
@@ -78,7 +75,7 @@ try {
     ].join("\n")
   );
 
-  run("pnpm", ["install", "--ignore-workspace"], projectDir);
+  run("npm", ["install", "--prefix", projectDir]);
 
   const help = run(join(projectDir, "node_modules", ".bin", "switchboard"), [
     "--help"
