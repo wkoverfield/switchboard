@@ -27,11 +27,11 @@ describe("recommended next action planner", () => {
     ]);
 
     expect(result.primary).toMatchObject({
-      kind: "missing-secret",
-      command: "switchboard secrets set github/demo/dev/token --value-stdin"
+      kind: "bypass-cleanup",
+      command: "switchboard import --write --cleanup-client"
     });
     expect(result.alternatives.map((item) => item.kind)).toEqual([
-      "bypass-cleanup",
+      "missing-secret",
       "client-install",
       "mandate-create"
     ]);

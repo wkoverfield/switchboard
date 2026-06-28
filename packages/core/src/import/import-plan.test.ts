@@ -109,14 +109,14 @@ describe("switchboard import plan", () => {
       }
     ]);
     expect(plan.recommendedNextAction.primary).toMatchObject({
-      kind: "missing-secret",
-      command:
-        "switchboard secrets set github/stockr/dev/token --value-stdin"
+      kind: "bypass-cleanup",
+      command: "switchboard import --write --cleanup-client"
     });
     expect(plan.recommendedNextAction.alternatives).toContainEqual(
       expect.objectContaining({
-        kind: "bypass-cleanup",
-        command: "switchboard import --write --cleanup-client"
+        kind: "missing-secret",
+        command:
+          "switchboard secrets set github/stockr/dev/token --value-stdin"
       })
     );
     expect(serialized).not.toContain("ghp_should_not_print");

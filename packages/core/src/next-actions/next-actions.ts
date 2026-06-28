@@ -22,8 +22,8 @@ export interface RecommendedNextAction {
 
 const nextActionRank: Record<RecommendedNextActionKind, number> = {
   "invalid-config": 10,
-  "missing-secret": 20,
-  "bypass-cleanup": 30,
+  "bypass-cleanup": 20,
+  "missing-secret": 30,
   "provider-setup": 35,
   "client-install": 40,
   "mandate-create": 50,

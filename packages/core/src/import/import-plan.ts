@@ -319,21 +319,22 @@ export async function createSwitchboardImportPlan(
     "Dry run only: this command does not write .switchboard.yaml or client config.",
     "Secret values are never read from env files or client config; only env variable names are reported.",
     "Imported MCP servers should be treated as setup candidates until doctor and preset checks pass.",
-    "Run client install separately so existing Codex/Claude config remains backup-protected and reversible."
+    "Run client install separately so existing Codex/Claude config remains backup-protected and reversible.",
+    "Cleanup backups are exact rollback copies of original client config and may contain any raw values that were already there."
   ];
+  const cleanupPlanned = cleanupPlan.some((item) => item.status === "planned");
   const nextActions = [
-    "switchboard import --dry-run",
+    ...(cleanupPlanned ? ["switchboard import --write --cleanup-client"] : []),
     ...secretCommands.map((command) => renderCommand(command)),
-    ...(cleanupPlan.some((item) => item.status === "planned")
-      ? ["switchboard import --write --cleanup-client"]
-      : []),
-    ...installClients.map((command) => renderCommand(command))
+    ...installClients.map((command) => renderCommand(command)),
+    ...(cleanupPlanned ? [] : ["switchboard import --dry-run"])
   ];
   const recommendedNextAction = planRecommendedNextAction(
     importNextActionCandidates({
       secretCommands,
       cleanupPlan,
-      installClients
+      installClients,
+      preferCleanup: cleanupPlanned
     })
   );
   const authorityStatus = planAuthorityStatus({
@@ -384,8 +385,19 @@ function importNextActionCandidates(options: {
   secretCommands: CommandShape[];
   cleanupPlan: ImportClientCleanupPlan[];
   installClients: CommandShape[];
+  preferCleanup?: boolean;
 }): NextActionCandidate[] {
   const candidates: NextActionCandidate[] = [];
+  if (
+    options.preferCleanup &&
+    options.cleanupPlan.some((item) => item.status === "planned")
+  ) {
+    candidates.push({
+      kind: "bypass-cleanup",
+      command: "switchboard import --write --cleanup-client",
+      reason: "Remove direct MCP bypass routes from active client config with backups."
+    });
+  }
   for (const command of options.secretCommands) {
     candidates.push({
       kind: "missing-secret",
@@ -393,7 +405,10 @@ function importNextActionCandidates(options: {
       reason: "Store the token behind a local secretRef before routing agents."
     });
   }
-  if (options.cleanupPlan.some((item) => item.status === "planned")) {
+  if (
+    !options.preferCleanup &&
+    options.cleanupPlan.some((item) => item.status === "planned")
+  ) {
     candidates.push({
       kind: "bypass-cleanup",
       command: "switchboard import --write --cleanup-client",

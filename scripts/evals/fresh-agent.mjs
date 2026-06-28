@@ -16,6 +16,7 @@ import process from "node:process";
 const scenario = process.argv[2];
 const knownScenarios = new Set([
   "import",
+  "package-import",
   "github-ci",
   "expired-mandate",
   "subagent"
@@ -45,6 +46,7 @@ if (!existsSync(cliPath)) {
 mkdirSync(outputRoot, { recursive: true });
 
 const project = mkdtempSync(join(tmpdir(), `switchboard-eval-${scenario}-`));
+const packDir = mkdtempSync(join(tmpdir(), `switchboard-eval-pack-${scenario}-`));
 const stateHome = join(project, ".state");
 const transcript = [];
 const scores = [];
@@ -53,11 +55,13 @@ try {
   const result =
     scenario === "import"
       ? evalImport()
-      : scenario === "github-ci"
-        ? evalGithubCi()
-        : scenario === "expired-mandate"
-          ? evalExpiredMandate()
-          : evalSubagent();
+      : scenario === "package-import"
+        ? evalPackageImport()
+        : scenario === "github-ci"
+          ? evalGithubCi()
+          : scenario === "expired-mandate"
+            ? evalExpiredMandate()
+            : evalSubagent();
 
   const summary = {
     schemaVersion: "switchboard.fresh-agent-eval.v1",
@@ -77,6 +81,7 @@ try {
     );
   }
 } finally {
+  rmSync(packDir, { recursive: true, force: true });
   rmSync(project, { recursive: true, force: true });
 }
 
@@ -122,6 +127,75 @@ function evalImport() {
   score("kept raw secrets redacted", !JSON.stringify(plan).includes("ghp_should"));
   score("returned structured commands", Boolean(plan.commands || plan.actions));
   return { detectedActions: plan.actions?.length ?? 0 };
+}
+
+function evalPackageImport() {
+  minimalPrompt(
+    "You are in a fresh repo with messy Claude and Codex MCP configs. Use only the installed Switchboard package to inspect, clean up, and explain the safer next step."
+  );
+  initRepo("main");
+  installLocalPackages();
+  mkdirSync(join(project, ".codex"), { recursive: true });
+  writeFileSync(
+    join(project, ".codex", "config.toml"),
+    [
+      "[mcp_servers.github]",
+      'command = "docker"',
+      'args = ["run", "-e", "GITHUB_TOKEN=ghp_should_not_print", "ghcr.io/github/github-mcp-server"]',
+      'env = { GITHUB_TOKEN = "ghp_should_not_print" }',
+      "",
+      "[mcp_servers.filesystem]",
+      'command = "npx"',
+      `args = ["-y", "@modelcontextprotocol/server-filesystem", "${project}/.."]`
+    ].join("\n")
+  );
+  writeFileSync(
+    join(project, ".mcp.json"),
+    JSON.stringify(
+      {
+        mcpServers: {
+          vercel: {
+            command: "npx",
+            args: ["-y", "vercel-mcp"],
+            env: {
+              VERCEL_TOKEN: "vercel_should_not_print"
+            }
+          }
+        }
+      },
+      null,
+      2
+    )
+  );
+
+  const scan = runPackageCliJson("scan", "--json");
+  const dryRun = runPackageCliJson("import", "--dry-run", "--json");
+  const write = runPackageCliJson("import", "--write", "--cleanup-client", "--json");
+  const doctor = runPackageCliJsonAllowFailure("doctor", "--json");
+
+  score("package scan found bypasses", scan.authorityStatus?.status === "bypass-present");
+  score(
+    "package import recommended cleanup first",
+    dryRun.recommendedNextAction?.primary?.command ===
+      "switchboard import --write --cleanup-client"
+  );
+  score("package cleanup wrote backup", write.clientCleanup?.some?.((item) => item.backupPath));
+  score(
+    "package doctor gives credential next step",
+    JSON.stringify(doctor).includes("switchboard secrets set")
+  );
+  score("package eval avoided raw secrets", !/ghp_should|vercel_should/.test(transcriptText()));
+  score(
+    "package eval explains authority",
+    JSON.stringify(dryRun).includes("authorityStatus") &&
+      JSON.stringify(write).includes("clientCleanup")
+  );
+  return {
+    scanStatus: scan.authorityStatus?.status,
+    dryRunPrimary: dryRun.recommendedNextAction?.primary?.command,
+    cleanupItems: write.clientCleanup?.length ?? 0,
+    doctorStatus: doctor.status
+  };
 }
 
 function evalGithubCi() {
@@ -341,6 +415,14 @@ function runCliJsonWithInput(input, ...args) {
   return JSON.parse(runCli(args, { input }).stdout);
 }
 
+function runPackageCliJson(...args) {
+  return JSON.parse(runPackageCli(args).stdout);
+}
+
+function runPackageCliJsonAllowFailure(...args) {
+  return JSON.parse(runPackageCli(args, { allowFailure: true }).stdout);
+}
+
 function runCli(args, options = {}) {
   transcript.push({ role: "agent", command: ["switchboard", ...args].join(" ") });
   const result = run(process.execPath, [cliPath, "--cwd", project, ...args], {
@@ -357,6 +439,54 @@ function runCli(args, options = {}) {
   return result;
 }
 
+function runPackageCli(args, options = {}) {
+  const binary = join(project, "node_modules", ".bin", "switchboard");
+  transcript.push({
+    role: "agent",
+    command: ["node_modules/.bin/switchboard", ...args].join(" ")
+  });
+  const result = run(binary, ["--cwd", project, ...args], {
+    cwd: project,
+    env: { ...process.env, XDG_STATE_HOME: stateHome },
+    input: options.input,
+    allowFailure: options.allowFailure
+  });
+  transcript.push({
+    role: "tool",
+    exitCode: result.status,
+    stdout: redact(result.stdout),
+    stderr: redact(result.stderr)
+  });
+  return result;
+}
+
+function installLocalPackages() {
+  const packageSpecs = [
+    ["@switchboard-mcp/core", "packages/core"],
+    ["@switchboard-mcp/mcp-runtime", "packages/mcp-runtime"],
+    ["@switchboard-mcp/cli", "apps/cli"]
+  ];
+  for (const [filter] of packageSpecs) {
+    run("pnpm", ["--filter", filter, "pack", "--pack-destination", packDir], {
+      cwd: repo
+    });
+  }
+  const dependencies = Object.fromEntries(
+    packageSpecs.map(([name, path]) => {
+      const version = JSON.parse(
+        readFileSync(join(repo, path, "package.json"), "utf8")
+      ).version;
+      const tarball = `${name.replace("@", "").replace("/", "-")}-${version}.tgz`;
+      return [name, `file:${join(packDir, tarball)}`];
+    })
+  );
+  writeFileSync(
+    join(project, "package.json"),
+    JSON.stringify({ private: true, type: "module", dependencies }, null, 2)
+  );
+  run("npm", ["install", "--prefix", project], { cwd: project });
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? project,
@@ -364,7 +494,7 @@ function run(command, args, options = {}) {
     input: options.input,
     encoding: "utf8"
   });
-  if (result.status !== 0) {
+  if (result.status !== 0 && !options.allowFailure) {
     throw new Error(
       `${command} ${args.join(" ")} failed\nstdout:\n${redact(result.stdout)}\nstderr:\n${redact(result.stderr)}`
     );
