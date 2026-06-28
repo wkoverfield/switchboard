@@ -3910,6 +3910,62 @@ describe("switchboard CLI program", () => {
     }
   });
 
+  it("uses the package-local binary for install writes run through node_modules .bin", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+    const binDir = join(root, "node_modules", ".bin");
+    mkdirSync(binDir, { recursive: true });
+    const localBinary = join(binDir, "switchboard");
+    writeFileSync(localBinary, "#!/usr/bin/env node\n");
+    chmodSync(localBinary, 0o755);
+    const originalArgv1 = process.argv[1];
+
+    process.argv[1] = localBinary;
+    try {
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message)
+      });
+      await program.parseAsync(
+        ["--cwd", root, "install", "codex", "--write", "--json"],
+        { from: "user" }
+      );
+      await program.parseAsync(["--cwd", root, "doctor", "--json"], {
+        from: "user"
+      });
+
+      const targetPath = join(root, ".codex", "config.toml");
+      expect(readFileSync(targetPath, "utf8")).toContain(
+        `command = "${localBinary}"`
+      );
+      const doctor = JSON.parse(output[1] ?? "{}") as {
+        clientConfigs: Array<{
+          client: string;
+          launch: { command: string; args: string[] } | null;
+        }>;
+        clientLaunches: Array<{ command: string; ok: boolean }>;
+      };
+      expect(
+        doctor.clientConfigs.find((config) => config.client === "codex")?.launch
+      ).toMatchObject({
+        command: localBinary,
+        args: ["--cwd", root, "mcp"]
+      });
+      expect(doctor.clientLaunches).toContainEqual(
+        expect.objectContaining({
+          command: localBinary,
+          ok: true
+        })
+      );
+    } finally {
+      if (originalArgv1 === undefined) {
+        process.argv.splice(1, 1);
+      } else {
+        process.argv[1] = originalArgv1;
+      }
+    }
+  });
+
   it("writes project-scoped Codex install config as JSON", async () => {
     const root = makeTempProject();
     writeStdioConfig(root);
