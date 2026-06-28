@@ -935,11 +935,11 @@ export function createProgram(io: ProgramIo = {}): Command {
           });
           return;
         }
-        if (!options.valueStdin) {
+        if (!options.valueStdin && options.json) {
           writeCommandError({
             json: options.json,
             code: "missing_secret_input",
-            message: "--value-stdin is required for this non-interactive V0",
+            message: "--value-stdin is required when using --json",
             nextActions: [
               `Pipe a secret value on stdin, for example: pbpaste | switchboard secrets set ${ref} --value-stdin`
             ]
@@ -948,13 +948,17 @@ export function createProgram(io: ProgramIo = {}): Command {
         }
 
         try {
-          const value = await readSecretFromStdin();
+          const value = options.valueStdin
+            ? await readSecretFromStdin()
+            : await readSecretFromPrompt(`Paste secret value for ${ref}: `);
           if (value.length === 0) {
             writeCommandError({
               json: options.json,
               code: "empty_secret",
               message: "secret value must not be empty",
-              nextActions: ["Pipe a non-empty secret value on stdin."]
+              nextActions: options.valueStdin
+                ? ["Pipe a non-empty secret value on stdin."]
+                : [`Run switchboard secrets set ${ref} again and paste a non-empty value.`]
             });
             return;
           }
@@ -974,7 +978,10 @@ export function createProgram(io: ProgramIo = {}): Command {
           writeCommandError({
             json: options.json,
             code: "secret_set_failed",
-            message: messageFromError(error)
+            message: messageFromError(error),
+            nextActions: [
+              `For scripts or non-interactive shells, use: switchboard secrets set ${ref} --value-stdin`
+            ]
           });
         }
       }
@@ -1109,6 +1116,12 @@ export function createProgram(io: ProgramIo = {}): Command {
         const cwd = resolve(program.opts<{ cwd?: string }>().cwd ?? process.cwd());
         const defaults = repoAwarePresetDefaults(preset, cwd);
         const resolvedSecretRef = options.secretRef ?? defaults.secretRef;
+        const configuredProfileName =
+          profileNameForProviderSecretRef({
+            cwd: program.opts<{ cwd?: string }>().cwd,
+            provider: template.provider,
+            secretRef: resolvedSecretRef
+          }) ?? defaults.profileName;
         const validation = validateSecretRef(resolvedSecretRef);
         if (!validation.ok) {
           writeCommandError({
@@ -1139,6 +1152,16 @@ export function createProgram(io: ProgramIo = {}): Command {
             });
             return;
           }
+          const unsafeSecret = validateProviderSecretValue(template.id, value);
+          if (!unsafeSecret.ok) {
+            writeCommandError({
+              json: options.json,
+              code: unsafeSecret.code,
+              message: unsafeSecret.message,
+              nextActions: unsafeSecret.nextActions
+            });
+            return;
+          }
 
           await secretStore.set(resolvedSecretRef, value);
           await rememberSecretRef(resolvedSecretRef, secretIndexOptions(io.secretIndexPath));
@@ -1156,7 +1179,7 @@ export function createProgram(io: ProgramIo = {}): Command {
             ),
             nextSteps: [
               `switchboard doctor`,
-              `switchboard presets check ${template.id} --profile ${defaults.profileName}`,
+              `switchboard presets check ${template.id} --profile ${configuredProfileName}`,
               `switchboard mandate create --from ${template.id}`
             ].map((step) =>
               rewriteSwitchboardCommand(step, switchboardCommandPrefixForRepo(cwd))
@@ -1371,6 +1394,16 @@ export function createProgram(io: ProgramIo = {}): Command {
               nextActions: [
                 `Run ${formatHumanCommand(`switchboard setup ${preset}`)} again and paste a non-empty token.`
               ]
+            });
+            return;
+          }
+          const unsafeSecret = validateProviderSecretValue(template.id, value);
+          if (!unsafeSecret.ok) {
+            writeCommandError({
+              json: options.json,
+              code: unsafeSecret.code,
+              message: unsafeSecret.message,
+              nextActions: unsafeSecret.nextActions
             });
             return;
           }
@@ -1740,7 +1773,8 @@ export function createProgram(io: ProgramIo = {}): Command {
           code: "no_stdio_profiles",
           message: "no stdio upstream profiles are configured",
           nextActions: [
-            "Add at least one generic stdio profile to Switchboard config."
+            "Run switchboard setup <preset> to add a provider profile.",
+            "Run switchboard import --dry-run to inspect existing MCP configs."
           ]
         });
         return;
@@ -1785,10 +1819,12 @@ export function createProgram(io: ProgramIo = {}): Command {
           writeOut(formatToolSurface(result, mandate?.repoPath));
         }
       } catch (error) {
+        const message = messageFromError(error);
         writeCommandError({
           json: options.json,
           code: "tool_surface_failed",
-          message: messageFromError(error)
+          message,
+          nextActions: toolSurfaceFailureNextActions(message, mandate?.id)
         });
       }
     });
@@ -3200,10 +3236,11 @@ export function createProgram(io: ProgramIo = {}): Command {
         .argument("[id]", "mandate id to inspect")
         .option("--json", "print machine-readable JSON")
         .option("--all", "show mandates for all repos")
+        .option("--verbose", "show detailed policy and delegation fields")
         .action(
           async (
             id: string | undefined,
-            options: { json?: boolean; all?: boolean }
+            options: { json?: boolean; all?: boolean; verbose?: boolean }
           ) => {
             const globalOptions = program.opts<{ cwd?: string }>();
             const repoPath = options.all
@@ -3253,7 +3290,9 @@ export function createProgram(io: ProgramIo = {}): Command {
             if (options.json) {
               writeOut(JSON.stringify(result, null, 2));
             } else {
-              writeOut(formatMandateStatus(result));
+              writeOut(
+                formatMandateStatus(result, options.verbose ? { verbose: true } : {})
+              );
             }
           }
         )
@@ -4300,7 +4339,8 @@ function formatImportWrite(result: ImportWriteDisplayResult): string {
     result.clientCleanup.some((item) => item.status === "updated")
       ? "- Removed direct MCP bypass routes from active Codex/Claude project config with backups."
       : "- Left Codex and Claude client config untouched.",
-    "- Kept raw secret values out of repo and client config.",
+    "- Kept raw secret values out of Switchboard config and active cleaned client config.",
+    "- Preserved rollback backups as exact copies; keep them local because they may contain original raw token values.",
     "",
     "Next:",
     ...nextActions.map((action) => `- ${formatHumanCommand(action)}`)
@@ -4627,6 +4667,7 @@ function formatDoctor(result: {
       `Authority status: ${formatAuthorityStatusLabel(result.authorityStatus)}`
     );
     lines.push(result.authorityStatus.summary);
+    lines.push(formatAuthorityReadinessLine(result.authorityStatus.status));
   }
 
   for (const check of result.checks) {
@@ -4773,6 +4814,19 @@ function formatDoctorReadinessLine(
   }
 
   return "Blocked: fix the failing checks below before giving an agent this repo.";
+}
+
+function formatAuthorityReadinessLine(status: AuthorityStatus["status"]): string {
+  if (status === "controlled") {
+    return "Switchboard appears to be the active project MCP route; agents should use its scoped profiles, leases, approvals, and audit.";
+  }
+  if (status === "partial-control") {
+    return "Switchboard is present, but missing tokens, client setup, or accepted risks still need attention before this repo is fully ready.";
+  }
+  if (status === "bypass-present") {
+    return "Direct project MCP routes can still give agents tools outside Switchboard control; clean them up or explicitly accept the risk.";
+  }
+  return "Switchboard cannot make a trustworthy authority assessment until config or client parse errors are fixed.";
 }
 
 function formatClientConfigStatus(
@@ -5034,6 +5088,34 @@ function repoAwarePresetDefaults(
   };
 }
 
+function profileNameForProviderSecretRef(options: {
+  cwd: string | undefined;
+  provider: string;
+  secretRef: string;
+}): string | null {
+  const loaded = loadSwitchboardConfig(optionsFromCwd(options.cwd));
+  if (loadedConfigCommandError(loaded)) {
+    return null;
+  }
+
+  for (const [profileName, profile] of Object.entries(loaded.config.profiles)) {
+    if (profile.provider !== options.provider) {
+      continue;
+    }
+    const upstreamEnv = profile.upstream?.env ?? {};
+    for (const value of Object.values(upstreamEnv)) {
+      if (
+        isSecretRefRuntimeValue(value) &&
+        value.secretRef === options.secretRef
+      ) {
+        return profileName;
+      }
+    }
+  }
+
+  return null;
+}
+
 function presetProfileDefaultForConfig(
   template: NonNullable<ReturnType<typeof getProviderSafetyTemplate>> | undefined,
   config: SwitchboardConfig
@@ -5157,17 +5239,21 @@ function formatProviderSetup(result: {
 }
 
 function formatHumanCommand(command: string): string {
+  const displayCommand = command.replace(
+    /^(switchboard\s+secrets\s+set\s+\S+)\s+--value-stdin$/,
+    "$1"
+  );
   if (!isSourceCheckoutEntrypoint()) {
-    return command;
+    return displayCommand;
   }
 
-  if (command === "switchboard") {
+  if (displayCommand === "switchboard") {
     return "pnpm switchboard";
   }
 
-  return command.startsWith("switchboard ")
-    ? `pnpm switchboard ${command.slice("switchboard ".length)}`
-    : command;
+  return displayCommand.startsWith("switchboard ")
+    ? `pnpm switchboard ${displayCommand.slice("switchboard ".length)}`
+    : displayCommand;
 }
 
 function isSourceCheckoutEntrypoint(): boolean {
@@ -6786,7 +6872,7 @@ function formatMandateStatus(result: {
   repoPath: string | null;
   mandates: MandateWithStatus[];
   readiness?: MandateStatusReadiness;
-}): string {
+}, options: { verbose?: boolean } = {}): string {
   const lines = [
     "Switchboard mandates",
     `Store: ${result.path}`,
@@ -6800,27 +6886,11 @@ function formatMandateStatus(result: {
 
   lines.push("");
   for (const mandate of result.mandates) {
-    lines.push(
-      [
-        mandate.id,
-        mandate.runtimeStatus,
-        mandate.agentRole,
-        mandate.branch,
-        ...(mandate.parentMandateId
-          ? [
-              `parent:${mandate.parentMandateId}`,
-              `delegated-by:${mandate.delegatedBy ?? "unknown"}`,
-              `path:${mandate.delegationPath?.join(">") ?? mandate.id}`
-            ]
-          : []),
-        `profiles:${mandate.profiles.join(",")}`,
-        `allow:${mandate.allowedTools.length > 0 ? mandate.allowedTools.join(",") : "all"}`,
-        `deny:${mandate.deniedTools.length > 0 ? mandate.deniedTools.join(",") : "none"}`,
-        `approval:${formatApprovalGates(mandate.approvalGates, ",")}`,
-        `handoff:${mandate.handoffState}`,
-        `expires:${mandate.expiresAt}`
-      ].join(" ")
-    );
+    if (options.verbose) {
+      lines.push(formatMandateStatusVerboseLine(mandate));
+      continue;
+    }
+    lines.push(...formatMandateStatusSummaryLines(mandate));
   }
 
   if (result.readiness && result.readiness.blockers.length > 0) {
@@ -6845,6 +6915,51 @@ function formatMandateStatus(result: {
   }
 
   return lines.join("\n");
+}
+
+function formatMandateStatusSummaryLines(
+  mandate: MandateWithStatus
+): string[] {
+  const approvalCount = mandate.approvalGates.length;
+  const allowSummary =
+    mandate.allowedTools.length > 0
+      ? `${mandate.allowedTools.length} allowed`
+      : "all tools allowed";
+  const denySummary = `${mandate.deniedTools.length} denied`;
+  const approvalSummary = `${approvalCount} approval-required`;
+  return [
+    `Mandate: ${mandate.id}`,
+    `  Lease: ${mandate.runtimeStatus}; expires ${mandate.expiresAt}`,
+    `  Repo: ${mandate.repoPath}`,
+    `  Branch: ${mandate.branch}`,
+    `  Agent: ${mandate.agentRole}`,
+    `  Profiles: ${mandate.profiles.join(", ") || "none"}`,
+    `  Policy: ${allowSummary}, ${denySummary}, ${approvalSummary}`,
+    `  Handoff: ${mandate.handoffState}`,
+    `  Report: switchboard mandate report ${mandate.id}`
+  ];
+}
+
+function formatMandateStatusVerboseLine(mandate: MandateWithStatus): string {
+  return [
+    mandate.id,
+    mandate.runtimeStatus,
+    mandate.agentRole,
+    mandate.branch,
+    ...(mandate.parentMandateId
+      ? [
+          `parent:${mandate.parentMandateId}`,
+          `delegated-by:${mandate.delegatedBy ?? "unknown"}`,
+          `path:${mandate.delegationPath?.join(">") ?? mandate.id}`
+        ]
+      : []),
+    `profiles:${mandate.profiles.join(",")}`,
+    `allow:${mandate.allowedTools.length > 0 ? mandate.allowedTools.join(",") : "all"}`,
+    `deny:${mandate.deniedTools.length > 0 ? mandate.deniedTools.join(",") : "none"}`,
+    `approval:${formatApprovalGates(mandate.approvalGates, ",")}`,
+    `handoff:${mandate.handoffState}`,
+    `expires:${mandate.expiresAt}`
+  ].join(" ");
 }
 
 async function createMandateStatusReadiness(options: {
@@ -7318,6 +7433,33 @@ function secretIndexOptions(path: string | undefined): { path?: string } {
 
 function messageFromError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function validateProviderSecretValue(
+  presetId: string,
+  value: string
+):
+  | { ok: true }
+  | { ok: false; code: string; message: string; nextActions: string[] } {
+  if (presetId !== "stripe-test") {
+    return { ok: true };
+  }
+
+  const trimmed = value.trim();
+  if (/^(sk|rk)_live_/i.test(trimmed) || /(^|[_\-.])live([_\-.]|$)/i.test(trimmed)) {
+    return {
+      ok: false,
+      code: "live_stripe_key_rejected",
+      message:
+        "stripe-test only accepts Stripe test-mode credentials; this value looks live or production-scoped.",
+      nextActions: [
+        "Use a restricted Stripe test key such as rk_test_... or sk_test_....",
+        "Run switchboard setup stripe-test again with a test-mode key."
+      ]
+    };
+  }
+
+  return { ok: true };
 }
 
 async function readAllStdin(): Promise<string> {
@@ -8422,24 +8564,24 @@ function sourceCheckoutEntrypoint(): string | null {
 }
 
 function sourceCheckoutRoot(): string | null {
-  if (
-    process.env.npm_lifecycle_event !== "switchboard" ||
-    process.env.npm_package_name !== "switchboard"
-  ) {
-    return null;
-  }
-
   const entrypoint = process.argv[1];
   if (!entrypoint || !entrypoint.endsWith(`${sep}apps${sep}cli${sep}dist${sep}index.js`)) {
     return null;
   }
+  if (
+    (process.env.npm_lifecycle_event === "switchboard" &&
+      process.env.npm_package_name === "switchboard") ||
+    isAbsolute(entrypoint)
+  ) {
+    return resolve(
+      entrypoint.slice(
+        0,
+        -`${sep}apps${sep}cli${sep}dist${sep}index.js`.length
+      )
+    );
+  }
 
-  return resolve(
-    entrypoint.slice(
-      0,
-      -`${sep}apps${sep}cli${sep}dist${sep}index.js`.length
-    )
-  );
+  return null;
 }
 
 function parseTimeoutMs(value: string): number | undefined {
@@ -8546,6 +8688,26 @@ function secretResolutionNextActions(message: string): string[] {
   return ref
     ? [`switchboard secrets set ${ref} --value-stdin`]
     : ["Run switchboard secrets doctor to inspect configured secretRefs."];
+}
+
+function toolSurfaceFailureNextActions(
+  message: string,
+  mandateId: string | undefined
+): string[] {
+  const ref = /secretRef "([^"]+)"/.exec(message)?.[1];
+  if (ref) {
+    return [`switchboard secrets set ${ref} --value-stdin`];
+  }
+  if (mandateId) {
+    return [
+      `switchboard mandate status ${mandateId}`,
+      `switchboard mandate report ${mandateId}`
+    ];
+  }
+  return [
+    "switchboard mandate status",
+    "switchboard mandate create --from <preset>"
+  ];
 }
 
 async function serveProfilesOverStdio(

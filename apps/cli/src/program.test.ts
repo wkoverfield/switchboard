@@ -254,9 +254,7 @@ describe("switchboard CLI program", () => {
       };
     };
     const serialized = JSON.stringify(parsed);
-    expect(parsed.nextActions[0]).toMatch(
-      /^switchboard secrets set github\/.*\/dev\/token --value-stdin$/
-    );
+    expect(parsed.nextActions[0]).toMatch(/^switchboard secrets set github\/.*\/dev\/token --value-stdin$/);
     expect(parsed.nextActions).toContain("switchboard install codex --write");
     expect(parsed.nextActions).toContain("switchboard install claude --write");
     expect(parsed.nextActions).not.toContain("switchboard import --dry-run");
@@ -1459,6 +1457,62 @@ describe("switchboard CLI program", () => {
     expect(output.join("\n")).not.toContain("ghp_secret");
   });
 
+  it("prompts for secret refs by default for humans", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const prompts: string[] = [];
+    const store = createMemorySecretStore();
+    const program = createProgram({
+      secretStore: store,
+      secretIndexPath: join(root, "state", "secrets", "index.json"),
+      readSecretFromPrompt: async (prompt) => {
+        prompts.push(prompt);
+        return "ghp_prompt_secret";
+      },
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(["secrets", "set", "github/findu/dev/token"], {
+      from: "user"
+    });
+
+    expect(prompts).toEqual([
+      "Paste secret value for github/findu/dev/token: "
+    ]);
+    expect(await store.get("github/findu/dev/token")).toBe("ghp_prompt_secret");
+    expect(output.join("\n")).toContain(
+      "Stored secretRef github/findu/dev/token"
+    );
+    expect(output.join("\n")).not.toContain("ghp_prompt_secret");
+  });
+
+  it("requires stdin for JSON secret set commands", async () => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message),
+      readSecretFromPrompt: async () => {
+        throw new Error("json should not prompt");
+      }
+    });
+
+    await program.parseAsync(
+      ["secrets", "set", "github/findu/dev/token", "--json"],
+      { from: "user" }
+    );
+
+    expect(errors).toEqual([]);
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      code: "missing_secret_input",
+      nextActions: [
+        "Pipe a secret value on stdin, for example: pbpaste | switchboard secrets set github/findu/dev/token --value-stdin"
+      ]
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
   it("stores provider preset auth without requiring users to know the secret ref", async () => {
     const root = makeTempProject();
     const output: string[] = [];
@@ -1529,6 +1583,60 @@ describe("switchboard CLI program", () => {
     expect(await store.get("vercel/findu/preview/token")).toBe("vercel_secret");
     expect(errors).toEqual([]);
     expect(output.join("\n")).not.toContain("vercel_secret");
+  });
+
+  it("points auth follow-up checks at an existing profile using the same secretRef", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  vercel_imported_repo:",
+        "    provider: vercel",
+        "    namespace: vercel_imported_repo",
+        "    upstream:",
+        "      type: stdio",
+        "      command: npx",
+        "      args:",
+        "        - -y",
+        "        - vercel-mcp",
+        "      env:",
+        "        VERCEL_TOKEN:",
+        "          secretRef: vercel/messy/dev/token"
+      ].join("\n")
+    );
+    const output: string[] = [];
+    const store = createMemorySecretStore();
+    const program = createProgram({
+      secretStore: store,
+      secretIndexPath: join(root, "state", "secrets", "index.json"),
+      readSecretFromStdin: async () => "vercel_secret",
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "auth",
+        "vercel-preview",
+        "--secret-ref",
+        "vercel/messy/dev/token",
+        "--value-stdin",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as { nextSteps: string[] };
+    expect(parsed.nextSteps).toContain(
+      "switchboard presets check vercel-preview --profile vercel_imported_repo"
+    );
+    expect(parsed.nextSteps).not.toContain(
+      `switchboard presets check vercel-preview --profile ${vercelRepoProfile(root)}`
+    );
   });
 
   it("runs guided provider setup without exposing the token", async () => {
@@ -1673,6 +1781,60 @@ describe("switchboard CLI program", () => {
     )).toBe(true);
     expect(await store.get(stripeRepoSecretRef(root))).toBe("sk_test_secret");
     expect(output.join("\n")).not.toContain("sk_test_secret");
+  });
+
+  it("rejects live-looking Stripe keys during guided setup before writing config", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    const output: string[] = [];
+    const store = createMemorySecretStore();
+    const program = createProgram({
+      secretStore: store,
+      secretIndexPath: join(root, "state", "secrets", "index.json"),
+      readSecretFromStdin: async () => "sk_live_secret_should_not_print",
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "setup", "stripe-test", "--value-stdin", "--json"],
+      { from: "user" }
+    );
+
+    expect(existsSync(join(root, ".switchboard.yaml"))).toBe(false);
+    expect(await store.get(stripeRepoSecretRef(root))).toBeNull();
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      code: "live_stripe_key_rejected",
+      message:
+        "stripe-test only accepts Stripe test-mode credentials; this value looks live or production-scoped."
+    });
+    expect(output.join("\n")).not.toContain("sk_live_secret_should_not_print");
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("rejects live-looking Stripe keys during auth before storing secrets", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const store = createMemorySecretStore();
+    const program = createProgram({
+      secretStore: store,
+      secretIndexPath: join(root, "state", "secrets", "index.json"),
+      readSecretFromStdin: async () => "rk_live_secret_should_not_print",
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "auth", "stripe-test", "--value-stdin", "--json"],
+      { from: "user" }
+    );
+
+    expect(await store.get(stripeRepoSecretRef(root))).toBeNull();
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      code: "live_stripe_key_rejected"
+    });
+    expect(output.join("\n")).not.toContain("rk_live_secret_should_not_print");
+    expect(process.exitCode).toBe(1);
   });
 
   it("does not include raw secrets in generated client config", async () => {
@@ -3396,7 +3558,8 @@ describe("switchboard CLI program", () => {
       code: "no_stdio_profiles",
       message: "no stdio upstream profiles are configured",
       nextActions: [
-        "Add at least one generic stdio profile to Switchboard config."
+        "Run switchboard setup <preset> to add a provider profile.",
+        "Run switchboard import --dry-run to inspect existing MCP configs."
       ]
     });
     expect(process.exitCode).toBe(1);
@@ -3521,7 +3684,10 @@ describe("switchboard CLI program", () => {
       schemaVersion: "switchboard.error.v1",
       code: "tool_surface_failed",
       message: "upstream unavailable",
-      nextActions: []
+      nextActions: [
+        "switchboard mandate status",
+        "switchboard mandate create --from <preset>"
+      ]
     });
     expect(process.exitCode).toBe(1);
   });
@@ -3899,6 +4065,51 @@ describe("switchboard CLI program", () => {
           }
         }
       });
+    } finally {
+      restoreEnvValue("npm_lifecycle_event", originalLifecycle);
+      restoreEnvValue("npm_package_name", originalPackageName);
+      if (originalArgv1 === undefined) {
+        process.argv.splice(1, 1);
+      } else {
+        process.argv[1] = originalArgv1;
+      }
+    }
+  });
+
+  it("uses the direct built source entrypoint for install snippets run through node", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+    const originalLifecycle = process.env.npm_lifecycle_event;
+    const originalPackageName = process.env.npm_package_name;
+    const originalArgv1 = process.argv[1];
+    const sourceEntrypoint = join(
+      root,
+      "switchboard",
+      "apps",
+      "cli",
+      "dist",
+      "index.js"
+    );
+    delete process.env.npm_lifecycle_event;
+    delete process.env.npm_package_name;
+    process.argv[1] = sourceEntrypoint;
+
+    try {
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message)
+      });
+      await program.parseAsync(["--cwd", root, "install", "codex", "--json"], {
+        from: "user"
+      });
+
+      const parsed = JSON.parse(output[0] ?? "{}") as {
+        content: string;
+      };
+      expect(parsed.content).toContain(`command = "${process.execPath}"`);
+      expect(parsed.content).toContain(
+        `args = ["${sourceEntrypoint}", "--cwd", "${root}", "mcp"]`
+      );
     } finally {
       restoreEnvValue("npm_lifecycle_event", originalLifecycle);
       restoreEnvValue("npm_package_name", originalPackageName);
@@ -4494,9 +4705,14 @@ describe("switchboard CLI program", () => {
     await program.parseAsync(["--cwd", root, "mandate", "status"], {
       from: "user"
     });
-    expect(output[2]).toContain("allow:github_findu_*");
-    expect(output[2]).toContain("deny:*_deploy_prod");
-    expect(output[2]).toContain(
+    expect(output[2]).toContain("Mandate: fix-ci");
+    expect(output[2]).toContain("Policy: 1 allowed, 1 denied, 1 approval-required");
+    await program.parseAsync(["--cwd", root, "mandate", "status", "--verbose"], {
+      from: "user"
+    });
+    expect(output[3]).toContain("allow:github_findu_*");
+    expect(output[3]).toContain("deny:*_deploy_prod");
+    expect(output[3]).toContain(
       "approval:gate-1:github_findu_checks_rerun(risk:high labels:remote-state+ci reason:rerunning CI changes remote state)"
     );
   });
@@ -6591,6 +6807,10 @@ describe("switchboard CLI program", () => {
     await program.parseAsync(["--cwd", root, "mandate", "status", "fix-ci"], {
       from: "user"
     });
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "status", "fix-ci", "--verbose"],
+      { from: "user" }
+    );
 
     const parsed = JSON.parse(output[0] ?? "{}") as {
       readiness: MandateStatusReadinessTestPayload;
@@ -6616,9 +6836,15 @@ describe("switchboard CLI program", () => {
         }
       }
     });
+    expect(output[1]).toContain("Mandate: fix-ci");
+    expect(output[1]).toContain("Policy: all tools allowed, 0 denied, 0 approval-required");
+    expect(output[1]).toContain("Report: switchboard mandate report fix-ci");
+    expect(output[1]).not.toContain("profiles:vercel_preview");
     expect(output[1]).toContain("Runtime blockers:");
     expect(output[1]).toContain("switchboard mandate renew fix-ci --lease 30m");
     expect(output[1]).not.toContain("ghp_secret");
+    expect(output[2]).toContain("profiles:vercel_preview");
+    expect(output[2]).toContain("allow:all");
   });
 
   it("renews an expired open mandate lease", async () => {
