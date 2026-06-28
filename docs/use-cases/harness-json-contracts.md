@@ -24,6 +24,7 @@ gets for that task.
 | Mandate report | `switchboard mandate report <id> --json` | `schemaVersion: "switchboard.mandate-report.v1"` | Stable enough for harness handoff inspection |
 | Mandate escalation | `switchboard mandate escalate <id> --json` | `schemaVersion: "switchboard.mandate-escalation.v1"` | Stable enough for local escalation planning |
 | Approval requests | `switchboard approvals --mandate <id> --include-children --json` | `schemaVersion: "switchboard.approvals.v1"` | Stable enough for mandate-tree approval visibility |
+| Approval watch snapshot | `switchboard approvals --mandate <id> --watch --timeout 0 --json` | `schemaVersion: "switchboard.approvals-watch.v1"` | Stable enough for bounded supervisor polling |
 | Tool surface | `switchboard tools --mandate <id> --json` | `schemaVersion: "switchboard.tool-surface.v1"` | Stable enough for harness preflight |
 | Audit logs | `switchboard logs --mandate <id> --json` | `schemaVersion: "switchboard.audit-log.v1"` | Stable enough for post-run mandate audit inspection |
 | Mandate command errors | `switchboard mandate <create\|child\|status\|handoff\|report\|escalate> ... --json` | `schemaVersion: "switchboard.error.v1"` | Stable enough for harness failure handling |
@@ -160,6 +161,13 @@ parent/child chain. The payload includes request counts by runtime status,
 matching mandates when tree mode is enabled, and `childrenByParent` for UI or
 automation. Mandate UIDs prevent reused human ids from mixing old and new
 approval queues when available.
+
+`switchboard.approvals-watch.v1` wraps bounded approval queue polling for
+supervisor agents. Use `--timeout 0` for one snapshot, or a finite timeout such
+as `--timeout 30s`; unbounded JSON watch is rejected so a harness always gets a
+complete JSON payload. Because JSON watch buffers snapshots until completion,
+bounded JSON watch is capped at `10m`; long-running supervisors should poll with
+short windows.
 
 `switchboard.tool-surface.v1` lets a harness inspect the scoped tool surface
 before launch. The payload includes profile/tool counts, namespaced tools, and

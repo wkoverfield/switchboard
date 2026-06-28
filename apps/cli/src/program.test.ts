@@ -6707,6 +6707,153 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("watches approval requests with bounded JSON snapshots", async () => {
+    const root = makeTempProject();
+    const approvalStorePath = join(root, "state", "approvals.json");
+    await createApprovalRequest({
+      path: approvalStorePath,
+      mandateId: "fix-ci",
+      repoPath: root,
+      branch: "fix/ci",
+      toolName: "github_findu_deploy",
+      approvalGateId: "gate-1",
+      approvalGatePattern: "github_findu_deploy",
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString()
+    });
+
+    const output: string[] = [];
+    const program = createProgram({
+      approvalStorePath,
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "approvals", "--watch", "--timeout", "0", "--json"],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      schemaVersion: "switchboard.approvals-watch.v1",
+      watch: {
+        intervalMs: 2000,
+        timeoutMs: 0,
+        snapshots: 1
+      },
+      snapshots: [
+        {
+          approvals: {
+            schemaVersion: "switchboard.approvals.v1",
+            counts: { pending: 1 },
+            requests: [
+              {
+                id: "approval-1",
+                runtimeStatus: "pending",
+                toolName: "github_findu_deploy"
+              }
+            ]
+          }
+        }
+      ]
+    });
+  });
+
+  it("rejects approval watch options that cannot finish clearly", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message)
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "approvals", "--watch", "--json"],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      ["--cwd", root, "approvals", "--interval", "1s", "--json"],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "approvals",
+        "--watch",
+        "--json",
+        "--interval",
+        "0",
+        "--timeout",
+        "0"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "approvals",
+        "--watch",
+        "--json",
+        "--timeout",
+        "24h"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "approvals",
+        "--watch",
+        "--json",
+        "--timeout",
+        "30m"
+      ],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "missing_watch_timeout",
+      message: "--watch --json requires --timeout so the JSON payload can finish",
+      nextActions: [
+        "Pass --timeout 0 for one JSON snapshot, or a bounded duration like --timeout 30s."
+      ]
+    });
+    expect(JSON.parse(output[1] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "invalid_watch_options",
+      message: "--interval and --timeout require --watch"
+    });
+    expect(JSON.parse(output[2] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "invalid_watch_duration",
+      message: "--interval must be at least 1s",
+      nextActions: ["Pass --interval 1s or longer."]
+    });
+    expect(JSON.parse(output[3] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "invalid_watch_duration",
+      message: "--timeout must use 0 or a duration like 2s or 1m"
+    });
+    expect(JSON.parse(output[4] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "watch_timeout_too_long",
+      message: "--watch --json buffers snapshots and must use --timeout 10m or less",
+      nextActions: [
+        "Use --timeout 0 for one snapshot, or poll with shorter bounded windows."
+      ]
+    });
+    expect(errors).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
   it("lists approval requests across a mandate tree", async () => {
     const root = makeTempProject();
     writeMandateConfig(root);
