@@ -1515,6 +1515,44 @@ describe("switchboard CLI program", () => {
     expect(output.join("\n")).not.toContain("vercel_secret");
   });
 
+  it("does not write provider config when guided setup cannot store the token", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    const output: string[] = [];
+    const errors: string[] = [];
+    const failingStore: SecretStore = {
+      get: async () => null,
+      set: async () => {
+        throw new Error("keychain unavailable");
+      },
+      delete: async () => undefined
+    };
+    const program = createProgram({
+      secretStore: failingStore,
+      secretIndexPath: join(root, "state", "secrets", "index.json"),
+      readSecretFromStdin: async () => "ghp_secret",
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message)
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "setup", "github-ci", "--value-stdin", "--json"],
+      { from: "user" }
+    );
+
+    expect(existsSync(join(root, ".switchboard.yaml"))).toBe(false);
+    expect(existsSync(join(root, "state", "secrets", "index.json"))).toBe(false);
+    const text = [...output, ...errors].join("\n");
+    expect(text).not.toContain("ghp_secret");
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "provider_setup_failed",
+      message: "keychain unavailable"
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
   it("runs guided Stripe test setup with repo-aware secret storage", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
@@ -4444,6 +4482,67 @@ describe("switchboard CLI program", () => {
       deniedTools: expect.arrayContaining([
         "stripe_stockr_test_*live*",
         "stripe_stockr_test_*production*"
+      ])
+    });
+  });
+
+  it("uses the repo-aware workspace profile for preset mandates", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "main");
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const repoProfile = githubRepoProfile(root);
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_ci:",
+        "    provider: github",
+        "    namespace: github_ci",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "  github_legacy:",
+        "    provider: github",
+        "    namespace: github_legacy",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        `  ${repoProfile}:`,
+        "    provider: github",
+        `    namespace: ${repoProfile}`,
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "workspaces:",
+        "  default:",
+        "    paths:",
+        "      - .",
+        "    profiles:",
+        `      - ${repoProfile}`
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "mandate", "create", "--from", "github-ci", "--json"],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      mandate: { profiles: string[]; allowedTools: string[]; deniedTools: string[] };
+    };
+    expect(parsed.mandate).toMatchObject({
+      profiles: [repoProfile],
+      allowedTools: [`${repoProfile}_*`],
+      deniedTools: expect.arrayContaining([
+        `${repoProfile}_delete*`,
+        `${repoProfile}_create_repository`
       ])
     });
   });
