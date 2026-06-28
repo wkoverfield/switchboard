@@ -150,6 +150,44 @@ describe("switchboard CLI program", () => {
     expect(text).not.toContain("secret\n");
   });
 
+  it("prints scan client routes without implying direct servers are Switchboard installs", async () => {
+    const root = makeTempProject();
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      join(root, ".codex", "config.toml"),
+      [
+        "[mcp_servers.github]",
+        'command = "docker"',
+        'args = ["run", "ghcr.io/github/github-mcp-server"]'
+      ].join("\n")
+    );
+    writeFileSync(
+      join(root, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          filesystem: {
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-filesystem", root]
+          }
+        }
+      })
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "scan"], {
+      from: "user"
+    });
+
+    const text = output.join("\n");
+    expect(text).toContain("Codex Switchboard route missing");
+    expect(text).toContain('Codex direct MCP server "github" detected');
+    expect(text).toContain("Claude Switchboard route missing");
+    expect(text).toContain('Claude direct MCP server "filesystem" detected');
+    expect(text).not.toContain("Codex project MCP config missing");
+    expect(text).not.toContain('Codex also has MCP server "github"');
+  });
+
   it("prints import dry-run before and after cleanup story", async () => {
     const root = makeTempProject();
     mkdirSync(join(root, ".codex"));
@@ -181,6 +219,53 @@ describe("switchboard CLI program", () => {
     expect(text).toContain("direct client routes removed from active config");
     expect(text).toContain("Recommended next:");
     expect(text).not.toContain("ghp_import_should_not_print");
+  });
+
+  it("prints post-write import next actions instead of stale dry-run guidance", async () => {
+    const root = makeTempProject();
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      join(root, ".codex", "config.toml"),
+      [
+        "[mcp_servers.github]",
+        'command = "docker"',
+        'args = ["run", "-e", "GITHUB_TOKEN", "ghcr.io/github/github-mcp-server"]',
+        'env = { GITHUB_TOKEN = "ghp_import_should_not_print" }'
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      secretStore: createMemorySecretStore(),
+      writeOut: (message) => output.push(message)
+    });
+    await program.parseAsync(
+      ["--cwd", root, "import", "--write", "--cleanup-client", "--json"],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      nextActions: string[];
+      plan: {
+        nextActions: string[];
+        recommendedNextAction: {
+          primary: { command: string } | null;
+        };
+      };
+    };
+    const serialized = JSON.stringify(parsed);
+    expect(parsed.nextActions[0]).toMatch(
+      /^switchboard secrets set github\/.*\/dev\/token --value-stdin$/
+    );
+    expect(parsed.nextActions).toContain("switchboard install codex --write");
+    expect(parsed.nextActions).toContain("switchboard install claude --write");
+    expect(parsed.nextActions).not.toContain("switchboard import --dry-run");
+    expect(parsed.plan.nextActions).toEqual(parsed.nextActions);
+    expect(parsed.plan.recommendedNextAction.primary?.command).toBe(
+      parsed.nextActions[0]
+    );
+    expect(parsed.plan.nextActions).not.toContain("switchboard import --dry-run");
+    expect(serialized).not.toContain("ghp_import_should_not_print");
   });
 
   it("prints the recommended next action as JSON", async () => {
