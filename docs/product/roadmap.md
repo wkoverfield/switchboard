@@ -213,6 +213,9 @@ Implemented in the current codebase:
 - mandate reports include aggregated handoff results, next steps, and artifacts
 - `switchboard mandate escalate <id> --json`
 - versioned `switchboard.mandate-escalation.v1` local escalation plans
+- escalation approval items include decision context: tool, gate, reason, risk,
+  labels, expiry, executable approve/deny commands, non-command next actions,
+  and human copy
 - versioned `switchboard.error.v1` JSON error envelopes for contracted mandate
   `--json` command failures
 - versioned `switchboard.approvals.v1` approval request payloads
@@ -339,8 +342,8 @@ Remaining roadmap should be grouped into these buckets:
   without help.
 - Approval UX: make pending approval queues, approve/deny actions, stale
   decisions, and escalation copy easier for humans to operate during real
-  agent work. Human queue polish and approval watch mode are shipped; richer
-  escalation copy remains.
+  agent work. Human queue polish, approval watch mode, and decision-ready
+  escalation copy are shipped.
 - Harness Contracts: preserve versioned JSON payloads, expand structured
   command objects where useful, and keep parent/child authority flows
   scriptable without making Switchboard the orchestrator. V0 launch payloads
