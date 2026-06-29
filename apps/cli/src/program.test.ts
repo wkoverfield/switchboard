@@ -5514,7 +5514,7 @@ describe("switchboard CLI program", () => {
         "--next-step",
         "merge PR",
         "--artifact",
-        "https://github.com/woverfield/switchboard/pull/214",
+        "https://github.com/wkoverfield/switchboard/pull/214",
         "--by",
         "worker-agent",
         "--json"
@@ -5549,7 +5549,7 @@ describe("switchboard CLI program", () => {
         "--next-step",
         "merge PR",
         "--artifact",
-        "https://github.com/woverfield/switchboard/pull/214",
+        "https://github.com/wkoverfield/switchboard/pull/214",
         "--by",
         "worker-agent",
         "--ignore-readiness",
@@ -5590,7 +5590,7 @@ describe("switchboard CLI program", () => {
         handoffSummary: "checks are green",
         handoffNextSteps: ["merge PR"],
         handoffArtifacts: [
-          "https://github.com/woverfield/switchboard/pull/214"
+          "https://github.com/wkoverfield/switchboard/pull/214"
         ],
         handoffBy: "worker-agent",
         runtimeStatus: "closed"
@@ -5638,7 +5638,7 @@ describe("switchboard CLI program", () => {
             state: "completed",
             summary: "checks are green",
             nextSteps: ["merge PR"],
-            artifacts: ["https://github.com/woverfield/switchboard/pull/214"],
+            artifacts: ["https://github.com/wkoverfield/switchboard/pull/214"],
             by: "worker-agent"
           }
         ],
@@ -5652,7 +5652,7 @@ describe("switchboard CLI program", () => {
         artifacts: [
           {
             mandateId: "rerun-checks",
-            value: "https://github.com/woverfield/switchboard/pull/214"
+            value: "https://github.com/wkoverfield/switchboard/pull/214"
           }
         ]
       },
@@ -5697,7 +5697,7 @@ describe("switchboard CLI program", () => {
     expect(output[6]).toContain("at:");
     expect(output[6]).toContain("Next: merge PR");
     expect(output[6]).toContain(
-      "Artifacts: https://github.com/woverfield/switchboard/pull/214"
+      "Artifacts: https://github.com/wkoverfield/switchboard/pull/214"
     );
   });
 
@@ -6386,7 +6386,7 @@ describe("switchboard CLI program", () => {
               handoffState: "blocked",
               handoffSummary: "GitHub checks API is returning 503",
               handoffNextSteps: ["retry when checks API recovers"],
-              handoffArtifacts: ["https://github.com/woverfield/switchboard/actions"],
+              handoffArtifacts: ["https://github.com/wkoverfield/switchboard/actions"],
               handoffBy: "worker-agent",
               handoffAt: "2026-06-21T14:20:00.000Z"
             }
@@ -6425,7 +6425,7 @@ describe("switchboard CLI program", () => {
           state: "blocked",
           summary: "GitHub checks API is returning 503",
           nextSteps: ["retry when checks API recovers"],
-          artifacts: ["https://github.com/woverfield/switchboard/actions"],
+          artifacts: ["https://github.com/wkoverfield/switchboard/actions"],
           commands: ["switchboard mandate report rerun-checks --json"]
         }
       ]

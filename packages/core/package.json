@@ -9,12 +9,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/woverfield/switchboard.git",
+    "url": "https://github.com/wkoverfield/switchboard.git",
     "directory": "packages/core"
   },
-  "homepage": "https://github.com/woverfield/switchboard#readme",
+  "homepage": "https://github.com/wkoverfield/switchboard#readme",
   "bugs": {
-    "url": "https://github.com/woverfield/switchboard/issues"
+    "url": "https://github.com/wkoverfield/switchboard/issues"
   },
   "exports": {
     ".": {

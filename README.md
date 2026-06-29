@@ -49,7 +49,7 @@ npx -y @switchboard-mcp/cli@latest --help
 To work from source:
 
 ```bash
-git clone https://github.com/woverfield/switchboard.git
+git clone https://github.com/wkoverfield/switchboard.git
 cd switchboard
 pnpm install
 pnpm build

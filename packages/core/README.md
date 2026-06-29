@@ -6,4 +6,4 @@ logs, and secret references.
 
 Most users should install and run `@switchboard-mcp/cli`.
 
-Project docs: https://github.com/woverfield/switchboard
+Project docs: https://github.com/wkoverfield/switchboard

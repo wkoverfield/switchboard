@@ -4,7 +4,7 @@
 
 - Date: 2026-06-26
 - Provider presets: `github-ci`, `vercel-preview`
-- Repo: `woverfield/switchboard`
+- Repo: `wkoverfield/switchboard`
 - Runner: Wilson's local macOS source checkout
 - Agent client or harness: Switchboard CLI plus MCP SDK stdio client
 - Result: passed
@@ -15,7 +15,7 @@
 
 - GitHub token model used: local GitHub CLI token copied into Switchboard
   `secretRef`
-- GitHub token owner/scope boundary: `woverfield` account; `repo`,
+- GitHub token owner/scope boundary: `wkoverfield` account; `repo`,
   `workflow`, `read:org`, and `gist` scopes observed from `gh auth status`
 - Vercel token model used: local Vercel CLI token copied into Switchboard
   `secretRef`

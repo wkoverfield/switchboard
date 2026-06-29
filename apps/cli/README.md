@@ -19,4 +19,4 @@ switchboard mandate create --from github-ci
 switchboard mcp --mandate fix-ci
 ```
 
-Project docs: https://github.com/woverfield/switchboard
+Project docs: https://github.com/wkoverfield/switchboard

@@ -431,7 +431,7 @@ describe("mandates", () => {
       state: "completed",
       summary: "CI is green",
       nextSteps: ["merge PR"],
-      artifacts: ["https://github.com/woverfield/switchboard/pull/214"],
+      artifacts: ["https://github.com/wkoverfield/switchboard/pull/214"],
       handoffBy: "lead-agent"
     });
 
@@ -440,7 +440,7 @@ describe("mandates", () => {
       handoffState: "completed",
       handoffSummary: "CI is green",
       handoffNextSteps: ["merge PR"],
-      handoffArtifacts: ["https://github.com/woverfield/switchboard/pull/214"],
+      handoffArtifacts: ["https://github.com/wkoverfield/switchboard/pull/214"],
       handoffBy: "lead-agent",
       handoffAt: "2026-06-19T16:45:00.000Z",
       runtimeStatus: "closed"

@@ -11,7 +11,7 @@ Canonical alpha flow:
 For a pre-public alpha install from source:
 
 ```bash
-git clone https://github.com/woverfield/switchboard.git
+git clone https://github.com/wkoverfield/switchboard.git
 cd switchboard
 pnpm install
 pnpm build
