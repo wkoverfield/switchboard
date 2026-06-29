@@ -224,9 +224,19 @@ function evalGithubCi() {
     "GITHUB_PERSONAL_ACCESS_TOKEN",
     "--arg",
     secretHash,
+    "--arg",
+    "get_pull_request",
+    "--arg",
+    "rerun_workflow",
+    "--arg",
+    "delete_file",
     "--write",
     "--json"
   );
+  const namespace = add.namespace ?? profileName;
+  const allowedReadTool = `${namespace}_get_pull_request`;
+  const approvalRerunTool = `${namespace}_rerun_workflow`;
+  const deniedDeleteTool = `${namespace}_delete_file`;
   score("used Switchboard setup", add.schemaVersion === "switchboard.provider-add.v1");
   runCliJsonWithInput(
     secretValue,
@@ -245,6 +255,14 @@ function evalGithubCi() {
     profileName,
     "--json"
   );
+  const check = runCliJsonAllowFailure(
+    "presets",
+    "check",
+    "github-ci",
+    "--profile",
+    profileName,
+    "--json"
+  );
   const tools = runCliJson("tools", "--mandate", "fix-ci", "--json");
   score("created scoped mandate", mandate.mandate?.id === "fix-ci");
   score("received mcp launch", Boolean(mandate.mcpLaunch?.args));
@@ -256,6 +274,32 @@ function evalGithubCi() {
         tool.upstreamName === "echo" &&
         tool.name?.endsWith?.("_echo")
     )
+  );
+  score(
+    "classified GitHub reads as allowed",
+    check.tools?.some?.(
+      (tool) =>
+        tool.toolName === allowedReadTool && tool.classification === "allowed"
+    )
+  );
+  score(
+    "classified GitHub reruns as approval-gated",
+    check.tools?.some?.(
+      (tool) =>
+        tool.toolName === approvalRerunTool &&
+        tool.classification === "approval_required"
+    )
+  );
+  score(
+    "classified GitHub delete as denied",
+    check.tools?.some?.(
+      (tool) =>
+        tool.toolName === deniedDeleteTool && tool.classification === "denied"
+    )
+  );
+  score(
+    "hid denied GitHub tools from mandate surface",
+    !tools.tools?.some?.((tool) => tool.name === deniedDeleteTool)
   );
   score("avoided raw secrets", transcriptText().includes(secretValue) === false);
   return { mandateId: mandate.mandate?.id, toolCount: tools.tools?.length ?? 0 };
@@ -411,6 +455,10 @@ function runCliJson(...args) {
   return JSON.parse(runCli(args).stdout);
 }
 
+function runCliJsonAllowFailure(...args) {
+  return JSON.parse(runCli(args, { allowFailure: true }).stdout);
+}
+
 function runCliJsonWithInput(input, ...args) {
   return JSON.parse(runCli(args, { input }).stdout);
 }
@@ -428,7 +476,8 @@ function runCli(args, options = {}) {
   const result = run(process.execPath, [cliPath, "--cwd", project, ...args], {
     cwd: project,
     env: { ...process.env, XDG_STATE_HOME: stateHome },
-    input: options.input
+    input: options.input,
+    allowFailure: options.allowFailure
   });
   transcript.push({
     role: "tool",

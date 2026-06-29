@@ -1,6 +1,6 @@
 # Switchboard Product Eval Strategy
 
-Last updated: 2026-06-27
+Last updated: 2026-06-29
 
 Switchboard should be evaluated against product usefulness, not only command
 coverage. The current public-alpha hypothesis is:
@@ -28,6 +28,7 @@ Run these before changing launch copy, onboarding, mandate JSON contracts, or
 provider setup flows:
 
 ```bash
+pnpm eval:fresh-agent-package-import
 pnpm eval:fresh-agent-import
 pnpm eval:fresh-agent-github-ci
 pnpm eval:fresh-agent-expired-mandate
@@ -80,9 +81,16 @@ A phase is not launch-ready until one non-Wilson developer can:
 - Code-mode/CLI workflows bypass Switchboard because MCP is the only supported
   execution path.
 
-## Current Known Gap
+## Current Known Gaps
 
-Switchboard has strong MCP and harness JSON coverage. It does not yet provide a
-first-class `switchboard run` / `switchboard env` path for agents that execute
-provider CLIs or generated code instead of connecting through MCP. This should
-be considered part of the next usefulness frontier.
+Switchboard now has both MCP and `switchboard run --mandate ... -- <command>`
+coverage for local authority paths. The remaining eval gap is stronger
+provider-specific proof: the GitHub CI pack should keep proving allowed,
+approval-required, denied, audit/report, and run-mode behavior against
+GitHub-shaped fixtures and live least-privilege dogfood, then repeat the pattern
+for the second provider proof.
+
+Fresh-agent evals are deterministic usability probes, not substitutes for a
+true non-Wilson alpha test. Before launch, keep at least one blind package-mode
+run where the tester can explain the value as: Switchboard found and cleaned
+repo MCP/tool access, then created bounded authority.
