@@ -1,6 +1,6 @@
 # Switchboard Roadmap
 
-Last updated: 2026-06-27
+Last updated: 2026-06-29
 
 This is the working roadmap for Switchboard. The source planning documents live in
 `docs/product/source/` and are preserved source material from the original
@@ -24,14 +24,14 @@ with this roadmap or `docs/product/mandate-strategy.md`.
 
 ## Product North Star
 
-Switchboard gives coding agents the right tools for each repo, environment, and
-task.
+Switchboard gives coding agents repo-scoped tool authority.
 
-The simple user-facing entry point is still repo-aware MCP/environment setup:
-project-scoped agent config, correct accounts/projects per repo, dev/prod
-separation, fewer duplicate MCP configs, safer defaults, and local auditability.
-Codex and Claude Code are the shipped installer path today; Cursor and VS Code
-remain planned client surfaces.
+The simple user-facing entry point is import/cleanup for repo agent tooling:
+find scattered Claude/Codex MCP config, explain risky or duplicated direct
+routes, move active client config toward one Switchboard endpoint, keep secrets
+behind local `secretRef`s, and show a clear authority status. Codex and Claude
+Code are the shipped installer path today; Cursor and VS Code remain planned
+client surfaces.
 
 The deeper product primitive is the local mandate layer for coding agents. A
 mandate gives an agent temporary, task-scoped authority for a specific repo,
@@ -47,6 +47,7 @@ serve the mandate layer rather than become the main product claim.
 Switchboard should win by making delegated coding-agent work bounded without
 forcing simple users to understand mandates on day one:
 
+- import/cleanup as the 90-second first aha
 - one local MCP endpoint across coding-agent clients
 - repo/worktree/branch-aware profile selection, not broad inherited human access
 - optional task-scoped mandates for advanced workflows
@@ -56,6 +57,22 @@ forcing simple users to understand mandates on day one:
 - audit and handoff state scoped to repo, task, and mandate
 - clear profile namespaces so duplicate tool names are safe
 - local-first config, secrets, and policy enforcement
+
+The current demo path should stay this boring and repeatable:
+
+```bash
+switchboard scan
+switchboard import --dry-run
+switchboard import --write --cleanup-client
+switchboard doctor
+switchboard setup github-ci
+switchboard mandate create --from github-ci --json
+```
+
+Cleanup is backup-protected, not magical deletion. Cleaned active client config
+should route through Switchboard and `secretRef`s, but rollback backups are exact
+copies of the previous client config and may contain any raw values that were
+already present.
 
 ## Layered Product Compass
 
@@ -89,7 +106,8 @@ The next roadmap should optimize for:
   harnesses where useful instead of replacing them
 
 Provider presets and future `switchboard add` flows should be judged by whether
-they make safe mandates easier to create and reuse. The better next demo is:
+they make safe mandates easier to create and reuse. After the import/cleanup
+front door is obvious, the advanced mandate demo should look like:
 
 ```bash
 switchboard mandate create fix-ci \
@@ -321,6 +339,21 @@ Implemented in the current codebase:
   routing and `switchboard run` Code Mode-style credential scoping/audit
 - bounded approval watch mode with `switchboard.approvals-watch.v1` JSON
   snapshots for supervisor agents and live human approval queues
+- human-friendly `switchboard secrets set <ref>` prompts for pasted values and
+  keeps `--value-stdin` as the script/agent path
+- cleanup-first import next actions that recommend
+  `switchboard import --write --cleanup-client` when direct bypass cleanup is
+  available
+- source-checkout and package-local install recovery so generated commands are
+  runnable from either `pnpm switchboard ...` or packaged `switchboard ...`
+  workflows
+- `stripe-test` setup/auth rejects live-looking Stripe credentials before
+  writing config or storing secrets
+- package-mode fresh-agent import eval coverage with
+  `pnpm eval:fresh-agent-package-import`
+- blind-agent findings captured from package-mode evals: the import/cleanup aha
+  is legible, while credential setup, readiness wording, dense status output,
+  and backup hygiene needed polish and have been improved through PR #128
 
 Not started:
 
@@ -334,12 +367,32 @@ Not started:
   surface beyond the fixture-backed `stripe-test` safety proof; current blocker
   is an MCP-authorized restricted Stripe test key
 
+## Next Priorities After PR #128
+
+1. Roadmap and launch story sync: keep README, quickstart, and this roadmap
+   aligned around repo-scoped tool authority, the 90-second import cleanup demo,
+   and backup hygiene.
+2. GitHub CI authority pack depth: prove allowed read/check/log-like tools,
+   approval-gated rerun/comment/write-like tools, denied admin/delete/repo
+   creation, approval request creation before upstream execution, and
+   mandate-linked audit/report output across MCP and `switchboard run`.
+3. Mandate and approval usability polish: make approval gates, queues, status,
+   and reports scannable during a real agent run without weakening JSON
+   contracts for harnesses.
+4. External/blind alpha evidence: add a repeatable runbook and eval summaries
+   that distinguish deterministic smokes from true blind-agent or human
+   usability tests.
+5. Provider proof after GitHub: run real Stripe test-mode dogfood if a restricted
+   MCP-authorized test key is available; otherwise use Vercel Preview or a
+   Supabase dev/read-only design plus fixture proof.
+
 Remaining roadmap should be grouped into these buckets:
 
-- Alpha Golden Path: GitHub CI is now the canonical first-run flow, with
-  quickstart and alpha golden-path docs aligned to shipped commands. The
-  remaining proof is that one non-Wilson developer can reach a ready mandate
-  without help.
+- Alpha Golden Path: import/cleanup is the onboarding wedge and GitHub CI is
+  the canonical first authority pack. The remaining proof is that one
+  non-Wilson developer or truly fresh agent can reach a ready mandate without
+  help and explain the value as "Switchboard found and cleaned repo MCP/tool
+  access, then created bounded authority."
 - Approval UX: make pending approval queues, approve/deny actions, stale
   decisions, and escalation copy easier for humans to operate during real
   agent work. Human queue polish, approval watch mode, and decision-ready

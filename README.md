@@ -1,14 +1,12 @@
 # Switchboard
 
-Clean up repo-scoped agent tool access, then give coding agents bounded
-authority.
+Repo-scoped tool authority for coding agents.
 
 Switchboard looks at a repo, finds scattered Claude/Codex MCP config, imports
-or sets up the tools that belong there, and gives agents bounded workspace
-authority instead of permanent mystery access to your whole developer
-environment.
+or sets up the tools that belong there, and gives agents bounded authority
+instead of permanent mystery access to your whole developer environment.
 
-The first aha should be simple:
+The first 90-second alpha path should be simple:
 
 ```bash
 switchboard scan
@@ -25,6 +23,11 @@ and workspace leases are the deeper layer: temporary, task-scoped records that
 bind repo, worktree, branch, agent role, profiles, allowed/denied tools,
 approval gates, lease expiry, audit state, and a harness-friendly MCP launch
 payload.
+
+Backup hygiene: Switchboard's cleaned active config is `secretRef`-based, but
+rollback backups are exact copies of the original client config. If those files
+already contained raw tokens or env values, the backups may contain them too;
+keep backups local/private and rotate or remove old secrets after migration.
 
 Switchboard is not a sandbox. It controls routed Switchboard MCP and
 `switchboard run` paths. Direct MCP routes, raw env vars, browser sessions,
@@ -56,7 +59,7 @@ pnpm build
 pnpm switchboard --help
 ```
 
-Then run the repo setup flow from the project you want agents to work in:
+Then run the 90-second demo path from the project you want agents to work in:
 
 ```bash
 switchboard scan
@@ -64,8 +67,15 @@ switchboard import --dry-run
 switchboard import --write --cleanup-client
 switchboard doctor
 switchboard setup github-ci
+switchboard mandate create --from github-ci --json
+```
+
+For a full local Codex client run, continue:
+
+```bash
 switchboard install codex --write
-switchboard mandate create --from github-ci
+switchboard mcp --mandate fix-ci
+switchboard mandate report fix-ci --json
 ```
 
 For Claude Code:
@@ -101,6 +111,7 @@ pnpm smoke:vercel-preview-dogfood
 pnpm smoke:mandate-runtime-readiness
 pnpm smoke:provider-presets
 pnpm eval:fresh-agent-import
+pnpm eval:fresh-agent-package-import
 pnpm eval:fresh-agent-github-ci
 pnpm eval:fresh-agent-expired-mandate
 pnpm eval:fresh-agent-subagent
@@ -157,6 +168,7 @@ switchboard approvals --mandate <id> --watch
 switchboard approvals --watch --timeout 0 --json
 switchboard approve <approval-id>
 switchboard deny <approval-id>
+switchboard secrets set <ref>
 switchboard secrets set <ref> --value-stdin
 switchboard secrets list
 switchboard secrets remove <ref>
@@ -248,4 +260,4 @@ Precedence, highest to lowest:
 5. global config
 6. built-in defaults
 
-Start with `docs/install/quickstart.md`. `switchboard init` prints or writes a starter repo config, and `switchboard doctor` tells you the next command to run, including whether project Codex/Claude config is missing, stale, installed, invalid, or missing referenced local secrets. `switchboard auth <preset>` stores the recommended provider token for a preset without making humans type the internal ref. `switchboard secrets set <ref> --value-stdin`, `switchboard secrets list`, `switchboard secrets remove <ref>`, and `switchboard secrets doctor` remain the lower-level scriptable secret primitives backed by the OS keychain adapter; lists and JSON output never print secret values. Config can reference upstream env secrets as `{ secretRef: "github/findu/dev/token" }`, and runtime commands resolve those refs only before launching permitted upstream profiles. `pnpm smoke:secret-ref-profile` proves this path end to end with an isolated dev-only backend and a fixture MCP server that reports only whether the env value is present. `pnpm smoke:mandate-secret-ref` proves the same secret-backed profile can be mounted through `serve --mandate`, produces mandate-linked audit entries, and keeps the raw secret out of CLI output, MCP responses, audit logs, and mandate reports. `switchboard test <profile>` checks that a configured stdio upstream starts and lists tools. `switchboard tools --mandate <id> --json` gives scripts and harnesses the repo/mandate-scoped tool surface, including approval-gated tool metadata, without launching an agent client; the response is tagged with `schemaVersion: "switchboard.tool-surface.v1"`. `switchboard mcp` auto-starts the local daemon when needed and supports daemon-backed tool listing and routed tool calls; add `--mandate <id>` to validate an active mandate, mount that mandate's profiles, enforce its allow/deny/approval-required tool patterns, and attach the mandate id to tool-call audit entries. Approval-required tools remain discoverable with `_meta.switchboard.approvalRequired`, but execution still creates a local approval request and returns retry instructions by default; when the connected MCP client advertises form elicitation support, Switchboard can ask for an in-client approve/deny decision, persist it through the same local approval store, and retry approved calls. Add `--approval-wait 30s` or another duration up to `10m` to keep gated tool calls pending while a local `switchboard approve <id>` or `switchboard deny <id>` decision arrives. If the MCP client disconnects during a wait, or a daemon starts for the repo with leftover pending requests, those requests are marked `stale` and cannot be approved later. Use `switchboard approvals --json`, `switchboard approve <id>`, and `switchboard deny <id>` to inspect and decide requests; add `--mandate <id> --include-children` to see a versioned `switchboard.approvals.v1` approval queue across a parent/child mandate tree. Use `switchboard approvals --watch` for a live human queue, or `switchboard approvals --watch --timeout 0 --json` for a bounded `switchboard.approvals-watch.v1` snapshot. `switchboard install <codex|claude>` prints dry-run client config snippets for the daemon-backed MCP adapter; add `--write` to update project-scoped client config with a timestamped backup, or `--rollback <backup>` to restore one. `switchboard mandate create` persists a local task-scoped authority record bound to a repo, worktree, branch, agent role, profiles, lease, and optional `--allow-tool` / `--deny-tool` / `--require-approval-tool` namespaced tool patterns; pair approval gates with `--require-approval-reason`, `--require-approval-risk`, and `--require-approval-label` to show structured context in `mandate status` and `approvals`. `switchboard mandate child` creates a narrower child mandate from an active parent, inheriting parent denies and approval gates while requiring the child repo, worktree, branch, profiles, allowed tools, and lease to stay within parent scope. `switchboard mandate handoff <id>` closes a mandate with `completed`, `blocked`, or `cancelled` handoff state; parent mandates cannot hand off while child mandates remain open, and handoff refuses local readiness blockers by default; `--ignore-readiness` only skips softer local blockers such as pending approvals. `switchboard mandate report <id> --json` emits a versioned `switchboard.mandate-report.v1` tree report with parent/child state, readiness blockers, result rollups, related audit entries, and approval requests. `switchboard mandate escalate <id> --json` emits a versioned `switchboard.mandate-escalation.v1` local escalation plan with pending approvals, open child mandates, blocked/cancelled handoffs, suggested commands, and copy text. `switchboard mandate create --json` and `switchboard mandate child --json` also return an `mcpLaunch` payload with the schema version, mandate id, repo cwd, command, args, and additive command candidates a harness can use to launch `switchboard --cwd <repo> mcp --mandate <id>` even when the CLI is not on `PATH`. `switchboard mandate status --json` lists those records with `schemaVersion: "switchboard.mandate-status.v1"`. `switchboard serve` exposes configured stdio upstream profiles as one daemonless MCP server for debugging and CI, with the same `--mandate <id>` runtime context option; approval request creation is daemon-backed, so use `switchboard mcp --mandate <id>` for approval workflows. `switchboard logs --json` reads the local JSONL audit log through `schemaVersion: "switchboard.audit-log.v1"` and can filter entries with `--mandate <id>`. `switchboard daemon <status|start|ping|tools|stop>` manages the local daemon lifecycle foundation and daemon-side tool discovery. Provider integrations and a full approval broker come in later milestones.
+Start with `docs/install/quickstart.md`. `switchboard init` prints or writes a starter repo config, and `switchboard doctor` tells you the next command to run, including whether project Codex/Claude config is missing, stale, installed, invalid, or missing referenced local secrets. `switchboard auth <preset>` stores the recommended provider token for a preset without making humans type the internal ref. `switchboard secrets set <ref>` is the lower-level human prompt, while `switchboard secrets set <ref> --value-stdin`, `switchboard secrets list`, `switchboard secrets remove <ref>`, and `switchboard secrets doctor` remain scriptable secret primitives backed by the OS keychain adapter; lists and JSON output never print secret values. Config can reference upstream env secrets as `{ secretRef: "github/findu/dev/token" }`, and runtime commands resolve those refs only before launching permitted upstream profiles. `pnpm smoke:secret-ref-profile` proves this path end to end with an isolated dev-only backend and a fixture MCP server that reports only whether the env value is present. `pnpm smoke:mandate-secret-ref` proves the same secret-backed profile can be mounted through `serve --mandate`, produces mandate-linked audit entries, and keeps the raw secret out of CLI output, MCP responses, audit logs, and mandate reports. `switchboard test <profile>` checks that a configured stdio upstream starts and lists tools. `switchboard tools --mandate <id> --json` gives scripts and harnesses the repo/mandate-scoped tool surface, including approval-gated tool metadata, without launching an agent client; the response is tagged with `schemaVersion: "switchboard.tool-surface.v1"`. `switchboard mcp` auto-starts the local daemon when needed and supports daemon-backed tool listing and routed tool calls; add `--mandate <id>` to validate an active mandate, mount that mandate's profiles, enforce its allow/deny/approval-required tool patterns, and attach the mandate id to tool-call audit entries. Approval-required tools remain discoverable with `_meta.switchboard.approvalRequired`, but execution still creates a local approval request and returns retry instructions by default; when the connected MCP client advertises form elicitation support, Switchboard can ask for an in-client approve/deny decision, persist it through the same local approval store, and retry approved calls. Add `--approval-wait 30s` or another duration up to `10m` to keep gated tool calls pending while a local `switchboard approve <id>` or `switchboard deny <id>` decision arrives. If the MCP client disconnects during a wait, or a daemon starts for the repo with leftover pending requests, those requests are marked `stale` and cannot be approved later. Use `switchboard approvals --json`, `switchboard approve <id>`, and `switchboard deny <id>` to inspect and decide requests; add `--mandate <id> --include-children` to see a versioned `switchboard.approvals.v1` approval queue across a parent/child mandate tree. Use `switchboard approvals --watch` for a live human queue, or `switchboard approvals --watch --timeout 0 --json` for a bounded `switchboard.approvals-watch.v1` snapshot. `switchboard install <codex|claude>` prints dry-run client config snippets for the daemon-backed MCP adapter; add `--write` to update project-scoped client config with a timestamped backup, or `--rollback <backup>` to restore one. `switchboard mandate create` persists a local task-scoped authority record bound to a repo, worktree, branch, agent role, profiles, lease, and optional `--allow-tool` / `--deny-tool` / `--require-approval-tool` namespaced tool patterns; pair approval gates with `--require-approval-reason`, `--require-approval-risk`, and `--require-approval-label` to show structured context in `mandate status` and `approvals`. `switchboard mandate child` creates a narrower child mandate from an active parent, inheriting parent denies and approval gates while requiring the child repo, worktree, branch, profiles, allowed tools, and lease to stay within parent scope. `switchboard mandate handoff <id>` closes a mandate with `completed`, `blocked`, or `cancelled` handoff state; parent mandates cannot hand off while child mandates remain open, and handoff refuses local readiness blockers by default; `--ignore-readiness` only skips softer local blockers such as pending approvals. `switchboard mandate report <id> --json` emits a versioned `switchboard.mandate-report.v1` tree report with parent/child state, readiness blockers, result rollups, related audit entries, and approval requests. `switchboard mandate escalate <id> --json` emits a versioned `switchboard.mandate-escalation.v1` local escalation plan with pending approvals, open child mandates, blocked/cancelled handoffs, suggested commands, and copy text. `switchboard mandate create --json` and `switchboard mandate child --json` also return an `mcpLaunch` payload with the schema version, mandate id, repo cwd, command, args, and additive command candidates a harness can use to launch `switchboard --cwd <repo> mcp --mandate <id>` even when the CLI is not on `PATH`. `switchboard mandate status --json` lists those records with `schemaVersion: "switchboard.mandate-status.v1"`. `switchboard serve` exposes configured stdio upstream profiles as one daemonless MCP server for debugging and CI, with the same `--mandate <id>` runtime context option; approval request creation is daemon-backed, so use `switchboard mcp --mandate <id>` for approval workflows. `switchboard logs --json` reads the local JSONL audit log through `schemaVersion: "switchboard.audit-log.v1"` and can filter entries with `--mandate <id>`. `switchboard daemon <status|start|ping|tools|stop>` manages the local daemon lifecycle foundation and daemon-side tool discovery. Provider integrations and a full approval broker come in later milestones.

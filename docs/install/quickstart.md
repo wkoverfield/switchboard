@@ -1,14 +1,14 @@
 # Quickstart
 
-Use this path to make one repo ready for a bounded GitHub CI agent task. The
-flow is local-first: Switchboard scans the repo for local tool/account hints,
-writes repo config, stores provider tokens behind `secretRef`s, installs a
-single local MCP endpoint into agent clients, and creates mandates for
-task-scoped authority.
+Use this path to give a bounded GitHub CI agent task repo-scoped tool
+authority. The flow is local-first: Switchboard scans the repo for local
+tool/account hints, writes repo config, stores provider tokens behind
+`secretRef`s, installs a single local MCP endpoint into agent clients, and
+creates mandates for task-scoped authority.
 
 Canonical alpha flow:
 
-For a pre-public alpha install from source:
+To work from source:
 
 ```bash
 git clone https://github.com/wkoverfield/switchboard.git
@@ -17,16 +17,15 @@ pnpm install
 pnpm build
 ```
 
-After the first public package publish, the normal alpha install will be:
+For the published alpha package:
 
 ```bash
 npm install -g @switchboard-mcp/cli
 ```
 
 From a packaged install, use `switchboard ...`. From a source checkout, use
-`pnpm switchboard ...` for the same commands. After publish, one-off
-experiments or harnesses can use `npx -y @switchboard-mcp/cli@latest ...`
-without a global install.
+`pnpm switchboard ...` for the same commands. One-off experiments or harnesses
+can use `npx -y @switchboard-mcp/cli@latest ...` without a global install.
 
 Start by scanning the repo. This is read-only and local: it reports repo,
 client, provider, and environment hints by name without printing secret values.
@@ -34,11 +33,16 @@ client, provider, and environment hints by name without printing secret values.
 ```bash
 switchboard scan
 switchboard import --dry-run
-switchboard setup github-ci
+switchboard import --write --cleanup-client
 switchboard doctor
-switchboard presets check github-ci --profile github_ci
+switchboard setup github-ci
+switchboard mandate create --from github-ci --json
+```
+
+For a full local client run, continue:
+
+```bash
 switchboard install codex --write
-switchboard mandate create --from github-ci
 switchboard mcp --mandate fix-ci
 switchboard mandate report fix-ci --json
 ```
@@ -53,8 +57,14 @@ guarantee.
 Codex or Claude MCP config; it reports existing servers, env variable names,
 recommended Switchboard profiles, local token aliases, and cleanup actions
 without writing config or reading secret values. When the plan looks right,
-`switchboard import --write` applies the repo `.switchboard.yaml` profile
-changes with a backup and leaves existing Codex/Claude client config untouched.
+`switchboard import --write --cleanup-client` applies the repo
+`.switchboard.yaml` profile changes and removes direct MCP bypasses from active
+Codex/Claude project config with timestamped rollback backups.
+
+Backup hygiene: cleaned active config is `secretRef`-based, but rollback
+backups are exact copies of the original client config. If the old config
+contained raw tokens or env values, the backup can contain them too. Keep
+backups local/private and rotate or remove old raw secrets after migration.
 
 If you want to inspect each step before writing, use the manual flow:
 
@@ -128,6 +138,7 @@ scripts or custom `--secret-ref` values, use the lower-level command printed by
 `switchboard add`:
 
 ```bash
+switchboard secrets set <ref>
 switchboard secrets set <ref> --value-stdin
 ```
 
@@ -154,7 +165,7 @@ If a runtime command reports a missing `secretRef`, run the exact command it
 prints:
 
 ```bash
-switchboard secrets set <ref> --value-stdin
+switchboard secrets set <ref>
 ```
 
 ## 4. Connect A Client
