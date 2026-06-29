@@ -27,6 +27,27 @@ switchboard mandate report fix-ci --json
 Paste the GitHub token when `setup github-ci` prompts, then press Enter. The
 token value is not printed.
 
+## Practical CI-Fix Task Path
+
+For a real CI-fix run, the useful shape is:
+
+1. Ask the agent to inspect repository state, pull request context, workflow
+   runs, and logs through the mandate-scoped GitHub tools.
+2. Let it edit local code through its normal coding environment.
+3. Use `switchboard run --mandate fix-ci -- gh run list` or a similar approved
+   provider CLI command when the agent is operating in Code Mode instead of MCP.
+4. Keep reruns, comments, PR updates, pushes, and merges approval-gated.
+5. Deny delete/admin/repository-creation shaped tools.
+6. End with `switchboard mandate report fix-ci --json` so the handoff includes
+   mandate id, audit entries, approval requests, and readiness state.
+
+The deterministic `pnpm smoke:github-ci-first-loop` proof covers that boundary:
+read/check/log-like tools are allowed, rerun/comment/write-like tools create
+approval requests before upstream execution, delete/admin/repository-creation
+tools stay denied, approved and denied decisions appear in audit/report output,
+and `switchboard run --mandate fix-ci -- ...` injects only mounted GitHub
+profile env keys.
+
 ## Expected Checkpoints
 
 After `switchboard setup github-ci`:
@@ -71,6 +92,7 @@ After `switchboard mcp --mandate fix-ci`:
 - The local daemon starts when needed.
 - Only the mandate-mounted profiles and policy-filtered tools are exposed.
 - Approval-required tools remain visible, but execution is gated.
+- Denied tools are hidden from normal tool lists and blocked if called directly.
 
 After `switchboard run --mandate fix-ci -- gh run list`:
 
@@ -111,6 +133,8 @@ After `switchboard mandate report fix-ci --json`:
 - The report uses `schemaVersion: "switchboard.mandate-report.v1"`.
 - It includes readiness blockers, related approvals, audit entries, and
   handoff/result state for the mandate tree.
+- GitHub CI approval-required, approved, denied, and Code Mode command-run
+  evidence should be tied back to the mandate id.
 
 ## Common Failures
 

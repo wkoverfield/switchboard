@@ -29,7 +29,15 @@ const secretValue = "github-ci-loop-secret-do-not-print";
 const secretHash = sha256(secretValue);
 const mandateId = "fix-ci";
 const toolName = `${profileName}_secret_status`;
+const allowedReadTool = `${profileName}_get_pull_request`;
+const allowedCheckTool = `${profileName}_list_workflow_runs`;
+const allowedLogTool = `${profileName}_get_job_logs`;
+const approvalRerunTool = `${profileName}_rerun_workflow`;
+const approvalWriteTool = `${profileName}_issue_write`;
+const deniedDeleteTool = `${profileName}_delete_file`;
+const deniedAdminTool = `${profileName}_create_repository`;
 const fixtureCliPath = join(project, "fixture");
+const fixtureCallLogPath = join(project, "fixture-tool-calls.log");
 const unmountedSecretRef = `github/${repoSlug}/dev/unmounted-token`;
 const unmountedSecretValue = "github-ci-unmounted-secret-do-not-print";
 
@@ -51,11 +59,25 @@ try {
     "--arg",
     fixtureServerPath,
     "--arg",
-    "secret",
+    profileName,
     "--arg",
     "GITHUB_PERSONAL_ACCESS_TOKEN",
     "--arg",
     secretHash,
+    "--arg",
+    "get_pull_request",
+    "--arg",
+    "list_workflow_runs",
+    "--arg",
+    "get_job_logs",
+    "--arg",
+    "rerun_workflow",
+    "--arg",
+    "issue_write",
+    "--arg",
+    "delete_file",
+    "--arg",
+    "create_repository",
     "--write",
     "--json"
   );
@@ -103,6 +125,13 @@ try {
     check.counts?.allowedSensitive === 1,
     "expected one allowed-sensitive fixture tool"
   );
+  assertToolClass(check, allowedReadTool, "allowed");
+  assertToolClass(check, allowedCheckTool, "allowed");
+  assertToolClass(check, allowedLogTool, "allowed");
+  assertToolClass(check, approvalRerunTool, "approval_required");
+  assertToolClass(check, approvalWriteTool, "approval_required");
+  assertToolClass(check, deniedDeleteTool, "denied");
+  assertToolClass(check, deniedAdminTool, "denied");
   assertNoSecretText(JSON.stringify(check), "provider check");
 
   const create = runCliJson(
@@ -147,9 +176,26 @@ try {
     tools.tools?.some?.((tool) => tool.name === toolName),
     "expected scoped tool surface"
   );
+  assert(
+    tools.tools?.some?.((tool) => tool.name === allowedReadTool),
+    "expected allowed GitHub read tool in scoped surface"
+  );
+  assert(
+    tools.tools?.some?.(
+      (tool) =>
+        tool.name === approvalRerunTool &&
+        tool._meta?.switchboard?.approvalRequired?.risk === "medium"
+    ),
+    "expected approval-gated GitHub rerun tool metadata"
+  );
+  assert(
+    !tools.tools?.some?.((tool) => tool.name === deniedDeleteTool),
+    "expected denied delete tool hidden from scoped surface"
+  );
   assertNoSecretText(JSON.stringify(tools), "tool surface");
 
   await assertMandateServeSeesSecret();
+  await assertGithubAuthorityPack();
   assertMandateRunSeesSecret();
 
   const logs = runCliJson("logs", "--mandate", mandateId, "--json");
@@ -178,6 +224,43 @@ try {
   );
   assert(runAudit.stdoutSnippet?.includes?.("hasGithubToken"), "expected stdout audit snippet");
   assert(!runAudit.stderrSnippet, "expected no stderr audit snippet");
+  assert(
+    logs.entries?.some?.(
+      (entry) =>
+        entry.mandateId === mandateId &&
+        entry.status === "ok" &&
+        entry.toolName === allowedReadTool
+    ),
+    "expected allowed GitHub read audit entry"
+  );
+  const approvalRequiredAudit = logs.entries?.find?.(
+    (entry) =>
+      entry.mandateId === mandateId &&
+      entry.status === "error" &&
+      entry.toolName === approvalWriteTool &&
+      entry.approvalRequestId
+  );
+  assert(approvalRequiredAudit, "expected approval-required GitHub write audit entry");
+  assert(
+    logs.entries?.some?.(
+      (entry) =>
+        entry.mandateId === mandateId &&
+        entry.status === "ok" &&
+        entry.toolName === approvalRerunTool &&
+        entry.approvalRequestId
+    ),
+    "expected approved GitHub rerun audit entry"
+  );
+  assert(
+    logs.entries?.some?.(
+      (entry) =>
+        entry.mandateId === mandateId &&
+        entry.status === "error" &&
+        entry.toolName === deniedDeleteTool &&
+        entry.error?.includes?.("denied")
+    ),
+    "expected denied GitHub delete audit entry"
+  );
   assertNoSecretText(JSON.stringify(logs), "logs");
   assertNoSecretText(readAuditLog(), "raw audit log");
 
@@ -186,18 +269,47 @@ try {
     report.readiness?.selectedCanHandoff === true,
     "expected mandate report ready"
   );
+  assert(
+    report.counts?.approvalRequests === 2,
+    "expected denied and approved approval requests in report"
+  );
+  assert(
+    report.approvalRequests?.some?.(
+      (request) =>
+        request.toolName === approvalWriteTool &&
+        request.runtimeStatus === "denied"
+    ),
+    "expected denied GitHub write approval request in report"
+  );
+  assert(
+    report.approvalRequests?.some?.(
+      (request) =>
+        request.toolName === approvalRerunTool &&
+        request.runtimeStatus === "approved"
+    ),
+    "expected approved GitHub rerun approval request in report"
+  );
+  assert(
+    report.auditEntries?.some?.((entry) => entry.toolName === deniedDeleteTool),
+    "expected denied GitHub audit entry in report"
+  );
   assertNoSecretText(JSON.stringify(report), "report");
 } finally {
+  runCli(["daemon", "stop", "--json"], undefined, { allowFailure: true });
   rmSync(project, { force: true, recursive: true });
 }
 
-function runCli(args, input) {
-  return spawnSync(process.execPath, [cliPath, "--cwd", project, ...args], {
+function runCli(args, input, options = {}) {
+  const result = spawnSync(process.execPath, [cliPath, "--cwd", project, ...args], {
     cwd: repo,
     encoding: "utf8",
     input,
     env: smokeEnv()
   });
+  if (result.status !== 0 && !options.allowFailure) {
+    return result;
+  }
+  return result;
 }
 
 function runCliJson(...args) {
@@ -246,6 +358,165 @@ async function assertMandateServeSeesSecret() {
   assertNoSecretText(serveStderr, "serve stderr");
 }
 
+async function assertGithubAuthorityPack() {
+  const client = new Client({
+    name: "switchboard-github-ci-authority-pack-smoke",
+    version: "0.1.0"
+  });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [cliPath, "--cwd", project, "mcp", "--mandate", mandateId],
+    cwd: repo,
+    env: smokeEnv(),
+    stderr: "pipe"
+  });
+
+  let mcpStderr = "";
+  transport.stderr?.on("data", (chunk) => {
+    mcpStderr += chunk.toString();
+  });
+
+  try {
+    try {
+      await client.connect(transport);
+
+      const tools = await client.listTools();
+      assert(
+        tools.tools.some((tool) => tool.name === allowedReadTool),
+        "expected allowed GitHub read tool in MCP list"
+      );
+      const gatedTool = tools.tools.find(
+        (tool) => tool.name === approvalRerunTool
+      );
+      assert(gatedTool, "expected approval-gated GitHub rerun tool in MCP list");
+      assert(
+        gatedTool._meta?.switchboard?.approvalRequired?.reason ===
+          "rerunning CI changes remote provider state",
+        "expected rerun approval reason"
+      );
+      assert(
+        !tools.tools.some((tool) => tool.name === deniedAdminTool),
+        "expected denied repository creation tool hidden from MCP list"
+      );
+
+      const readResult = await client.callTool({
+        name: allowedReadTool,
+        arguments: { message: "inspect" }
+      });
+      assert(
+        textContent(readResult) === `${profileName}:get_pull_request:inspect`,
+        "expected allowed GitHub read call to route upstream"
+      );
+      assertToolCallCount("get_pull_request", 1);
+
+      const writeBlock = await captureResult(() =>
+        client.callTool({
+          name: approvalWriteTool,
+          arguments: { message: "comment" }
+        })
+      );
+      assert(
+        writeBlock.error || writeBlock.result?.isError === true,
+        "expected GitHub write call to require approval before upstream execution"
+      );
+      assertToolCallCount("issue_write", 0);
+      const writeApprovals = runCliJson(
+        "approvals",
+        "--mandate",
+        mandateId,
+        "--json"
+      );
+      const writeRequest = writeApprovals.requests?.find?.(
+        (request) =>
+          request.toolName === approvalWriteTool &&
+          request.runtimeStatus === "pending"
+      );
+      assert(writeRequest, "expected pending approval request for GitHub write");
+      assert(
+        writeRequest.approvalGateReason ===
+          "write tools change GitHub repository, issue, or pull request state",
+        "expected GitHub write approval reason"
+      );
+      const denied = runCliJson(
+        "deny",
+        writeRequest.id,
+        "--reason",
+        "do not write comments during fixture proof",
+        "--json"
+      );
+      assert(
+        denied.request?.runtimeStatus === "denied",
+        "expected denied GitHub write approval request"
+      );
+      assertToolCallCount("issue_write", 0);
+
+      const rerunBlock = await captureResult(() =>
+        client.callTool({
+          name: approvalRerunTool,
+          arguments: { message: "rerun" }
+        })
+      );
+      assert(
+        rerunBlock.error || rerunBlock.result?.isError === true,
+        "expected GitHub rerun call to require approval before upstream execution"
+      );
+      assertToolCallCount("rerun_workflow", 0);
+      const rerunApprovals = runCliJson(
+        "approvals",
+        "--mandate",
+        mandateId,
+        "--json"
+      );
+      const rerunRequest = rerunApprovals.requests?.find?.(
+        (request) =>
+          request.toolName === approvalRerunTool &&
+          request.runtimeStatus === "pending"
+      );
+      assert(rerunRequest, "expected pending approval request for GitHub rerun");
+      const approved = runCliJson(
+        "approve",
+        rerunRequest.id,
+        "--reason",
+        "CI rerun approved for fixture proof",
+        "--json"
+      );
+      assert(
+        approved.request?.runtimeStatus === "approved",
+        "expected approved GitHub rerun approval request"
+      );
+      const approvedRerun = await client.callTool({
+        name: approvalRerunTool,
+        arguments: { message: "rerun" }
+      });
+      assert(
+        textContent(approvedRerun) === `${profileName}:rerun_workflow:rerun`,
+        "expected approved GitHub rerun call to route upstream"
+      );
+      assertToolCallCount("rerun_workflow", 1);
+
+      const deniedCall = await captureResult(() =>
+        client.callTool({
+          name: deniedDeleteTool,
+          arguments: { message: "delete" }
+        })
+      );
+      assert(
+        deniedCall.error || deniedCall.result?.isError === true,
+        "expected denied GitHub delete call to stay blocked"
+      );
+      assertToolCallCount("delete_file", 0);
+    } catch (error) {
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}\nMCP stderr:\n${redactSecret(mcpStderr)}`
+      );
+    }
+  } finally {
+    await client.close().catch(() => {});
+  }
+
+  assertNoSecretText(mcpStderr, "mcp stderr");
+}
+
 function assertMandateRunSeesSecret() {
   const result = runCliJson(
     "run",
@@ -268,6 +539,14 @@ function assertMandateRunSeesSecret() {
   assert(child.argv?.[0] === "checks", "expected fixture CLI argument");
   assertNoSecretText(JSON.stringify(result), "run mode result");
   assertNoSecretText(JSON.stringify(result), "run mode result unmounted secret", unmountedSecretValue);
+}
+
+async function captureResult(run) {
+  try {
+    return { result: await run() };
+  } catch (error) {
+    return { error: error instanceof Error ? error : new Error(String(error)) };
+  }
 }
 
 function writeFixtureCli() {
@@ -297,6 +576,7 @@ function appendRunModeEnvGuards() {
     [
       `        GITHUB_PERSONAL_ACCESS_TOKEN:`,
       `          secretRef: ${secretRef}`,
+      `        SWITCHBOARD_FIXTURE_CALL_LOG: ${JSON.stringify(fixtureCallLogPath)}`,
       `        GITHUB_LITERAL_ENV: literal_should_not_be_injected`
     ].join("\n")
   );
@@ -325,7 +605,8 @@ function smokeEnv() {
     XDG_DATA_HOME: join(project, "xdg-data"),
     XDG_STATE_HOME: join(project, "xdg-state"),
     TS_KEYRING_BACKEND: "file",
-    SWITCHBOARD_ALLOW_UNSAFE_SECRET_BACKENDS: "1"
+    SWITCHBOARD_ALLOW_UNSAFE_SECRET_BACKENDS: "1",
+    SWITCHBOARD_FIXTURE_CALL_LOG: fixtureCallLogPath
   };
 }
 
@@ -380,4 +661,26 @@ function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+function assertToolCallCount(toolName, expected) {
+  const calls = existsSync(fixtureCallLogPath)
+    ? readFileSync(fixtureCallLogPath, "utf8")
+        .split("\n")
+        .filter(Boolean)
+    : [];
+  const actual = calls.filter((call) => call === toolName).length;
+  assert(
+    actual === expected,
+    `expected ${toolName} upstream call count ${expected}, got ${actual}`
+  );
+}
+
+function assertToolClass(check, toolName, classification) {
+  const tool = check.tools?.find?.((entry) => entry.toolName === toolName);
+  assert(tool, `expected provider check tool ${toolName}`);
+  assert(
+    tool.classification === classification,
+    `expected ${toolName} to be ${classification}, got ${tool.classification}`
+  );
 }

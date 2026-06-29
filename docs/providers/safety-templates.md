@@ -139,11 +139,13 @@ included comments, Copilot assignment, branch/file/PR creation, issue writes,
 PR review writes, pushes, updates, and merge.
 
 Deterministic alpha proof now also exercises GitHub CI through both authority
-paths: MCP routing under `switchboard serve --mandate fix-ci` and Code
-Mode-style command execution under `switchboard run --mandate fix-ci -- ...`.
-The run-mode proof verifies that only the mounted GitHub profile secretRef env
-key is injected, raw env values stay absent, and the command run is audited
-under the mandate id.
+paths: mandate-scoped MCP routing and Code Mode-style command execution under
+`switchboard run --mandate fix-ci -- ...`. `pnpm smoke:github-ci-first-loop`
+uses a GitHub-shaped fixture surface to prove that read/check/log-like tools are
+allowed, rerun/comment/write-like tools create approval requests before upstream
+execution, delete/admin/repository-creation tools stay denied, approved and
+denied decisions appear in audit/report output, and run mode injects only the
+mounted GitHub profile secretRef env key.
 
 ### `vercel-preview`
 
