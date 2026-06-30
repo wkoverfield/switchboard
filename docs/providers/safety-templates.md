@@ -210,8 +210,8 @@ keeping claims modest:
 
 The first live GitHub MCP server dogfood has held up against observed tool
 names. The first live Vercel Preview dogfood has held up for readonly project
-and deployment/log inspection, and fixture proof now covers the full Vercel
-Preview authority boundary. The remaining live provider proof is to repeat
+and deployment/log inspection, and fixture proof now covers the core Vercel
+Preview authority pattern. The remaining live provider proof is to repeat
 GitHub CI with a dedicated least-privilege token, rerun Vercel Preview with a
 project-scoped token/report, and add Stripe test-mode proof once an
 MCP-authorized restricted test key is available. Once those reports stay
