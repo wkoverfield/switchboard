@@ -28,6 +28,7 @@ Run these before changing launch copy, onboarding, mandate JSON contracts, or
 provider setup flows:
 
 ```bash
+pnpm eval:blind-alpha
 pnpm eval:fresh-agent-package-import
 pnpm eval:fresh-agent-import
 pnpm eval:fresh-agent-github-ci
@@ -36,10 +37,18 @@ pnpm eval:fresh-agent-subagent
 pnpm eval:published-alpha
 ```
 
-The fresh-agent evals exercise source-built CLI behavior with minimal prompts.
+The fresh-agent evals exercise CLI behavior with minimal prompts and write
+redacted summaries under `.switchboard-evals/`.
+`pnpm eval:blind-alpha` is the closest deterministic rehearsal of the alpha
+story: package install, messy Codex/Claude MCP config, import cleanup, client
+install, mandate creation, status, report, and plain-English value check.
 `pnpm eval:published-alpha` installs the public npm package in a clean temp
 directory and checks the public launch claims from the same package a tester
 would install.
+
+Every eval summary includes an `evidence` object. Treat
+`deterministic-scripted` as regression evidence, not proof that a true blind
+tester understood the product.
 
 ### Adversarial Agent Reviews
 
@@ -69,6 +78,14 @@ A phase is not launch-ready until one non-Wilson developer can:
 4. Complete either import cleanup or one provider setup.
 5. Create a mandate/workspace lease.
 6. Explain back why Switchboard is better than raw MCP/client config.
+
+Use `docs/use-cases/blind-alpha-runbook.md` for non-Wilson human tests and
+fresh-agent package rehearsals. Record the result as one of:
+
+- `deterministic-scripted`: reproducible fixture eval; CI-friendly.
+- `blind-agent`: a fresh coding agent following the runbook without hidden
+  product context.
+- `blind-human`: a non-Wilson developer using the package in a disposable repo.
 
 ## What Counts As Failure
 

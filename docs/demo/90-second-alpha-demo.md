@@ -6,6 +6,7 @@ Goal: show the aha path without live credentials.
 
 ```bash
 pnpm build
+pnpm eval:blind-alpha
 pnpm smoke:package-install
 pnpm eval:fresh-agent-import
 pnpm eval:fresh-agent-github-ci
@@ -24,6 +25,11 @@ This should return `0.1.1` or newer. The published-package eval installs
 `@switchboard-mcp/cli` from npm in a clean temp directory, then checks the
 three launch claims: MCP cleanup, scoped provider setup, and harness-ready
 workspace leases.
+
+The blind-alpha eval is a deterministic package-mode rehearsal, not a true
+blind human test. It should still produce the core acceptance sentence:
+Switchboard found and cleaned repo MCP/tool access, then created bounded
+authority.
 
 Narration:
 

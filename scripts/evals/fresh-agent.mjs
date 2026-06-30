@@ -17,6 +17,7 @@ const scenario = process.argv[2];
 const knownScenarios = new Set([
   "import",
   "package-import",
+  "blind-alpha",
   "github-ci",
   "expired-mandate",
   "subagent"
@@ -57,15 +58,18 @@ try {
       ? evalImport()
       : scenario === "package-import"
         ? evalPackageImport()
-        : scenario === "github-ci"
-          ? evalGithubCi()
-          : scenario === "expired-mandate"
-            ? evalExpiredMandate()
-            : evalSubagent();
+        : scenario === "blind-alpha"
+          ? evalBlindAlpha()
+          : scenario === "github-ci"
+            ? evalGithubCi()
+            : scenario === "expired-mandate"
+              ? evalExpiredMandate()
+              : evalSubagent();
 
   const summary = {
     schemaVersion: "switchboard.fresh-agent-eval.v1",
     scenario,
+    evidence: evidenceForScenario(scenario),
     project,
     passed: scores.every((score) => score.passed),
     scores,
@@ -195,6 +199,156 @@ function evalPackageImport() {
     dryRunPrimary: dryRun.recommendedNextAction?.primary?.command,
     cleanupItems: write.clientCleanup?.length ?? 0,
     doctorStatus: doctor.status
+  };
+}
+
+function evalBlindAlpha() {
+  minimalPrompt(
+    "You are a fresh alpha tester in a repo with messy Claude and Codex MCP configs. Use only Switchboard package commands to clean up direct MCP routes, install project clients, create bounded authority, inspect the report, and explain the value plainly."
+  );
+  initRepo("main");
+  installLocalPackages();
+  mkdirSync(join(project, ".codex"), { recursive: true });
+  writeFileSync(
+    join(project, ".codex", "config.toml"),
+    [
+      "[mcp_servers.github]",
+      'command = "docker"',
+      'args = ["run", "-e", "GITHUB_TOKEN=ghp_should_not_print", "ghcr.io/github/github-mcp-server"]',
+      'env = { GITHUB_TOKEN = "ghp_should_not_print" }',
+      "",
+      "[mcp_servers.filesystem]",
+      'command = "npx"',
+      `args = ["-y", "@modelcontextprotocol/server-filesystem", "${project}/.."]`
+    ].join("\n")
+  );
+  writeFileSync(
+    join(project, ".mcp.json"),
+    JSON.stringify(
+      {
+        mcpServers: {
+          vercel: {
+            command: "npx",
+            args: ["-y", "vercel-mcp"],
+            env: {
+              VERCEL_TOKEN: "vercel_should_not_print"
+            }
+          }
+        }
+      },
+      null,
+      2
+    )
+  );
+
+  const repoSlug = safeIdentifier(basename(project));
+  const profileName = `github_${repoSlug}_ci`;
+  const secretRef = `github/${repoSlug}/dev/token`;
+  const scan = runPackageCliJson("scan", "--json");
+  const dryRun = runPackageCliJson("import", "--dry-run", "--json");
+  const cleanup = runPackageCliJson(
+    "import",
+    "--write",
+    "--cleanup-client",
+    "--json"
+  );
+  const doctorAfterCleanup = runPackageCliJsonAllowFailure("doctor", "--json");
+  const add = runPackageCliJson(
+    "add",
+    "github-ci",
+    "--profile-name",
+    profileName,
+    "--secret-ref",
+    secretRef,
+    "--command",
+    process.execPath,
+    "--arg",
+    fixtureServerPath,
+    "--arg",
+    profileName,
+    "--arg",
+    "GITHUB_PERSONAL_ACCESS_TOKEN",
+    "--arg",
+    secretHash,
+    "--write",
+    "--json"
+  );
+  runPackageCliJsonWithInput(
+    secretValue,
+    "secrets",
+    "set",
+    secretRef,
+    "--value-stdin",
+    "--json"
+  );
+  const codexInstall = runPackageCliJson("install", "codex", "--write", "--json");
+  const claudeInstall = runPackageCliJson("install", "claude", "--write", "--json");
+  const mandate = runPackageCliJson(
+    "mandate",
+    "create",
+    "--from",
+    "github-ci",
+    "--profiles",
+    profileName,
+    "--json"
+  );
+  const status = runPackageCliJson("mandate", "status", "fix-ci", "--json");
+  const report = runPackageCliJson("mandate", "report", "fix-ci", "--json");
+
+  const valueExplanation =
+    "Switchboard found and cleaned repo MCP/tool access, then created bounded authority.";
+  score(
+    "blind alpha identified direct bypasses",
+    scan.authorityStatus?.status === "bypass-present"
+  );
+  score(
+    "blind alpha dry-run recommends cleanup",
+    dryRun.recommendedNextAction?.primary?.command ===
+      "switchboard import --write --cleanup-client"
+  );
+  score(
+    "blind alpha cleanup created backups",
+    cleanup.clientCleanup?.some?.((item) => item.backupPath)
+  );
+  score(
+    "blind alpha surfaced credential recovery",
+    JSON.stringify(doctorAfterCleanup).includes("switchboard secrets set")
+  );
+  score("blind alpha configured GitHub CI profile", add.profileName === profileName);
+  score("blind alpha installed Codex through Switchboard", codexInstall.client === "codex");
+  score(
+    "blind alpha installed Claude through Switchboard",
+    claudeInstall.client === "claude"
+  );
+  score("blind alpha created bounded authority", mandate.workspaceLease?.mandateId === "fix-ci");
+  score(
+    "blind alpha inspected mandate status",
+    status.mandates?.some?.((item) => item.id === "fix-ci")
+  );
+  score(
+    "blind alpha inspected mandate report",
+    report.selectedMandateId === "fix-ci" ||
+      report.mandates?.some?.((item) => item.id === "fix-ci")
+  );
+  score(
+    "blind alpha avoided raw secrets",
+    !/ghp_should|vercel_should/.test(transcriptText()) &&
+      !transcriptText().includes(secretValue)
+  );
+  score(
+    "blind alpha can explain value plainly",
+    valueExplanation.includes("cleaned repo MCP/tool access") &&
+      valueExplanation.includes("bounded authority")
+  );
+
+  return {
+    scanStatus: scan.authorityStatus?.status,
+    cleanupItems: cleanup.clientCleanup?.length ?? 0,
+    doctorStatusAfterCleanup: doctorAfterCleanup.status,
+    installedClients: [codexInstall.client, claudeInstall.client],
+    mandateId: mandate.mandate?.id,
+    workspaceLease: Boolean(mandate.workspaceLease),
+    valueExplanation
   };
 }
 
@@ -471,6 +625,10 @@ function runPackageCliJsonAllowFailure(...args) {
   return JSON.parse(runPackageCli(args, { allowFailure: true }).stdout);
 }
 
+function runPackageCliJsonWithInput(input, ...args) {
+  return JSON.parse(runPackageCli(args, { input }).stdout);
+}
+
 function runCli(args, options = {}) {
   transcript.push({ role: "agent", command: ["switchboard", ...args].join(" ") });
   const result = run(process.execPath, [cliPath, "--cwd", project, ...args], {
@@ -553,6 +711,51 @@ function run(command, args, options = {}) {
 
 function score(name, passed) {
   scores.push({ name, passed: Boolean(passed) });
+}
+
+function evidenceForScenario(name) {
+  const scripted = {
+    kind: "deterministic-scripted",
+    summary:
+      "A reproducible fixture run that checks commands, JSON contracts, and redacted transcripts.",
+    limitation:
+      "This is not a substitute for a true blind human or independent agent test."
+  };
+  const packageMode = {
+    ...scripted,
+    mode: "package-mode",
+    summary:
+      "A reproducible package install run that exercises the CLI the way an alpha tester would install it."
+  };
+  const map = {
+    import: {
+      ...scripted,
+      surface: "source-built import dry-run"
+    },
+    "package-import": {
+      ...packageMode,
+      surface: "package import cleanup"
+    },
+    "blind-alpha": {
+      ...packageMode,
+      surface: "package blind-alpha rehearsal",
+      acceptance:
+        "The tester can say: Switchboard found and cleaned repo MCP/tool access, then created bounded authority."
+    },
+    "github-ci": {
+      ...scripted,
+      surface: "GitHub CI authority pack fixture"
+    },
+    "expired-mandate": {
+      ...scripted,
+      surface: "mandate recovery fixture"
+    },
+    subagent: {
+      ...scripted,
+      surface: "harness/subagent fixture"
+    }
+  };
+  return map[name] ?? scripted;
 }
 
 function writeSummary(summary) {
