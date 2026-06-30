@@ -303,6 +303,9 @@ Implemented in the current codebase:
 - guarded `pnpm smoke:stripe-test-live-dogfood` harness for manual real
   Stripe test-mode dogfood with explicit opt-in, live-key refusal, and local
   redacted summary output
+- guarded `pnpm smoke:vercel-preview-live-dogfood` and
+  `pnpm smoke:supabase-dev-live-dogfood` harnesses for manual real provider
+  dogfood with explicit opt-in, safe default skips, and redacted summary output
 - npm-packable alpha package metadata and `pnpm smoke:package-pack` for
   `@switchboard-mcp/core`, `@switchboard-mcp/mcp-runtime`, and
   `@switchboard-mcp/cli`
@@ -399,9 +402,9 @@ Not started:
    that distinguish deterministic smokes from true blind-agent or human
    usability tests.
 5. Provider proof after GitHub: Vercel Preview and Supabase Dev fixture proof
-   now exist; next run real Stripe test-mode dogfood if a restricted
-   MCP-authorized test key becomes available, otherwise continue with Vercel
-   Preview live-token dogfood or Supabase Dev live development-project dogfood.
+   now exist, and opt-in live harnesses exist for Vercel Preview, Supabase Dev,
+   and Stripe Test. Next evidence should come from running those harnesses with
+   intentionally scoped live credentials.
 
 Remaining roadmap should be grouped into these buckets:
 
