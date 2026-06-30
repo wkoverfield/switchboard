@@ -105,6 +105,11 @@ pnpm --filter @switchboard-mcp/cli switchboard --cwd "$SWITCHBOARD_REPO" approva
 pnpm --filter @switchboard-mcp/cli switchboard --cwd "$SWITCHBOARD_REPO" approvals --mandate "$SWITCHBOARD_DEMO_TASK" --json
 ```
 
+The human queue is an operator surface. It summarizes pending/approved/denied
+counts, names the mandate, branch, tool, gate, risk, labels, reason, expiry,
+and prints the exact approve/deny/retry commands. JSON remains the stable
+contract for harnesses.
+
 For a live human queue while an MCP call is waiting:
 
 ```bash
@@ -148,6 +153,9 @@ Then inspect the report:
 ```bash
 pnpm --filter @switchboard-mcp/cli switchboard --cwd "$SWITCHBOARD_REPO" mandate report "$SWITCHBOARD_DEMO_TASK" --json
 ```
+
+The human report also includes approval request details when they exist, so a
+handoff can be read without separately opening the JSON payload.
 
 ## What This Proves
 

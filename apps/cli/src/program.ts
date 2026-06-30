@@ -6936,30 +6936,42 @@ function formatMandateStatusSummaryLines(
     `  Profiles: ${mandate.profiles.join(", ") || "none"}`,
     `  Policy: ${allowSummary}, ${denySummary}, ${approvalSummary}`,
     `  Handoff: ${mandate.handoffState}`,
+    `  MCP: switchboard mcp --mandate ${mandate.id}`,
+    `  Run: switchboard run --mandate ${mandate.id} -- <command>`,
+    `  Approvals: switchboard approvals --mandate ${mandate.id}`,
     `  Report: switchboard mandate report ${mandate.id}`
   ];
 }
 
 function formatMandateStatusVerboseLine(mandate: MandateWithStatus): string {
   return [
-    mandate.id,
-    mandate.runtimeStatus,
-    mandate.agentRole,
-    mandate.branch,
+    `Mandate: ${mandate.id}`,
+    `  Runtime: ${mandate.runtimeStatus}`,
+    `  Task: ${mandate.task}`,
+    `  Agent: ${mandate.agentRole}`,
+    `  Repo: ${mandate.repoPath}`,
+    `  Worktree: ${mandate.worktreePath}`,
+    `  Branch: ${mandate.branch}`,
     ...(mandate.parentMandateId
       ? [
-          `parent:${mandate.parentMandateId}`,
-          `delegated-by:${mandate.delegatedBy ?? "unknown"}`,
-          `path:${mandate.delegationPath?.join(">") ?? mandate.id}`
+          `  Parent: ${mandate.parentMandateId}`,
+          `  Delegated by: ${mandate.delegatedBy ?? "unknown"}`,
+          `  Delegation path: ${mandate.delegationPath?.join(" > ") ?? mandate.id}`
         ]
       : []),
-    `profiles:${mandate.profiles.join(",")}`,
-    `allow:${mandate.allowedTools.length > 0 ? mandate.allowedTools.join(",") : "all"}`,
-    `deny:${mandate.deniedTools.length > 0 ? mandate.deniedTools.join(",") : "none"}`,
-    `approval:${formatApprovalGates(mandate.approvalGates, ",")}`,
-    `handoff:${mandate.handoffState}`,
-    `expires:${mandate.expiresAt}`
-  ].join(" ");
+    `  Profiles: ${mandate.profiles.join(", ") || "none"}`,
+    "  Policy:",
+    `    Allowed: ${mandate.allowedTools.length > 0 ? mandate.allowedTools.join(", ") : "all"}`,
+    `    Denied: ${mandate.deniedTools.length > 0 ? mandate.deniedTools.join(", ") : "none"}`,
+    ...formatApprovalGateDetailLines(mandate.approvalGates, "    "),
+    `  Handoff: ${mandate.handoffState}`,
+    `  Expires: ${mandate.expiresAt}`,
+    "  Commands:",
+    `    switchboard mcp --mandate ${mandate.id}`,
+    `    switchboard run --mandate ${mandate.id} -- <command>`,
+    `    switchboard approvals --mandate ${mandate.id}`,
+    `    switchboard mandate report ${mandate.id}`
+  ].join("\n");
 }
 
 async function createMandateStatusReadiness(options: {
@@ -7099,6 +7111,13 @@ function formatMandateReport(report: MandateReportPayload): string {
     }
   }
 
+  if (report.approvalRequests.length > 0) {
+    lines.push("", "Approval request details:");
+    for (const request of report.approvalRequests) {
+      lines.push(...formatApprovalRequestDetailLines(request, "  "));
+    }
+  }
+
   if (report.results.handoffs.length > 0) {
     lines.push("", "Handoff results:");
     for (const handoff of report.results.handoffs) {
@@ -7224,6 +7243,31 @@ function formatApprovalGates(
     .join(separator);
 }
 
+function formatApprovalGateDetailLines(
+  gates: MandateWithStatus["approvalGates"],
+  indent: string
+): string[] {
+  if (gates.length === 0) {
+    return [`${indent}Approval gates: none`];
+  }
+
+  const lines = [`${indent}Approval gates:`];
+  for (const gate of gates) {
+    lines.push(`${indent}  - ${gate.toolPattern}`);
+    lines.push(`${indent}    gate: ${gate.id}`);
+    if (gate.risk) {
+      lines.push(`${indent}    risk: ${gate.risk}`);
+    }
+    if (gate.labels && gate.labels.length > 0) {
+      lines.push(`${indent}    labels: ${gate.labels.join(", ")}`);
+    }
+    if (gate.reason) {
+      lines.push(`${indent}    reason: ${gate.reason}`);
+    }
+  }
+  return lines;
+}
+
 function formatApprovalRequests(result: {
   path: string;
   repoPath: string | null;
@@ -7257,6 +7301,9 @@ function formatApprovalRequests(result: {
     lines.push(
       `Summary: ${result.counts.pending} pending, ${result.counts.approved} approved, ${result.counts.denied} denied, ${result.counts.expired} expired, ${result.counts.stale} stale`
     );
+    if (result.counts.pending > 0) {
+      lines.push("Operator: review pending requests, approve only intentional side effects, then retry approved tool calls.");
+    }
   }
 
   if (result.requests.length === 0) {
@@ -7266,43 +7313,51 @@ function formatApprovalRequests(result: {
 
   lines.push("");
   for (const request of result.requests) {
-    lines.push(`${request.id} [${request.runtimeStatus}]`);
-    lines.push(`  mandate: ${request.mandateId}`);
-    if (request.parentMandateId) {
-      lines.push(`  parent: ${request.parentMandateId}`);
-    }
-    if (request.delegatedBy) {
-      lines.push(`  delegated by: ${request.delegatedBy}`);
-    }
-    if (request.delegationPath) {
-      lines.push(`  delegation path: ${request.delegationPath.join(" > ")}`);
-    }
-    lines.push(`  branch: ${request.branch}`);
-    lines.push(`  tool: ${request.toolName}`);
-    lines.push(
-      `  gate: ${request.approvalGateId} (${request.approvalGatePattern})`
-    );
-    if (request.approvalGateRisk) {
-      lines.push(`  risk: ${request.approvalGateRisk}`);
-    }
-    if (request.approvalGateLabels && request.approvalGateLabels.length > 0) {
-      lines.push(`  labels: ${request.approvalGateLabels.join(", ")}`);
-    }
-    if (request.approvalGateReason) {
-      lines.push(`  reason: ${request.approvalGateReason}`);
-    }
-    lines.push(`  expires: ${request.expiresAt}`);
-    const nextActions = approvalRequestNextActions(request);
-    if (nextActions.length > 0) {
-      lines.push("  next:");
-      for (const action of nextActions) {
-        lines.push(`    ${action}`);
-      }
-    }
+    lines.push(...formatApprovalRequestDetailLines(request, ""));
     lines.push("");
   }
 
   return lines.join("\n");
+}
+
+function formatApprovalRequestDetailLines(
+  request: ApprovalRequestWithStatus,
+  indent: string
+): string[] {
+  const lines = [`${indent}${request.id} [${request.runtimeStatus}] ${request.toolName}`];
+  lines.push(`${indent}  mandate: ${request.mandateId}`);
+  if (request.parentMandateId) {
+    lines.push(`${indent}  parent: ${request.parentMandateId}`);
+  }
+  if (request.delegatedBy) {
+    lines.push(`${indent}  delegated by: ${request.delegatedBy}`);
+  }
+  if (request.delegationPath) {
+    lines.push(`${indent}  delegation path: ${request.delegationPath.join(" > ")}`);
+  }
+  lines.push(`${indent}  branch: ${request.branch}`);
+  lines.push(`${indent}  tool: ${request.toolName}`);
+  lines.push(
+    `${indent}  gate: ${request.approvalGateId} (${request.approvalGatePattern})`
+  );
+  if (request.approvalGateRisk) {
+    lines.push(`${indent}  risk: ${request.approvalGateRisk}`);
+  }
+  if (request.approvalGateLabels && request.approvalGateLabels.length > 0) {
+    lines.push(`${indent}  labels: ${request.approvalGateLabels.join(", ")}`);
+  }
+  if (request.approvalGateReason) {
+    lines.push(`${indent}  reason: ${request.approvalGateReason}`);
+  }
+  lines.push(`${indent}  expires: ${request.expiresAt}`);
+  const nextActions = approvalRequestNextActions(request);
+  if (nextActions.length > 0) {
+    lines.push(`${indent}  next:`);
+    for (const action of nextActions) {
+      lines.push(`${indent}    ${action}`);
+    }
+  }
+  return lines;
 }
 
 function approvalRequestNextActions(
