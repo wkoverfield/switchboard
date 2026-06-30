@@ -1,6 +1,6 @@
 # Switchboard Roadmap
 
-Last updated: 2026-06-29
+Last updated: 2026-06-30
 
 This is the working roadmap for Switchboard. The source planning documents live in
 `docs/product/source/` and are preserved source material from the original
@@ -244,9 +244,10 @@ Implemented in the current codebase:
   mandate
 - local `secretRef` values backed by the OS keychain adapter
 - `switchboard secrets set/list/remove/doctor`
-- `switchboard auth <github-ci|vercel-preview>` human-friendly provider token
-  storage over the same secretRef primitives
-- `switchboard setup <github-ci|vercel-preview>` guided provider setup that
+- `switchboard auth <github-ci|vercel-preview|supabase-dev>` human-friendly provider token
+  storage over the same secretRef primitives; `supabase-dev` rejects obvious
+  production/live/admin/root/service-role-looking values
+- `switchboard setup <github-ci|vercel-preview|supabase-dev>` guided provider setup that
   writes config and stores the provider token in one happy-path command
 - `switchboard scan` / `switchboard scan --json` read-only first-run repo scan
   for git, client config, Switchboard config, provider/env hints, warnings, and
@@ -259,15 +260,16 @@ Implemented in the current codebase:
   mandate-linked audit entries, and no raw secret values in CLI output, MCP
   responses, audit logs, or mandate reports
 - provider safety template foundation with `switchboard presets list` and
-  `switchboard presets show <github-ci|vercel-preview>`
-- guided provider setup planner with `switchboard add <github-ci|vercel-preview>`
+  `switchboard presets show <github-ci|vercel-preview|supabase-dev>`
+- guided provider setup planner with
+  `switchboard add <github-ci|vercel-preview|supabase-dev>`
 - `switchboard add <preset> --write` for repo-local `.switchboard.yaml`
   updates with backups
 - provider-add JSON includes structured `commands` for harnesses in addition to
   human-readable shell strings
 - `switchboard doctor` emits a top-level readiness status:
   `ok`, `setup-incomplete`, or `failed`
-- `switchboard mandate create --from <github-ci|vercel-preview>`
+- `switchboard mandate create --from <github-ci|vercel-preview|supabase-dev>`
 - preset-backed mandate creation uses template defaults, the current git
   branch, and optional CLI overrides
 - `pnpm smoke:harness-subagent-proof`
@@ -343,6 +345,12 @@ Implemented in the current codebase:
   execution, production/admin/env/domain/token/billing/team-shaped tools are
   denied, approval/audit/report evidence is tied to the mandate id, and
   `switchboard run` injects only mounted Vercel `secretRef` env keys
+- Supabase Dev safety-template dogfood smoke now proves a database-shaped authority pack against
+  a Supabase-shaped fixture surface: dev reads are allowed, arbitrary SQL and
+  migrations create approval requests before upstream execution,
+  destructive/prod/admin/service-role/token-shaped tools are denied,
+  approval/audit/report evidence is tied to the mandate id, and
+  `switchboard run` injects only mounted Supabase `secretRef` env keys
 - bounded approval watch mode with `switchboard.approvals-watch.v1` JSON
   snapshots for supervisor agents and live human approval queues
 - human-friendly `switchboard secrets set <ref>` prompts for pasted values and
@@ -368,7 +376,9 @@ Not started:
 - richer mandate tree approval escalation and result aggregation beyond
   visibility/reporting
 - global/user-scope client installers
-- Supabase, PostHog, or Sentry integrations
+- full/live Supabase integration beyond the fixture-backed `supabase-dev`
+  safety-template proof
+- PostHog or Sentry integrations
 - real Stripe test-mode MCP dogfood against an observed live `@stripe/mcp` tool
   surface beyond the fixture-backed `stripe-test` safety proof; current blocker
   is an MCP-authorized restricted Stripe test key
@@ -388,10 +398,10 @@ Not started:
 4. External/blind alpha evidence: add a repeatable runbook and eval summaries
    that distinguish deterministic smokes from true blind-agent or human
    usability tests.
-5. Provider proof after GitHub: deepen Vercel Preview fixture proof now; run
-   real Stripe test-mode dogfood if a restricted MCP-authorized test key becomes
-   available; otherwise continue with Vercel Preview live-token dogfood or a
-   Supabase dev/read-only design plus fixture proof.
+5. Provider proof after GitHub: Vercel Preview and Supabase Dev fixture proof
+   now exist; next run real Stripe test-mode dogfood if a restricted
+   MCP-authorized test key becomes available, otherwise continue with Vercel
+   Preview live-token dogfood or Supabase Dev live development-project dogfood.
 
 Remaining roadmap should be grouped into these buckets:
 

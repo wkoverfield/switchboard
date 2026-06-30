@@ -309,7 +309,8 @@ describe("switchboard CLI program", () => {
     expect(parsed.templates.map((template) => template.id)).toEqual([
       "github-ci",
       "stripe-test",
-      "vercel-preview"
+      "vercel-preview",
+      "supabase-dev"
     ]);
     expect(parsed.templates[0]?.defaultSecretRef).toBe("github/example/dev/token");
     expect(output.join("\n")).not.toContain("ghp_");
@@ -1834,6 +1835,64 @@ describe("switchboard CLI program", () => {
       code: "live_stripe_key_rejected"
     });
     expect(output.join("\n")).not.toContain("rk_live_secret_should_not_print");
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("rejects unsafe-looking Supabase dev credentials during guided setup before writing config", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    const output: string[] = [];
+    const store = createMemorySecretStore();
+    const program = createProgram({
+      secretStore: store,
+      secretIndexPath: join(root, "state", "secrets", "index.json"),
+      readSecretFromStdin: async () => "service_role_prod_secret_should_not_print",
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "setup", "supabase-dev", "--value-stdin", "--json"],
+      { from: "user" }
+    );
+
+    expect(existsSync(join(root, ".switchboard.yaml"))).toBe(false);
+    expect(await store.get(supabaseRepoSecretRef(root))).toBeNull();
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      code: "unsafe_supabase_dev_credential_rejected",
+      message:
+        "supabase-dev only accepts development Supabase credentials; this value looks production, admin, root, live, or service-role scoped."
+    });
+    expect(output.join("\n")).not.toContain(
+      "service_role_prod_secret_should_not_print"
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("rejects unsafe-looking Supabase dev credentials during auth before storing secrets", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const store = createMemorySecretStore();
+    const program = createProgram({
+      secretStore: store,
+      secretIndexPath: join(root, "state", "secrets", "index.json"),
+      readSecretFromStdin: async () => "supabase-live-admin-secret-should-not-print",
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "auth", "supabase-dev", "--value-stdin", "--json"],
+      { from: "user" }
+    );
+
+    expect(await store.get(supabaseRepoSecretRef(root))).toBeNull();
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      code: "unsafe_supabase_dev_credential_rejected"
+    });
+    expect(output.join("\n")).not.toContain(
+      "supabase-live-admin-secret-should-not-print"
+    );
     expect(process.exitCode).toBe(1);
   });
 
@@ -7913,6 +7972,10 @@ function stripeRepoProfile(root: string): string {
 
 function stripeRepoSecretRef(root: string): string {
   return `stripe/${repoSlug(root)}/test/secret-key`;
+}
+
+function supabaseRepoSecretRef(root: string): string {
+  return `supabase/${repoSlug(root)}/dev/access-token`;
 }
 
 function initGitRepo(root: string, branch: string): void {

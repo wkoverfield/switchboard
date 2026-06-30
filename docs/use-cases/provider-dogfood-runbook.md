@@ -130,11 +130,57 @@ Acceptance:
   approval-gated.
 - `mandate report inspect-test-payments --json` contains no raw token values.
 
+## Supabase Dev
+
+Start with the deterministic policy proof:
+
+```bash
+pnpm smoke:supabase-dev-dogfood
+```
+
+Then run real Supabase dogfood only against a development project. Guided
+`setup`/`auth` rejects obvious production, live, admin, root, and `service_role`
+credential-looking values, but that is a guardrail, not proof of project scope:
+
+```bash
+switchboard setup supabase-dev
+switchboard doctor
+switchboard presets check supabase-dev --profile supabase_dev --json
+switchboard mandate create --from supabase-dev --json
+switchboard mcp --mandate inspect-dev-db
+```
+
+For live dogfood, prefer an MCP launch that is explicitly read-only and
+project-scoped, for example by keeping `--read-only` and adding the upstream
+server's project-scoping argument when available. Do not claim full Supabase
+least privilege until a real development-project MCP surface has been observed.
+
+Credential posture:
+
+- Use a Supabase access token scoped to a development project when possible.
+- Never use production database credentials or `service_role` keys as agent MCP
+  credentials.
+- Start with read access for project metadata, schemas/tables, logs, and query
+  plans.
+- Add arbitrary SQL, migration, insert/update/upsert, or config-setting
+  capability only when those tools remain approval-gated.
+
+Acceptance:
+
+- `presets check` returns `policy-covered`.
+- `allowed_sensitive` is zero.
+- Production, service-role, admin, root, destructive data/schema,
+  secret/token, and credential-shaped tools are denied.
+- Arbitrary SQL, migrations, create/insert/update/upsert, and configuration
+  writes are approval-gated.
+- `mandate report inspect-dev-db --json` contains no raw token values.
+
 ## Rules
 
 - Do not store raw provider tokens in `.switchboard.yaml`, `.mcp.json`,
   `.codex/config.toml`, audit logs, or mandate payloads.
 - Prefer narrowing credential scope first, then narrowing mandate policy.
 - Treat every `allowed_sensitive` tool as a policy bug until reviewed.
-- Do not add new providers until GitHub CI and Vercel Preview both survive this
-  runbook against real provider tools.
+- Do not add broad provider coverage until GitHub CI, Vercel Preview, and
+  Supabase Dev survive this runbook against real provider tools or have clear
+  fixture-only caveats.

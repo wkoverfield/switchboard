@@ -19,6 +19,7 @@ switchboard auth github-ci
 switchboard presets list
 switchboard presets show github-ci
 switchboard presets show vercel-preview --json
+switchboard presets show supabase-dev --json
 switchboard presets check github-ci --profile github_findu
 ```
 
@@ -195,6 +196,56 @@ stay denied, approved and denied decisions appear in audit/report output, and
 `switchboard run --mandate inspect-preview -- ...` injects only the mounted
 Vercel profile `secretRef` env key.
 
+### `supabase-dev`
+
+Purpose: inspect development database/project state while destructive,
+production, admin, service-role, and secret/token-shaped actions stay denied or
+approval-gated.
+
+Default posture:
+
+- provider: `supabase`
+- profile: `supabase_dev`
+- namespace: `supabase_dev`
+- secret env: `SUPABASE_ACCESS_TOKEN`
+- default secretRef: `supabase/example/dev/access-token`
+- default command: `npx -y @supabase/mcp-server-supabase@latest --read-only`
+- mode: `guarded`
+- enforcement: `switchboard`
+
+The default command is intentionally only a read-only starting point. Live
+dogfood must use a development project token and add upstream project scoping
+when the Supabase MCP server supports it; Switchboard cannot prove a token is
+development-only from tool names alone.
+
+Recommended mandate policy:
+
+- allow namespaced Supabase dev inspection tools for the task
+- deny production, service-role, admin, root, destructive data/schema,
+  secret/token, and credential-shaped tools
+- require approval for arbitrary SQL, migrations, create/insert/update/upsert,
+  and configuration-setting tools
+
+Credential guidance:
+
+- minimum access: development project metadata, schemas/tables, logs, and query
+  plans
+- rejected by guided setup/auth: obvious production, live, admin, root, or
+  `service_role`-looking values
+- add only when approval-gated: arbitrary SQL, development migrations, and
+  development row writes
+- avoid: production project access, `service_role` keys, project admin tokens,
+  and destructive database privileges
+
+Deterministic alpha proof exercises the Supabase Dev authority pattern without
+live credentials. `pnpm smoke:supabase-dev-dogfood` uses a Supabase-shaped
+fixture surface to prove read/list/query/log tools are allowed, arbitrary SQL
+and migration tools create approval requests before upstream execution,
+destructive/prod/admin/service-role/token-shaped tools stay denied, approved
+and denied decisions appear in audit/report output, and
+`switchboard run --mandate inspect-dev-db -- ...` injects only the mounted
+Supabase profile `secretRef` env key.
+
 ## Why This Comes Before Full Presets
 
 The market wedge is repo-aware provider setup, but full presets become dangerous
@@ -214,6 +265,8 @@ and deployment/log inspection, and fixture proof now covers the core Vercel
 Preview authority pattern. The remaining live provider proof is to repeat
 GitHub CI with a dedicated least-privilege token, rerun Vercel Preview with a
 project-scoped token/report, and add Stripe test-mode proof once an
-MCP-authorized restricted test key is available. Once those reports stay
-policy-covered, Switchboard can promote the most useful provider path into a
-real preset.
+MCP-authorized restricted test key is available. Supabase Dev now has fixture
+proof for the database-shaped authority pattern, but still needs live
+development-project dogfood before any production-facing claims. Once those
+reports stay policy-covered, Switchboard can promote the most useful provider
+path into a real preset.

@@ -17,7 +17,8 @@ report to keep. Do not commit synthetic reports as proof.
 ## Summary
 
 - Date:
-- Provider preset: `github-ci`, `vercel-preview`, or `stripe-test`
+- Provider preset: `github-ci`, `vercel-preview`, `stripe-test`, or
+  `supabase-dev`
 - Repo:
 - Runner:
 - Agent client or harness:

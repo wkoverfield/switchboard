@@ -101,12 +101,13 @@ fresh-agent package rehearsals. Record the result as one of:
 ## Current Known Gaps
 
 Switchboard now has both MCP and `switchboard run --mandate ... -- <command>`
-coverage for local authority paths. GitHub CI and Vercel Preview both have
+coverage for local authority paths. GitHub CI, Vercel Preview, and Supabase Dev have
 deterministic provider-shaped fixture proof for allowed, approval-required,
 denied, audit/report, and run-mode behavior. The remaining provider eval gap is
 live least-privilege dogfood: repeat GitHub CI with a dedicated token, rerun
-Vercel Preview with a project-scoped token/report, and run Stripe test-mode once
-an MCP-authorized restricted test key is available.
+Vercel Preview with a project-scoped token/report, run Supabase Dev against a
+real development project, and run Stripe test-mode once an MCP-authorized
+restricted test key is available.
 
 Fresh-agent evals are deterministic usability probes, not substitutes for a
 true non-Wilson alpha test. Before launch, keep at least one blind package-mode

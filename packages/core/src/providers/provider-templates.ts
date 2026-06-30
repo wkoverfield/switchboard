@@ -442,6 +442,128 @@ export const providerSafetyTemplates: ProviderSafetyTemplate[] = [
       "Prefer a token scoped to the project/team needed for the current repo.",
       "Production promotion, environment-variable edits, and domain changes should remain denied or approval-gated."
     ]
+  },
+  {
+    id: "supabase-dev",
+    provider: "supabase",
+    label: "Supabase Dev",
+    description:
+      "Supabase development MCP profile shape for inspecting dev database/project state with destructive database actions denied.",
+    defaultProfileName: "supabase_dev",
+    defaultNamespace: "supabase_dev",
+    defaultSecretRef: "supabase/example/dev/access-token",
+    secretEnvName: "SUPABASE_ACCESS_TOKEN",
+    defaultCommand: "npx",
+    defaultArgs: [
+      "-y",
+      "@supabase/mcp-server-supabase@latest",
+      "--read-only"
+    ],
+    environment: "development",
+    readOnly: true,
+    mode: "guarded",
+    recommendedMandate: {
+      task: "inspect-dev-db",
+      agent: "implementer",
+      branch: "fix/db",
+      lease: "2h",
+      allowedTools: ["{namespace}_*"],
+      deniedTools: [
+        "{namespace}_*prod*",
+        "{namespace}_*production*",
+        "{namespace}_*service_role*",
+        "{namespace}_*service-role*",
+        "{namespace}_*admin*",
+        "{namespace}_*root*",
+        "{namespace}_drop*",
+        "{namespace}_drop_*",
+        "{namespace}_truncate*",
+        "{namespace}_truncate_*",
+        "{namespace}_delete*",
+        "{namespace}_delete_*",
+        "{namespace}_remove*",
+        "{namespace}_remove_*",
+        "{namespace}_revoke*",
+        "{namespace}_grant*",
+        "{namespace}_secret*",
+        "{namespace}_token*",
+        "{namespace}_credential*"
+      ],
+      approvalGates: [
+        {
+          toolPattern: "{namespace}_execute_sql",
+          reason:
+            "arbitrary SQL can mutate data or schema even in development databases",
+          risk: "high",
+          labels: ["supabase", "database", "sql"]
+        },
+        {
+          toolPattern: "{namespace}_apply_migration*",
+          reason: "applying migrations changes database schema",
+          risk: "high",
+          labels: ["supabase", "database", "schema"]
+        },
+        {
+          toolPattern: "{namespace}_create*",
+          reason: "creating database or project resources changes remote state",
+          risk: "medium",
+          labels: ["supabase", "database", "write"]
+        },
+        {
+          toolPattern: "{namespace}_insert*",
+          reason: "inserting rows changes development data",
+          risk: "medium",
+          labels: ["supabase", "database", "write"]
+        },
+        {
+          toolPattern: "{namespace}_update*",
+          reason: "updating rows or settings changes development state",
+          risk: "medium",
+          labels: ["supabase", "database", "write"]
+        },
+        {
+          toolPattern: "{namespace}_upsert*",
+          reason: "upserting rows changes development data",
+          risk: "medium",
+          labels: ["supabase", "database", "write"]
+        },
+        {
+          toolPattern: "{namespace}_set*",
+          reason: "setting configuration changes development project state",
+          risk: "medium",
+          labels: ["supabase", "database", "write"]
+        }
+      ]
+    },
+    credentialGuidance: {
+      posture:
+        "Use a Supabase access token scoped to a development project when possible. Keep the MCP server read-only by default and add project scoping with --project-ref for live dogfood.",
+      minimumScopes: [
+        "read development project metadata",
+        "read development schemas and tables",
+        "read development logs or query plans"
+      ],
+      approvalScopes: [
+        "run arbitrary SQL against development",
+        "apply development migrations",
+        "insert, update, or upsert development rows"
+      ],
+      avoidScopes: [
+        "production project access",
+        "service_role keys",
+        "project admin tokens",
+        "database destructive privileges"
+      ],
+      notes: [
+        "Prefer the MCP server's read-only mode until a mandate intentionally approval-gates write actions.",
+        "Use --project-ref during live dogfood so the token cannot drift across projects unnoticed."
+      ]
+    },
+    notes: [
+      "This preset is for development Supabase projects, not production databases.",
+      "Read/list/query inspection should be easy; migrations, arbitrary SQL, and row writes should stay approval-gated or denied by credential scope.",
+      "Do not use service_role keys as agent MCP credentials."
+    ]
   }
 ];
 

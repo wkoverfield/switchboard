@@ -5079,6 +5079,14 @@ function repoAwarePresetDefaults(
       secretRef: `stripe/${repoName}/test/secret-key`
     };
   }
+  if (presetId === "supabase-dev") {
+    const profileName = `supabase_${repoName}_dev`;
+    return {
+      profileName,
+      namespace: profileName,
+      secretRef: `supabase/${repoName}/dev/access-token`
+    };
+  }
 
   const template = getProviderSafetyTemplate(presetId);
   return {
@@ -5176,6 +5184,12 @@ function profileMatchesTemplatePreset(
       (identifier.startsWith("stripe_") && identifier.endsWith("_test"))
     );
   }
+  if (presetId === "supabase-dev") {
+    return identifiers.some((identifier) =>
+      identifier === "supabase_dev" ||
+      (identifier.startsWith("supabase_") && identifier.endsWith("_dev"))
+    );
+  }
   return identifiers.some((identifier) => identifier === safeIdentifierForCommand(presetId));
 }
 
@@ -5232,6 +5246,12 @@ function formatProviderSetup(result: {
     `Namespace: ${result.namespace}`,
     `Token: stored locally for ${result.label}`,
     `Token alias: ${result.secretRef}`,
+    ...(result.label === "Supabase Dev"
+      ? [
+          "",
+          "Safety note: use a development project token only; for live dogfood, add upstream project scoping before creating mandates."
+        ]
+      : []),
     "",
     "Next steps:",
     ...result.nextSteps.map((step) => `  ${formatHumanCommand(step)}`)
@@ -5268,13 +5288,21 @@ function formatProviderAddSummary(plan: ProviderAddPlan): string[] {
     plan.id,
     plan.rendered.namespace
   );
-  return [
+  const lines = [
     `one ${plan.rendered.template.provider} MCP profile: ${plan.rendered.profileName}`,
     `one local token alias for ${plan.rendered.template.secretEnvName}: ${plan.rendered.secretRef}`,
     `agent clients route through Switchboard after install`,
     `mandate policy: ${policy.allowedTools?.length ?? 0} allow pattern(s), ${policy.approvalGates?.length ?? 0} approval gate(s), ${policy.deniedTools?.length ?? 0} deny pattern(s)`,
     `mandate command binds authority to the current repo, branch, and ${plan.rendered.template.recommendedMandate.lease} lease`
   ];
+
+  if (plan.id === "supabase-dev") {
+    lines.push(
+      "live dogfood still needs a development project token and upstream project scoping"
+    );
+  }
+
+  return lines;
 }
 
 function formatProviderPresetList(result: {
@@ -7496,22 +7524,44 @@ function validateProviderSecretValue(
 ):
   | { ok: true }
   | { ok: false; code: string; message: string; nextActions: string[] } {
-  if (presetId !== "stripe-test") {
-    return { ok: true };
+  const trimmed = value.trim();
+
+  if (presetId === "stripe-test") {
+    if (
+      /^(sk|rk)_live_/i.test(trimmed) ||
+      /(^|[_\-.])live([_\-.]|$)/i.test(trimmed)
+    ) {
+      return {
+        ok: false,
+        code: "live_stripe_key_rejected",
+        message:
+          "stripe-test only accepts Stripe test-mode credentials; this value looks live or production-scoped.",
+        nextActions: [
+          "Use a restricted Stripe test key such as rk_test_... or sk_test_....",
+          "Run switchboard setup stripe-test again with a test-mode key."
+        ]
+      };
+    }
   }
 
-  const trimmed = value.trim();
-  if (/^(sk|rk)_live_/i.test(trimmed) || /(^|[_\-.])live([_\-.]|$)/i.test(trimmed)) {
-    return {
-      ok: false,
-      code: "live_stripe_key_rejected",
-      message:
-        "stripe-test only accepts Stripe test-mode credentials; this value looks live or production-scoped.",
-      nextActions: [
-        "Use a restricted Stripe test key such as rk_test_... or sk_test_....",
-        "Run switchboard setup stripe-test again with a test-mode key."
-      ]
-    };
+  if (presetId === "supabase-dev") {
+    if (
+      /service[_\-.]?role/i.test(trimmed) ||
+      /(^|[_\-.])(?:prod|production|live|admin|root)(?:[_\-.]|$)/i.test(
+        trimmed
+      )
+    ) {
+      return {
+        ok: false,
+        code: "unsafe_supabase_dev_credential_rejected",
+        message:
+          "supabase-dev only accepts development Supabase credentials; this value looks production, admin, root, live, or service-role scoped.",
+        nextActions: [
+          "Use a development-project Supabase access token with the narrowest available scope.",
+          "For live dogfood, add project scoping to the upstream command before creating mandates."
+        ]
+      };
+    }
   }
 
   return { ok: true };
@@ -8173,6 +8223,8 @@ function providerAuthCommandForMissingSecret(
         ? getProviderSafetyTemplate("vercel-preview")
         : profile.provider === "stripe"
           ? getProviderSafetyTemplate("stripe-test")
+          : profile.provider === "supabase"
+            ? getProviderSafetyTemplate("supabase-dev")
           : undefined;
   if (!preset) {
     return undefined;
@@ -8205,6 +8257,11 @@ function providerTemplateDoctorNextSteps(
     if (profile.provider === "stripe") {
       steps.push(`switchboard presets check stripe-test --profile ${profileName}`);
       steps.push("switchboard mandate create --from stripe-test");
+    }
+
+    if (profile.provider === "supabase") {
+      steps.push(`switchboard presets check supabase-dev --profile ${profileName}`);
+      steps.push("switchboard mandate create --from supabase-dev");
     }
   }
 
