@@ -337,6 +337,12 @@ Implemented in the current codebase:
   silently removing or hiding them
 - GitHub CI first-loop smoke now proves the authority pack across both MCP
   routing and `switchboard run` Code Mode-style credential scoping/audit
+- Vercel Preview dogfood smoke now proves the second provider authority pack
+  against a Vercel-shaped fixture surface: preview reads are allowed,
+  deployment create/rollback tools create approval requests before upstream
+  execution, production/admin/env/domain/token/billing/team-shaped tools are
+  denied, approval/audit/report evidence is tied to the mandate id, and
+  `switchboard run` injects only mounted Vercel `secretRef` env keys
 - bounded approval watch mode with `switchboard.approvals-watch.v1` JSON
   snapshots for supervisor agents and live human approval queues
 - human-friendly `switchboard secrets set <ref>` prompts for pasted values and
@@ -367,7 +373,7 @@ Not started:
   surface beyond the fixture-backed `stripe-test` safety proof; current blocker
   is an MCP-authorized restricted Stripe test key
 
-## Next Priorities After PR #128
+## Next Priorities After PR #132
 
 1. Roadmap and launch story sync: keep README, quickstart, and this roadmap
    aligned around repo-scoped tool authority, the 90-second import cleanup demo,
@@ -382,8 +388,9 @@ Not started:
 4. External/blind alpha evidence: add a repeatable runbook and eval summaries
    that distinguish deterministic smokes from true blind-agent or human
    usability tests.
-5. Provider proof after GitHub: run real Stripe test-mode dogfood if a restricted
-   MCP-authorized test key is available; otherwise use Vercel Preview or a
+5. Provider proof after GitHub: deepen Vercel Preview fixture proof now; run
+   real Stripe test-mode dogfood if a restricted MCP-authorized test key becomes
+   available; otherwise continue with Vercel Preview live-token dogfood or a
    Supabase dev/read-only design plus fixture proof.
 
 Remaining roadmap should be grouped into these buckets:
