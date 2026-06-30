@@ -405,6 +405,9 @@ Not started:
    now exist, and opt-in live harnesses exist for Vercel Preview, Supabase Dev,
    and Stripe Test. Next evidence should come from running those harnesses with
    intentionally scoped live credentials.
+6. Authority Map Draft: use discovered profile tool surfaces to create
+   conservative allow / approval / deny / review plans so agents can help map
+   unknown providers without Switchboard becoming an integration treadmill.
 
 Remaining roadmap should be grouped into these buckets:
 
@@ -421,6 +424,9 @@ Remaining roadmap should be grouped into these buckets:
   command objects where useful, and keep parent/child authority flows
   scriptable without making Switchboard the orchestrator. V0 launch payloads
   now include structured follow-up commands and a policy summary.
+- Authority Maps: let agents turn discovered MCP tools into reviewable,
+  deterministic authority drafts. V0 should stay non-mutating; later apply and
+  mandate-from-map flows should require explicit human approval.
 - Real Provider Dogfood: deepen GitHub CI first, then Vercel Preview, using
   least-privilege tokens and real tool names before adding more providers.
   Credential guidance, the live dogfood runbook, and the report template are
