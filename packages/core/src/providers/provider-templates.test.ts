@@ -14,7 +14,8 @@ describe("provider safety templates", () => {
     expect(listProviderSafetyTemplates().map((template) => template.id)).toEqual([
       "github-ci",
       "stripe-test",
-      "vercel-preview"
+      "vercel-preview",
+      "supabase-dev"
     ]);
     expect(JSON.stringify(listProviderSafetyTemplates())).not.toContain("ghp_");
     expect(JSON.stringify(listProviderSafetyTemplates())).not.toContain(
@@ -22,6 +23,9 @@ describe("provider safety templates", () => {
     );
     expect(JSON.stringify(listProviderSafetyTemplates())).not.toContain(
       "sk_live_secret"
+    );
+    expect(JSON.stringify(listProviderSafetyTemplates())).not.toContain(
+      "supabase-secret-value"
     );
   });
 
@@ -176,6 +180,56 @@ describe("provider safety templates", () => {
     );
     expect(rendered.notes.join(" ")).toContain("real money");
     expect(rendered.configYaml).not.toContain("sk_live");
+  });
+
+  it("renders Supabase dev policy with read-only default guidance", () => {
+    const rendered = renderProviderSafetyTemplate("supabase-dev", {
+      namespace: "supabase_findu_dev",
+      secretRef: "supabase/findu/dev/access-token"
+    });
+    const parsed = switchboardConfigSchema.parse(parseYaml(rendered.configYaml));
+
+    expect(parsed.profiles.supabase_dev).toMatchObject({
+      provider: "supabase",
+      environment: "development",
+      readOnly: true,
+      mode: "guarded",
+      upstream: {
+        command: "npx",
+        args: [
+          "-y",
+          "@supabase/mcp-server-supabase@latest",
+          "--read-only"
+        ],
+        env: {
+          SUPABASE_ACCESS_TOKEN: {
+            secretRef: "supabase/findu/dev/access-token"
+          }
+        }
+      }
+    });
+    expect(rendered.mandateCommand).toContain(
+      "--deny-tool 'supabase_findu_dev_*prod*'"
+    );
+    expect(rendered.mandateCommand).toContain(
+      "--deny-tool 'supabase_findu_dev_*service_role*'"
+    );
+    expect(rendered.mandateCommand).toContain(
+      "--deny-tool 'supabase_findu_dev_drop*'"
+    );
+    expect(rendered.mandateCommand).toContain(
+      "--require-approval-tool supabase_findu_dev_execute_sql"
+    );
+    expect(rendered.mandateCommand).toContain(
+      "--require-approval-labels 'supabase,database,schema'"
+    );
+    expect(rendered.credentialGuidance.minimumScopes).toContain(
+      "read development schemas and tables"
+    );
+    expect(rendered.credentialGuidance.avoidScopes).toContain(
+      "service_role keys"
+    );
+    expect(rendered.notes.join(" ")).toContain("development Supabase projects");
   });
 
   it("classifies Stripe test live and payment-affecting tools safely", () => {
@@ -429,6 +483,85 @@ describe("provider safety templates", () => {
       { toolName: "vercel_preview_token_create", classification: "denied" },
       { toolName: "vercel_preview_billing_list", classification: "denied" },
       { toolName: "vercel_preview_team_members", classification: "denied" }
+    ]);
+  });
+
+  it("classifies Supabase dev database-shaped tools safely", () => {
+    const result = checkProviderSafetyTemplateTools("supabase-dev", {
+      namespace: "supabase_dev",
+      toolNames: [
+        "supabase_dev_list_tables",
+        "supabase_dev_get_schema",
+        "supabase_dev_select_rows",
+        "supabase_dev_get_logs",
+        "supabase_dev_execute_sql",
+        "supabase_dev_apply_migration",
+        "supabase_dev_create_table",
+        "supabase_dev_insert_rows",
+        "supabase_dev_update_rows",
+        "supabase_dev_upsert_rows",
+        "supabase_dev_set_config",
+        "supabase_dev_delete_rows",
+        "supabase_dev_drop_table",
+        "supabase_dev_truncate_table",
+        "supabase_dev_production_query",
+        "supabase_dev_service_role_status",
+        "supabase_dev_admin_update",
+        "supabase_dev_token_create",
+        "github_findu_checks_list"
+      ]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.counts).toMatchObject({
+      tools: 19,
+      allowed: 4,
+      approvalRequired: 7,
+      denied: 7,
+      allowedSensitive: 0,
+      notAllowed: 1
+    });
+    expect(result.tools).toMatchObject([
+      { toolName: "supabase_dev_list_tables", classification: "allowed" },
+      { toolName: "supabase_dev_get_schema", classification: "allowed" },
+      { toolName: "supabase_dev_select_rows", classification: "allowed" },
+      { toolName: "supabase_dev_get_logs", classification: "allowed" },
+      {
+        toolName: "supabase_dev_execute_sql",
+        classification: "approval_required"
+      },
+      {
+        toolName: "supabase_dev_apply_migration",
+        classification: "approval_required"
+      },
+      {
+        toolName: "supabase_dev_create_table",
+        classification: "approval_required"
+      },
+      {
+        toolName: "supabase_dev_insert_rows",
+        classification: "approval_required"
+      },
+      {
+        toolName: "supabase_dev_update_rows",
+        classification: "approval_required"
+      },
+      {
+        toolName: "supabase_dev_upsert_rows",
+        classification: "approval_required"
+      },
+      {
+        toolName: "supabase_dev_set_config",
+        classification: "approval_required"
+      },
+      { toolName: "supabase_dev_delete_rows", classification: "denied" },
+      { toolName: "supabase_dev_drop_table", classification: "denied" },
+      { toolName: "supabase_dev_truncate_table", classification: "denied" },
+      { toolName: "supabase_dev_production_query", classification: "denied" },
+      { toolName: "supabase_dev_service_role_status", classification: "denied" },
+      { toolName: "supabase_dev_admin_update", classification: "denied" },
+      { toolName: "supabase_dev_token_create", classification: "denied" },
+      { toolName: "github_findu_checks_list", classification: "not_allowed" }
     ]);
   });
 });

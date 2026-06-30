@@ -25,6 +25,7 @@ describe("switchboard project scan", () => {
       join(root, ".env.local"),
       [
         "STRIPE_SECRET_KEY=sk_live_should_not_print",
+        "SUPABASE_ACCESS_TOKEN=supabase_should_not_print",
         "NEXT_PUBLIC_POSTHOG_KEY=phc_should_not_print",
         "VERCEL_TOKEN=vercel_should_not_print"
       ].join("\n"),
@@ -54,6 +55,7 @@ describe("switchboard project scan", () => {
       "github",
       "posthog",
       "stripe",
+      "supabase",
       "vercel"
     ]);
     expect(
@@ -83,13 +85,21 @@ describe("switchboard project scan", () => {
       profileName: "vercel_stockr_preview",
       namespace: "vercel_stockr_preview"
     });
+    expect(
+      result.suggestions.find((suggestion) => suggestion.provider === "supabase")
+    ).toMatchObject({
+      profileName: "supabase_stockr_dev",
+      namespace: "supabase_stockr_dev"
+    });
     expect(result.nextActions).toContain("switchboard setup github-ci");
     expect(result.nextActions).toContain("switchboard setup vercel-preview");
+    expect(result.nextActions).toContain("switchboard setup supabase-dev");
     expect(result.recommendedNextAction.primary).toMatchObject({
       command: "switchboard setup github-ci"
     });
     expect(serialized).not.toContain("sk_live_should_not_print");
     expect(serialized).not.toContain("phc_should_not_print");
+    expect(serialized).not.toContain("supabase_should_not_print");
     expect(serialized).not.toContain("vercel_should_not_print");
     expect(serialized).not.toContain("prj_should_not_print");
     expect(serialized).not.toContain("team_should_not_print");

@@ -40,6 +40,10 @@ assert(
   list.templates?.some?.((template) => template.id === "stripe-test"),
   "stripe-test listed"
 );
+assert(
+  list.templates?.some?.((template) => template.id === "supabase-dev"),
+  "supabase-dev listed"
+);
 
 const github = run([
   "presets",
@@ -133,6 +137,32 @@ assert(
 );
 assertNoRawSecret(JSON.stringify(stripe), "stripe preset");
 
+const supabase = run([
+  "presets",
+  "show",
+  "supabase-dev",
+  "--namespace",
+  "supabase_findu_dev",
+  "--secret-ref",
+  "supabase/findu/dev/access-token",
+  "--json"
+]);
+assert(
+  supabase.mandateCommand.includes("--deny-tool 'supabase_findu_dev_*prod*'"),
+  "supabase prod denied"
+);
+assert(
+  supabase.mandateCommand.includes(
+    "--require-approval-tool supabase_findu_dev_execute_sql"
+  ),
+  "supabase arbitrary SQL approval gated"
+);
+assert(
+  supabase.credentialGuidance?.avoidScopes?.includes?.("service_role keys"),
+  "supabase service role keys avoided"
+);
+assertNoRawSecret(JSON.stringify(supabase), "supabase preset");
+
 try {
   mkdirSync(tmpRoot, { recursive: true });
   writeFileSync(join(tmpRoot, ".gitignore"), ".switchboard.local.yaml\n");
@@ -204,6 +234,40 @@ try {
   assert(stripeCheck.ok === true, "stripe fixture preset check ok");
   assert(stripeCheck.counts?.allowed === 2, "stripe fixture allowed tools");
   assertNoRawSecret(JSON.stringify(stripeCheck), "stripe provider check");
+
+  writeFileSync(
+    join(tmpRoot, ".switchboard.yaml"),
+    [
+      "version: 1",
+      "profiles:",
+      "  supabase_dev:",
+      "    provider: supabase",
+      "    namespace: supabase_dev",
+      "    upstream:",
+      "      type: stdio",
+      `      command: ${JSON.stringify(process.execPath)}`,
+      "      args:",
+      `        - ${JSON.stringify(fixtureServerPath)}`,
+      "        - supabase-dev"
+    ].join("\n")
+  );
+  const supabaseCheck = run([
+    "--cwd",
+    tmpRoot,
+    "presets",
+    "check",
+    "supabase-dev",
+    "--profile",
+    "supabase_dev",
+    "--json"
+  ]);
+  assert(
+    supabaseCheck.schemaVersion === "switchboard.provider-preset-check.v1",
+    "supabase check schema"
+  );
+  assert(supabaseCheck.ok === true, "supabase fixture preset check ok");
+  assert(supabaseCheck.counts?.allowed === 2, "supabase fixture allowed tools");
+  assertNoRawSecret(JSON.stringify(supabaseCheck), "supabase provider check");
 } finally {
   rmSync(tmpRoot, { recursive: true, force: true });
 }
@@ -217,6 +281,10 @@ function assertNoRawSecret(value, label) {
   assert(
     !value.includes("sk_live_secret"),
     `${label} contains Stripe live key value text`
+  );
+  assert(
+    !value.includes("supabase-secret-value"),
+    `${label} contains Supabase token-like value text`
   );
 }
 

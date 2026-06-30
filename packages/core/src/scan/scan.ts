@@ -649,6 +649,17 @@ function buildSuggestions(options: {
     });
   }
 
+  if (providers.has("supabase") && !hasProfile(options.profileNames, "supabase")) {
+    suggestions.push({
+      kind: "provider-profile",
+      provider: "supabase",
+      profileName: repoAwareProfileName("supabase-dev", options.repoName),
+      namespace: repoAwareProfileName("supabase-dev", options.repoName),
+      command: "switchboard setup supabase-dev",
+      reason: "Supabase project or env hints were detected."
+    });
+  }
+
   for (const client of options.clients) {
     if (client.status !== "installed") {
       suggestions.push({
@@ -678,6 +689,9 @@ function repoAwareProfileName(presetId: string, repoName: string): string {
   if (presetId === "vercel-preview") {
     return `vercel_${repo}_preview`;
   }
+  if (presetId === "supabase-dev") {
+    return `supabase_${repo}_dev`;
+  }
   return safeIdentifier(`${presetId}_${repo}`);
 }
 
@@ -691,6 +705,9 @@ function configuredMandatePresetIds(profileNames: string[]): string[] {
   }
   if (hasProfile(profileNames, "stripe")) {
     presetIds.push("stripe-test");
+  }
+  if (hasProfile(profileNames, "supabase")) {
+    presetIds.push("supabase-dev");
   }
   return presetIds;
 }
