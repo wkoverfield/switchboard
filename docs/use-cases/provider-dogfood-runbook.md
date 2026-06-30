@@ -56,6 +56,32 @@ Record after each run:
 
 Use Vercel Preview as the second provider proof, not a broad expansion:
 
+Start with the deterministic policy proof:
+
+```bash
+pnpm smoke:vercel-preview-dogfood
+```
+
+Then run real Vercel Preview dogfood only with an intentionally scoped preview
+token:
+
+```bash
+SWITCHBOARD_LIVE_PROVIDER_DOGFOOD=1 \
+SWITCHBOARD_VERCEL_PREVIEW_TOKEN=<project/team-scoped token> \
+pnpm smoke:vercel-preview-live-dogfood
+```
+
+The live harness skips unless explicitly enabled, intentionally ignores ambient
+`VERCEL_TOKEN`, and writes a redacted local summary to
+`.switchboard-live-dogfood/`. If the upstream MCP server needs additional
+scoping args, pass them as JSON:
+
+```bash
+SWITCHBOARD_VERCEL_MCP_ARGS_JSON='["--flag","value"]'
+```
+
+The manual equivalent is:
+
 ```bash
 switchboard setup vercel-preview
 switchboard doctor
@@ -141,6 +167,24 @@ pnpm smoke:supabase-dev-dogfood
 Then run real Supabase dogfood only against a development project. Guided
 `setup`/`auth` rejects obvious production, live, admin, root, and `service_role`
 credential-looking values, but that is a guardrail, not proof of project scope:
+
+```bash
+SWITCHBOARD_LIVE_PROVIDER_DOGFOOD=1 \
+SWITCHBOARD_SUPABASE_DEV_ACCESS_TOKEN=<development access token> \
+SWITCHBOARD_SUPABASE_PROJECT_REF=<development project ref> \
+pnpm smoke:supabase-dev-live-dogfood
+```
+
+The live harness skips unless explicitly enabled, intentionally ignores ambient
+`SUPABASE_ACCESS_TOKEN`, requires an explicit project ref, launches the upstream
+server with `--read-only --project-ref`, and writes a redacted local summary to
+`.switchboard-live-dogfood/`. Additional upstream args can be passed with:
+
+```bash
+SWITCHBOARD_SUPABASE_MCP_ARGS_JSON='["--flag","value"]'
+```
+
+The manual equivalent is:
 
 ```bash
 switchboard setup supabase-dev
