@@ -186,6 +186,15 @@ allowed-sensitive, 0 approval-required, 0 denied, and 0 not-allowed. A
 mandate-scoped MCP session successfully called `vercel_preview_list_projects`
 without printing token values.
 
+Deterministic alpha proof now also exercises the Vercel Preview authority
+boundary without live credentials. `pnpm smoke:vercel-preview-dogfood` uses a
+Vercel-shaped fixture surface to prove preview read/log tools are allowed,
+deployment create/rollback tools create approval requests before upstream
+execution, production deploy/admin/env/domain/token/billing/team-shaped tools
+stay denied, approved and denied decisions appear in audit/report output, and
+`switchboard run --mandate inspect-preview -- ...` injects only the mounted
+Vercel profile `secretRef` env key.
+
 ## Why This Comes Before Full Presets
 
 The market wedge is repo-aware provider setup, but full presets become dangerous
@@ -201,8 +210,10 @@ keeping claims modest:
 
 The first live GitHub MCP server dogfood has held up against observed tool
 names. The first live Vercel Preview dogfood has held up for readonly project
-and deployment/log inspection. The remaining provider proof is to repeat GitHub
-CI with a dedicated least-privilege token and deepen Vercel Preview with a
-project-scoped token/report. Once
-those reports stay policy-covered, Switchboard can promote the most useful
-provider path into a real preset.
+and deployment/log inspection, and fixture proof now covers the core Vercel
+Preview authority pattern. The remaining live provider proof is to repeat
+GitHub CI with a dedicated least-privilege token, rerun Vercel Preview with a
+project-scoped token/report, and add Stripe test-mode proof once an
+MCP-authorized restricted test key is available. Once those reports stay
+policy-covered, Switchboard can promote the most useful provider path into a
+real preset.
