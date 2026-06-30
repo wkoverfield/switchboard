@@ -4707,14 +4707,20 @@ describe("switchboard CLI program", () => {
     });
     expect(output[2]).toContain("Mandate: fix-ci");
     expect(output[2]).toContain("Policy: 1 allowed, 1 denied, 1 approval-required");
+    expect(output[2]).toContain("MCP: switchboard mcp --mandate fix-ci");
+    expect(output[2]).toContain("Run: switchboard run --mandate fix-ci -- <command>");
+    expect(output[2]).toContain("Approvals: switchboard approvals --mandate fix-ci");
     await program.parseAsync(["--cwd", root, "mandate", "status", "--verbose"], {
       from: "user"
     });
-    expect(output[3]).toContain("allow:github_findu_*");
-    expect(output[3]).toContain("deny:*_deploy_prod");
-    expect(output[3]).toContain(
-      "approval:gate-1:github_findu_checks_rerun(risk:high labels:remote-state+ci reason:rerunning CI changes remote state)"
-    );
+    expect(output[3]).toContain("Allowed: github_findu_*");
+    expect(output[3]).toContain("Denied: *_deploy_prod");
+    expect(output[3]).toContain("Approval gates:");
+    expect(output[3]).toContain("- github_findu_checks_rerun");
+    expect(output[3]).toContain("gate: gate-1");
+    expect(output[3]).toContain("risk: high");
+    expect(output[3]).toContain("labels: remote-state, ci");
+    expect(output[3]).toContain("reason: rerunning CI changes remote state");
   });
 
   it("creates a provider-preset mandate with current branch defaults", async () => {
@@ -6093,6 +6099,20 @@ describe("switchboard CLI program", () => {
     expect(output[4]).toContain("open_child_mandate rerun-checks");
     expect(output[4]).toContain("switchboard approve approval-1");
     expect(output[4]).toContain("use --reason when approving or denying");
+    await program.parseAsync(["--cwd", root, "mandate", "report", "fix-ci"], {
+      from: "user"
+    });
+    expect(output[5]).toContain("Approval request details:");
+    expect(output[5]).toContain("approval-1 [pending] github_findu_checks_rerun");
+    expect(output[5]).toContain("risk: high");
+    expect(output[5]).toContain("labels: ci, remote-state");
+    expect(output[5]).toContain("reason: rerunning checks changes remote GitHub state");
+    expect(output[5]).toContain(
+      'switchboard approve approval-1 --reason "<why this is safe>"'
+    );
+    expect(output[5]).toContain(
+      'switchboard deny approval-1 --reason "<why this should not run>"'
+    );
   });
 
   it("reports scoped missing secret refs as mandate readiness blockers", async () => {
@@ -6843,8 +6863,8 @@ describe("switchboard CLI program", () => {
     expect(output[1]).toContain("Runtime blockers:");
     expect(output[1]).toContain("switchboard mandate renew fix-ci --lease 30m");
     expect(output[1]).not.toContain("ghp_secret");
-    expect(output[2]).toContain("profiles:vercel_preview");
-    expect(output[2]).toContain("allow:all");
+    expect(output[2]).toContain("Profiles: vercel_preview");
+    expect(output[2]).toContain("Allowed: all");
   });
 
   it("renews an expired open mandate lease", async () => {
@@ -7137,7 +7157,11 @@ describe("switchboard CLI program", () => {
       from: "user"
     });
     expect(output[1]).toContain("Summary: 2 pending, 0 approved, 0 denied, 1 expired, 1 stale");
+    expect(output[1]).toContain(
+      "Operator: review pending requests, approve only intentional side effects, then retry approved tool calls."
+    );
     expect(output[1]).toContain("approval-1 [pending]");
+    expect(output[1]).toContain("approval-1 [pending] github_findu_deploy");
     expect(output[1]).toContain("tool: github_findu_deploy");
     expect(output[1]).toContain(
       'switchboard approve approval-1 --reason "<why this is safe>"'

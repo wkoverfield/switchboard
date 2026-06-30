@@ -38,6 +38,7 @@ const deniedDeleteTool = `${profileName}_delete_file`;
 const deniedAdminTool = `${profileName}_create_repository`;
 const fixtureCliPath = join(project, "fixture");
 const fixtureCallLogPath = join(project, "fixture-tool-calls.log");
+const runtimeDir = join(project, "runtime");
 const unmountedSecretRef = `github/${repoSlug}/dev/unmounted-token`;
 const unmountedSecretValue = "github-ci-unmounted-secret-do-not-print";
 
@@ -604,6 +605,7 @@ function smokeEnv() {
     XDG_CONFIG_HOME: join(project, "xdg-config"),
     XDG_DATA_HOME: join(project, "xdg-data"),
     XDG_STATE_HOME: join(project, "xdg-state"),
+    SWITCHBOARD_RUNTIME_DIR: runtimeDir,
     TS_KEYRING_BACKEND: "file",
     SWITCHBOARD_ALLOW_UNSAFE_SECRET_BACKENDS: "1",
     SWITCHBOARD_FIXTURE_CALL_LOG: fixtureCallLogPath
