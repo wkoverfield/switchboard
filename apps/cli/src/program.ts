@@ -8,6 +8,7 @@ import {
   type AuditLogEntry,
   type AuditLogger,
   checkAuthorityMapDraft,
+  createRepoAudit,
   type ApprovalRequestWithStatus,
   checkLocalConfigIgnored,
   checkInstalledClientLaunches,
@@ -16,6 +17,7 @@ import {
   parseAuthorityMapDraft,
   type AuthorityMapDraft,
   type AuthorityMapCheckResult,
+  type RepoAuditResult,
   createMandate,
   decideApprovalRequest,
   createInitConfigPlan,
@@ -625,6 +627,28 @@ export function createProgram(io: ProgramIo = {}): Command {
         options.json
           ? JSON.stringify(displayResult, null, 2)
           : formatScan(displayResult)
+      );
+    });
+
+  program
+    .command("audit")
+    .description("Audit this repo's coding-agent tool authority posture.")
+    .option("--json", "print machine-readable JSON")
+    .action(async (options: { json?: boolean }) => {
+      const globalOptions = program.opts<{ cwd?: string }>();
+      const launch = resolveInstallLaunch({ commandArgs: [] });
+      const scan = await scanSwitchboardProject({
+        ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+        command: launch.command,
+        commandArgs: launch.commandArgs
+      });
+      const displayScan = rewriteScanCommandsForCurrentInvocation(scan);
+      const audit = createRepoAudit(displayScan);
+
+      writeOut(
+        options.json
+          ? JSON.stringify(audit, null, 2)
+          : formatRepoAudit(audit)
       );
     });
 
@@ -3970,6 +3994,47 @@ function formatScan(result: SwitchboardScanResult): string {
       "Next:",
       ...result.nextActions.map((action) => `- ${formatHumanCommand(action)}`)
     );
+  }
+
+  return lines.join("\n");
+}
+
+function formatRepoAudit(result: RepoAuditResult): string {
+  const lines = [
+    `Switchboard audit: ${result.status}`,
+    result.summary,
+    "",
+    "Repo:",
+    `- path: ${result.repo.gitRoot ?? result.repo.cwd}`,
+    `- branch: ${result.repo.branch ?? "unknown"}`,
+    `- authority: ${formatAuthorityStatusLabel(result.authorityStatus)}`,
+    "",
+    "Findings:",
+    `- bypasses: ${result.findingSummary.bypasses}`,
+    `- risks: ${result.findingSummary.risks}`,
+    `- warnings: ${result.findingSummary.warnings}`,
+    `- severity: critical ${result.findingSummary.critical}, high ${result.findingSummary.high}, medium ${result.findingSummary.medium}, info ${result.findingSummary.info}`,
+    "",
+    "Checks:"
+  ];
+
+  for (const check of result.checks) {
+    lines.push(`- ${check.status}: ${check.title}`);
+    lines.push(`  ${check.summary}`);
+    for (const evidence of check.evidence.slice(0, 3)) {
+      lines.push(`  evidence: ${evidence}`);
+    }
+    if (check.nextActions.length > 0) {
+      lines.push(`  fix: ${formatHumanCommand(check.nextActions[0] as string)}`);
+    }
+  }
+
+  if (result.recommendedNextAction.primary) {
+    lines.push("", "Recommended next:");
+    lines.push(
+      `- ${formatHumanCommand(result.recommendedNextAction.primary.command)}`
+    );
+    lines.push(`  ${result.recommendedNextAction.primary.reason}`);
   }
 
   return lines.join("\n");

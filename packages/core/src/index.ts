@@ -2,6 +2,7 @@ export * from "./approvals/approval-requests.js";
 export * from "./authority/authority-map.js";
 export * from "./authority/authority-status.js";
 export * from "./audit/audit-log.js";
+export * from "./audit/repo-audit.js";
 export * from "./config/load-config.js";
 export * from "./config/gitignore.js";
 export * from "./config/paths.js";
