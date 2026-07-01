@@ -33,6 +33,14 @@ try {
     "bypass check"
   );
   assert(
+    audit.checks.some((check) => check.id === "unknown-mcp-commands"),
+    "unknown command check"
+  );
+  assert(
+    audit.findingSummary.directClientServers === 1,
+    "direct client server count"
+  );
+  assert(
     JSON.stringify(audit).includes("switchboard import --write --cleanup-client"),
     "cleanup next action"
   );
@@ -47,6 +55,18 @@ try {
   assert(
     !human.stdout.includes("ghp_audit_smoke_should_not_print"),
     "redacted human"
+  );
+
+  const exported = runCli(["audit", "export", "--format", "jsonl"]);
+  assert(
+    exported.stdout.includes("switchboard.repo-audit-export.v1"),
+    "export schema"
+  );
+  assert(exported.stdout.includes('"type":"summary"'), "export summary");
+  assert(exported.stdout.includes('"type":"check"'), "export checks");
+  assert(
+    !exported.stdout.includes("ghp_audit_smoke_should_not_print"),
+    "redacted export"
   );
 } finally {
   rmSync(project, { force: true, recursive: true });

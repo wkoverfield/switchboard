@@ -258,6 +258,9 @@ Implemented in the current codebase:
   with ready/needs-attention/unsafe/invalid status, checks, finding counts,
   evidence, and exact next actions for teams deciding whether to give agents a
   repo
+- `switchboard audit export --format jsonl` for local JSONL evidence exports,
+  plus audit checks for unknown direct MCP commands, project client scope
+  conflicts, and configured profile/direct-MCP surface bloat
 - runtime secret injection for configured stdio upstream env
 - missing `secretRef` readiness in doctor, runtime errors, mandate reports, and
   mandate escalations

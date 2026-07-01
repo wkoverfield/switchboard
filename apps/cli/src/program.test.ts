@@ -187,6 +187,12 @@ describe("switchboard CLI program", () => {
         nextActions: ["switchboard import --write --cleanup-client"]
       })
     );
+    expect(parsed.checks).toContainEqual(
+      expect.objectContaining({
+        id: "unknown-mcp-commands",
+        status: "pass"
+      })
+    );
     expect(parsed.recommendedNextAction.primary?.command).toBe(
       "switchboard import --dry-run"
     );
@@ -218,6 +224,51 @@ describe("switchboard CLI program", () => {
     expect(text).toContain("fix: switchboard import --write --cleanup-client");
     expect(text).toContain("Recommended next:");
     expect(text).not.toContain("ghp_audit_should_not_print");
+  });
+
+  it("exports audit evidence as JSONL", async () => {
+    const root = makeTempProject();
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      join(root, ".codex", "config.toml"),
+      [
+        "[mcp_servers.custom]",
+        'command = "custom-mcp"',
+        'args = ["--token", "ghp_export_should_not_print"]'
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(
+      ["--cwd", root, "audit", "export", "--format", "jsonl"],
+      {
+        from: "user"
+      }
+    );
+
+    const lines = output.join("\n").trim().split("\n").map((line) =>
+      JSON.parse(line) as {
+        schemaVersion: string;
+        type: string;
+        check?: { id: string; status: string; evidence: string[] };
+      }
+    );
+    expect(lines[0]).toMatchObject({
+      schemaVersion: "switchboard.repo-audit-export.v1",
+      type: "summary"
+    });
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        type: "check",
+        check: expect.objectContaining({
+          id: "unknown-mcp-commands",
+          status: "warn",
+          evidence: ["codex:custom custom-mcp"]
+        })
+      })
+    );
+    expect(output.join("\n")).not.toContain("ghp_export_should_not_print");
   });
 
   it("prints scan client routes without implying direct servers are Switchboard installs", async () => {
