@@ -113,7 +113,13 @@ runtime transport, coarse environment class, profiles, policy summary, lease
 timestamps, `mcpLaunch`, `runLaunch`, follow-up commands, capability flags, and
 explicit limits. The mandate record remains the local source of truth;
 `workspaceLease` is the portable handoff object an orchestrator can pass to a
-worker agent.
+worker agent. Additive authority evidence fields record who and what granted
+the authority: `authority.createdBy` is the optional `--actor` identity,
+`authority.source` records whether policy came from a `preset`,
+`authority-map`, `parent` mandate, or `manual` flags, `authority.policyHash`
+is a deterministic `sha256:<hex>` digest of the granted profile/tool/approval
+policy, and `lease.events` lists `created` and `renewed` lease lifecycle
+events with timestamps, lease durations, expiries, and optional actors.
 
 `runLaunch` is the CLI alternative for harnesses or Code Mode-style agents that
 need scoped provider credentials without an MCP client. It points at:
@@ -145,7 +151,11 @@ including open child mandates and pending approval requests that block handoff.
 The additive `results` object summarizes completed/blocked/cancelled handoffs,
 open mandates, flattened next steps, and artifacts across the reported tree.
 The UID fields disambiguate repeated human slug ids such as multiple `fix-ci`
-mandates over time.
+mandates over time. The additive `evidence` array carries per-mandate authority
+evidence: `createdBy`, `authoritySource` (`preset`, `authority-map`, `parent`,
+or `manual` with an optional `ref`), the deterministic `policyHash`, and the
+`leaseEvents` lifecycle list, so an exported report proves what authority
+existed, from where, under what policy, for how long, and who granted it.
 
 `switchboard.mandate-escalation.v1` lets a harness build a local escalation
 plan from the report data without calling a remote approval service. The payload

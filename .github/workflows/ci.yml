@@ -43,6 +43,7 @@ jobs:
       - run: pnpm smoke:vercel-preview-dogfood
       - run: pnpm smoke:package-pack
       - run: pnpm smoke:mandate-lifecycle
+      - run: pnpm smoke:mandate-lease-evidence
       - run: pnpm smoke:mandate-walkthrough
       - run: pnpm smoke:install-codex
       - run: pnpm smoke:install-claude

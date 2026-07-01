@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  computeMandatePolicyHash,
   createChildMandate,
   createMandate,
   evaluateMandateToolPolicy,
@@ -11,6 +12,7 @@ import {
   normalizeMandateId,
   parseMandateLease,
   readMandateStore,
+  renewMandate,
   resolveActiveMandate,
   resolveMandateStorePath,
   updateMandateHandoff
@@ -793,6 +795,223 @@ describe("mandates", () => {
         id: "fix-ci"
       })
     ).rejects.toThrow('mandate "fix-ci" was not found');
+  });
+
+  it("records creation evidence with policy hash and lease events", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+
+    const mandate = await createMandate({
+      path,
+      now: () => new Date("2026-06-19T16:00:00.000Z"),
+      task: "fix-ci",
+      repoPath: join(root, "repo"),
+      worktreePath: join(root, "repo"),
+      branch: "fix/ci",
+      agentRole: "implementer",
+      profiles: ["github_findu"],
+      lease: "2h",
+      allowedTools: ["github_findu_*"],
+      deniedTools: ["*_deploy_prod"],
+      createdBy: " wilson ",
+      authoritySource: { type: "preset", ref: " github-ci " }
+    });
+
+    expect(mandate.createdBy).toBe("wilson");
+    expect(mandate.authoritySource).toEqual({
+      type: "preset",
+      ref: "github-ci"
+    });
+    expect(mandate.policyHash).toBe(
+      computeMandatePolicyHash({
+        profiles: ["github_findu"],
+        allowedTools: ["github_findu_*"],
+        deniedTools: ["*_deploy_prod"],
+        approvalGates: []
+      })
+    );
+    expect(mandate.policyHash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(mandate.leaseEvents).toEqual([
+      {
+        type: "created",
+        at: "2026-06-19T16:00:00.000Z",
+        lease: "2h",
+        expiresAt: "2026-06-19T18:00:00.000Z",
+        actor: "wilson"
+      }
+    ]);
+  });
+
+  it("computes a stable policy hash independent of optional gate fields", () => {
+    const base = {
+      profiles: ["github_findu"],
+      allowedTools: ["github_findu_*"],
+      deniedTools: [],
+      approvalGates: [
+        { id: "gate-1", toolPattern: "github_findu_checks_rerun" }
+      ]
+    };
+    expect(computeMandatePolicyHash(base)).toBe(
+      computeMandatePolicyHash({ ...base })
+    );
+    expect(
+      computeMandatePolicyHash({
+        ...base,
+        approvalGates: [
+          {
+            id: "gate-1",
+            toolPattern: "github_findu_checks_rerun",
+            risk: "high"
+          }
+        ]
+      })
+    ).not.toBe(computeMandatePolicyHash(base));
+    expect(
+      computeMandatePolicyHash({ ...base, deniedTools: ["*_deploy_prod"] })
+    ).not.toBe(computeMandatePolicyHash(base));
+  });
+
+  it("appends renewal lease events with the renewing actor", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+    const repoPath = join(root, "repo");
+
+    await createMandate({
+      path,
+      now: () => new Date("2026-06-19T16:00:00.000Z"),
+      task: "fix-ci",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "fix/ci",
+      agentRole: "implementer",
+      profiles: ["github_findu"],
+      lease: "1h",
+      createdBy: "wilson"
+    });
+
+    const renewed = await renewMandate({
+      path,
+      id: "fix-ci",
+      repoPath,
+      lease: "2h",
+      actor: "harness-1",
+      now: () => new Date("2026-06-19T16:30:00.000Z")
+    });
+
+    expect(renewed.expiresAt).toBe("2026-06-19T18:30:00.000Z");
+    expect(renewed.leaseEvents).toEqual([
+      {
+        type: "created",
+        at: "2026-06-19T16:00:00.000Z",
+        lease: "1h",
+        expiresAt: "2026-06-19T17:00:00.000Z",
+        actor: "wilson"
+      },
+      {
+        type: "renewed",
+        at: "2026-06-19T16:30:00.000Z",
+        lease: "2h",
+        expiresAt: "2026-06-19T18:30:00.000Z",
+        actor: "harness-1"
+      }
+    ]);
+  });
+
+  it("defaults child mandates to a parent authority source", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+    const repoPath = join(root, "repo");
+
+    await createMandate({
+      path,
+      now: () => new Date("2026-06-19T16:00:00.000Z"),
+      task: "fix-ci",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "fix/ci",
+      agentRole: "lead",
+      profiles: ["github_findu"],
+      lease: "2h",
+      authoritySource: { type: "preset", ref: "github-ci" }
+    });
+
+    const child = await createChildMandate({
+      path,
+      now: () => new Date("2026-06-19T16:10:00.000Z"),
+      parentId: "fix-ci",
+      task: "rerun checks",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "fix/ci",
+      agentRole: "worker",
+      profiles: ["github_findu"],
+      lease: "30m",
+      createdBy: "lead-agent"
+    });
+
+    expect(child.authoritySource).toEqual({ type: "parent", ref: "fix-ci" });
+    expect(child.createdBy).toBe("lead-agent");
+    expect(child.policyHash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(child.leaseEvents).toEqual([
+      {
+        type: "created",
+        at: "2026-06-19T16:10:00.000Z",
+        lease: "30m",
+        expiresAt: "2026-06-19T16:40:00.000Z",
+        actor: "lead-agent"
+      }
+    ]);
+  });
+
+  it("parses stores written before lease evidence fields existed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        mandates: [
+          {
+            version: 1,
+            id: "legacy",
+            task: "legacy",
+            repoPath: join(root, "repo"),
+            worktreePath: join(root, "repo"),
+            branch: "main",
+            agentRole: "implementer",
+            profiles: ["github_findu"],
+            lease: "2h",
+            createdAt: "2026-06-19T16:00:00.000Z",
+            expiresAt: "2026-06-19T18:00:00.000Z",
+            allowedTools: [],
+            deniedTools: [],
+            approvalGates: [],
+            handoffState: "open"
+          }
+        ]
+      })
+    );
+
+    const store = await readMandateStore({ path });
+    expect(store.mandates[0]?.id).toBe("legacy");
+    expect(store.mandates[0]?.policyHash).toBeUndefined();
+    expect(store.mandates[0]?.leaseEvents).toBeUndefined();
+
+    const renewed = await renewMandate({
+      path,
+      id: "legacy",
+      repoPath: join(root, "repo"),
+      lease: "1h",
+      now: () => new Date("2026-06-19T16:30:00.000Z")
+    });
+    expect(renewed.leaseEvents).toEqual([
+      {
+        type: "renewed",
+        at: "2026-06-19T16:30:00.000Z",
+        lease: "1h",
+        expiresAt: "2026-06-19T17:30:00.000Z"
+      }
+    ]);
   });
 
   it("computes active and expired runtime status from expiresAt", () => {

@@ -5044,6 +5044,8 @@ describe("switchboard CLI program", () => {
         "fix-ci",
         "--agent",
         "implementer",
+        "--actor",
+        "human-wilson",
         "--profiles",
         "github_findu,vercel_preview",
         "--branch",
@@ -5093,6 +5095,16 @@ describe("switchboard CLI program", () => {
           }
         ],
         lease: "2h",
+        createdBy: "human-wilson",
+        authoritySource: { type: "manual" },
+        policyHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+        leaseEvents: [
+          {
+            type: "created",
+            lease: "2h",
+            actor: "human-wilson"
+          }
+        ],
         runtimeStatus: "active"
       },
       mcpLaunch: {
@@ -5163,7 +5175,8 @@ describe("switchboard CLI program", () => {
               risk: "high",
               labels: ["remote-state", "ci"]
             }
-          ]
+          ],
+          policyHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/)
         },
         commandCandidates: [
           {
@@ -5211,7 +5224,19 @@ describe("switchboard CLI program", () => {
           agentRole: "implementer",
           profiles: ["github_findu", "vercel_preview"],
           allowedTools: ["github_findu_*"],
-          deniedTools: ["*_deploy_prod"]
+          deniedTools: ["*_deploy_prod"],
+          createdBy: "human-wilson",
+          source: { type: "manual" },
+          policyHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/)
+        },
+        lease: {
+          events: [
+            {
+              type: "created",
+              lease: "2h",
+              actor: "human-wilson"
+            }
+          ]
         },
         mcpLaunch: {
           schemaVersion: "switchboard.mcp-launch.v1",
@@ -5289,6 +5314,10 @@ describe("switchboard CLI program", () => {
     expect(output[3]).toContain("risk: high");
     expect(output[3]).toContain("labels: remote-state, ci");
     expect(output[3]).toContain("reason: rerunning CI changes remote state");
+    expect(output[3]).toContain("Created by: human-wilson");
+    expect(output[3]).toContain("Authority source: manual");
+    expect(output[3]).toMatch(/Policy hash: sha256:[0-9a-f]{64}/);
+    expect(output[3]).toMatch(/Lease created at:.+lease:2h.+actor:human-wilson/);
   });
 
   it("creates a mandate from a reviewed authority map", async () => {
