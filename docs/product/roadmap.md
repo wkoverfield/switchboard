@@ -254,6 +254,10 @@ Implemented in the current codebase:
 - `switchboard scan` / `switchboard scan --json` read-only first-run repo scan
   for git, client config, Switchboard config, provider/env hints, warnings, and
   next actions without network calls or secret values
+- `switchboard manifest` / `switchboard manifest --json` read-only repo
+  authority manifest that composes config sources, profiles, client install
+  status, rendered Codex/Claude Switchboard routes, secretRef readiness, audit
+  posture, and exact next actions without writing files or exposing secrets
 - `switchboard audit` / `switchboard audit --json` repo authority posture report
   with ready/needs-attention/unsafe/invalid status, checks, finding counts,
   evidence, and exact next actions for teams deciding whether to give agents a

@@ -122,6 +122,7 @@ const approvalWatchSchemaVersion = "switchboard.approvals-watch.v1";
 const toolSurfaceSchemaVersion = "switchboard.tool-surface.v1";
 const auditLogSchemaVersion = "switchboard.audit-log.v1";
 const repoAuditExportSchemaVersion = "switchboard.repo-audit-export.v1";
+const repoManifestSchemaVersion = "switchboard.repo-manifest.v1";
 const secretsSchemaVersion = "switchboard.secrets.v1";
 const providerPresetSchemaVersion = "switchboard.provider-preset.v1";
 const providerPresetCheckSchemaVersion = "switchboard.provider-preset-check.v1";
@@ -628,6 +629,21 @@ export function createProgram(io: ProgramIo = {}): Command {
         options.json
           ? JSON.stringify(displayResult, null, 2)
           : formatScan(displayResult)
+      );
+    });
+
+  program
+    .command("manifest")
+    .description("Print the repo-level Switchboard authority manifest.")
+    .option("--json", "print machine-readable JSON")
+    .action(async (options: { json?: boolean }) => {
+      const manifest = await createRepoManifestForCurrentInvocation(program, {
+        secretStore
+      });
+      writeOut(
+        options.json
+          ? JSON.stringify(manifest, null, 2)
+          : formatRepoManifest(manifest)
       );
     });
 
@@ -4166,6 +4182,251 @@ function formatRepoAuditJsonl(result: RepoAuditResult): string {
     }))
   ];
   return lines.map((line) => JSON.stringify(line)).join("\n");
+}
+
+interface RepoManifest {
+  schemaVersion: typeof repoManifestSchemaVersion;
+  generatedAt: string;
+  repo: SwitchboardScanResult["repo"];
+  runtime: SwitchboardScanResult["runtime"];
+  config: {
+    valid: boolean;
+    sources: SwitchboardScanResult["switchboard"]["configSources"];
+    diagnostics: ReturnType<typeof loadSwitchboardConfig>["diagnostics"];
+    namespaceCollisions: ReturnType<typeof loadSwitchboardConfig>["namespaceCollisions"];
+  };
+  authorityStatus: SwitchboardScanResult["authorityStatus"];
+  audit: Pick<RepoAuditResult, "status" | "summary" | "findingSummary">;
+  profiles: Array<{
+    name: string;
+    provider: string;
+    namespace: string;
+    environment: string | null;
+    upstreamType: string | null;
+    secretRefs: string[];
+  }>;
+  clients: Array<{
+    client: SupportedClient;
+    targetPath: string;
+    status: string;
+    message: string;
+    directServerNames: string[];
+    installCommand: string;
+    rendered: {
+      serverName: string;
+      target: string;
+      content: string;
+    } | null;
+  }>;
+  secrets: {
+    usages: ReturnType<typeof collectSecretRefUsages>;
+    missing: MissingSecretRef[];
+  };
+  nextActions: {
+    recommended: RecommendedNextAction["primary"];
+    commands: string[];
+  };
+  safetyNotes: string[];
+}
+
+async function createRepoManifestForCurrentInvocation(
+  program: Command,
+  options: { secretStore: SecretStore }
+): Promise<RepoManifest> {
+  const globalOptions = program.opts<{ cwd?: string }>();
+  const launch = resolveInstallLaunch({ commandArgs: [] });
+  const scan = await scanSwitchboardProject({
+    ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+    command: launch.command,
+    commandArgs: launch.commandArgs
+  });
+  const displayScan = rewriteScanCommandsForCurrentInvocation(scan);
+  const audit = createRepoAudit(displayScan);
+  const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
+  const cwd = configCwdBase(loaded, globalOptions.cwd);
+  const namespaceByProfile = new Map(
+    namespacesForProfiles(loaded.config.profiles).map((entry) => [
+      entry.profile,
+      entry.namespace
+    ])
+  );
+  const secretUsages = collectSecretRefUsages(loaded.config);
+  const missingSecrets = await findMissingSecretRefs(
+    loaded.config,
+    options.secretStore
+  );
+  const configValid = !loaded.diagnostics.some(
+    (diagnostic) => diagnostic.level === "error"
+  );
+
+  return {
+    schemaVersion: repoManifestSchemaVersion,
+    generatedAt: new Date().toISOString(),
+    repo: displayScan.repo,
+    runtime: displayScan.runtime,
+    config: {
+      valid: configValid,
+      sources: displayScan.switchboard.configSources,
+      diagnostics: loaded.diagnostics,
+      namespaceCollisions: loaded.namespaceCollisions
+    },
+    authorityStatus: displayScan.authorityStatus,
+    audit: {
+      status: audit.status,
+      summary: audit.summary,
+      findingSummary: audit.findingSummary
+    },
+    profiles: Object.entries(loaded.config.profiles).map(([name, profile]) => ({
+      name,
+      provider: profile.provider,
+      namespace: profile.namespace ?? namespaceByProfile.get(name) ?? name,
+      environment: profile.environment ?? null,
+      upstreamType: profile.upstream?.type ?? null,
+      secretRefs: secretUsages
+        .filter((usage) => usage.profileName === name)
+        .map((usage) => usage.ref)
+    })),
+    clients: createManifestClientEntries({
+      scan: displayScan,
+      cwd,
+      launch,
+      configValid
+    }),
+    secrets: {
+      usages: secretUsages,
+      missing: missingSecrets
+    },
+    nextActions: {
+      recommended: displayScan.recommendedNextAction.primary,
+      commands: displayScan.nextActions
+    },
+    safetyNotes: [
+      "This manifest is a local Switchboard authority view, not a sandbox.",
+      "Rendered client config routes agents through Switchboard MCP; direct clients, raw provider CLIs, browsers, and unrestricted shell access can bypass it.",
+      "Secret refs are listed by name only; raw secret values are never included."
+    ]
+  };
+}
+
+function createManifestClientEntries(options: {
+  scan: SwitchboardScanResult;
+  cwd: string;
+  launch: ReturnType<typeof resolveInstallLaunch>;
+  configValid: boolean;
+}): RepoManifest["clients"] {
+  const byClient = new Map(
+    options.scan.clients.map((client) => [client.client, client] as const)
+  );
+  return (["codex", "claude"] as SupportedClient[]).map((client) => {
+    const scanClient = byClient.get(client);
+    let rendered: RepoManifest["clients"][number]["rendered"] = null;
+    if (options.configValid) {
+      try {
+        const config = renderSwitchboardClientConfig({
+          client,
+          command: options.launch.command,
+          commandArgs: options.launch.commandArgs,
+          cwd: options.cwd
+        });
+        rendered = {
+          serverName: config.serverName,
+          target: config.target,
+          content: config.content
+        };
+      } catch {
+        rendered = null;
+      }
+    }
+    return {
+      client,
+      targetPath: scanClient?.targetPath ?? resolveProjectClientConfigPathSafe(client, options.cwd),
+      status: scanClient?.status ?? "missing",
+      message: scanClient?.message ?? `${client} project config is missing.`,
+      directServerNames: scanClient?.otherServerNames ?? [],
+      installCommand: `switchboard install ${client} --write`,
+      rendered
+    };
+  });
+}
+
+function resolveProjectClientConfigPathSafe(
+  client: SupportedClient,
+  cwd: string
+): string {
+  return client === "codex"
+    ? resolve(cwd, ".codex", "config.toml")
+    : resolve(cwd, ".mcp.json");
+}
+
+function formatRepoManifest(manifest: RepoManifest): string {
+  const lines = [
+    `Switchboard repo manifest: ${manifest.repo.name}`,
+    `Authority: ${formatAuthorityStatusLabel(manifest.authorityStatus)}`,
+    manifest.authorityStatus.summary,
+    `Audit: ${manifest.audit.status}`,
+    "",
+    "Repo:",
+    `- path: ${manifest.repo.gitRoot ?? manifest.repo.cwd}`,
+    `- branch: ${manifest.repo.branch ?? "unknown"}`,
+    `- runtime: ${formatManifestRuntime(manifest)}`,
+    "",
+    "Config:",
+    `- valid: ${manifest.config.valid ? "yes" : "no"}`,
+    `- sources: ${manifest.config.sources.length}`,
+    `- diagnostics: ${manifest.config.diagnostics.length}`,
+    "",
+    "Profiles:",
+    ...(manifest.profiles.length > 0
+      ? manifest.profiles.map(
+          (profile) =>
+            `- ${profile.name}: ${profile.provider}, namespace ${profile.namespace}, upstream ${profile.upstreamType ?? "none"}`
+        )
+      : ["- none"])
+  ];
+
+  lines.push("", "Clients:");
+  for (const client of manifest.clients) {
+    lines.push(`- ${client.client}: ${client.status}`);
+    lines.push(`  target: ${client.targetPath}`);
+    lines.push(`  install: ${formatHumanCommand(client.installCommand)}`);
+    if (client.directServerNames.length > 0) {
+      lines.push(`  direct routes: ${client.directServerNames.join(", ")}`);
+    }
+  }
+
+  lines.push("", "Secrets:");
+  lines.push(`- refs used: ${manifest.secrets.usages.length}`);
+  lines.push(`- missing: ${manifest.secrets.missing.length}`);
+  for (const missing of manifest.secrets.missing.slice(0, 5)) {
+    lines.push(`  - ${missing.ref}: ${missing.message}`);
+  }
+
+  if (manifest.nextActions.recommended) {
+    lines.push("", "Recommended next:");
+    lines.push(
+      `- ${formatHumanCommand(manifest.nextActions.recommended.command)}`
+    );
+    lines.push(`  ${manifest.nextActions.recommended.reason}`);
+  }
+
+  lines.push(
+    "",
+    "Safety notes:",
+    ...manifest.safetyNotes.map((note) => `- ${note}`)
+  );
+
+  return lines.join("\n");
+}
+
+function formatManifestRuntime(manifest: RepoManifest): string {
+  const labels: string[] = [manifest.runtime.kind];
+  if (manifest.runtime.devcontainerPresent) {
+    labels.push("devcontainer present");
+  }
+  if (manifest.runtime.vercelProjectPresent) {
+    labels.push("Vercel project linked");
+  }
+  return labels.join(", ");
 }
 
 function rewriteScanCommandsForCurrentInvocation(
