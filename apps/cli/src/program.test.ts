@@ -150,6 +150,138 @@ describe("switchboard CLI program", () => {
     expect(text).not.toContain("secret\n");
   });
 
+  it("prints repo manifest JSON as the source-of-truth authority view", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "main");
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      join(root, ".codex", "config.toml"),
+      [
+        "[mcp_servers.github]",
+        'command = "docker"',
+        'args = ["run", "GITHUB_TOKEN=ghp_manifest_should_not_print"]'
+      ].join("\n")
+    );
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_ci:",
+        "    provider: github",
+        "    namespace: github_ci",
+        "    environment: development",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "      env:",
+        "        GITHUB_TOKEN:",
+        "          secretRef: github/example/dev/token"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      secretStore: createMemorySecretStore()
+    });
+    await program.parseAsync(["--cwd", root, "manifest", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      schemaVersion: string;
+      authorityStatus: { status: string };
+      audit: { status: string; findingSummary: { bypasses: number } };
+      profiles: Array<{
+        name: string;
+        provider: string;
+        namespace: string;
+        secretRefs: string[];
+      }>;
+      clients: Array<{
+        client: string;
+        status: string;
+        directServerNames: string[];
+        rendered: { content: string } | null;
+      }>;
+      secrets: {
+        usages: Array<{ ref: string; envName: string }>;
+        missing: Array<{ ref: string }>;
+      };
+      safetyNotes: string[];
+    };
+
+    expect(parsed.schemaVersion).toBe("switchboard.repo-manifest.v1");
+    expect(parsed.authorityStatus.status).toBe("bypass-present");
+    expect(parsed.audit.status).toBe("unsafe");
+    expect(parsed.audit.findingSummary.bypasses).toBe(1);
+    expect(parsed.profiles).toContainEqual(
+      expect.objectContaining({
+        name: "github_ci",
+        provider: "github",
+        namespace: "github_ci",
+        secretRefs: ["github/example/dev/token"]
+      })
+    );
+    expect(parsed.clients).toContainEqual(
+      expect.objectContaining({
+        client: "codex",
+        status: "missing",
+        directServerNames: ["github"],
+        rendered: expect.objectContaining({
+          content: expect.stringContaining(`--cwd", "${root}", "mcp"`)
+        })
+      })
+    );
+    expect(parsed.clients).toContainEqual(
+      expect.objectContaining({
+        client: "claude",
+        rendered: expect.objectContaining({
+          content: expect.stringContaining(`"${root}"`)
+        })
+      })
+    );
+    expect(
+      parsed.clients.find((client) => client.client === "claude")?.rendered
+        ?.content
+    ).toContain('"--cwd"');
+    expect(parsed.secrets.usages).toContainEqual(
+      expect.objectContaining({
+        ref: "github/example/dev/token",
+        envName: "GITHUB_TOKEN"
+      })
+    );
+    expect(parsed.secrets.missing).toContainEqual(
+      expect.objectContaining({ ref: "github/example/dev/token" })
+    );
+    expect(parsed.safetyNotes.join("\n")).toContain("not a sandbox");
+    expect(output.join("\n")).not.toContain("ghp_manifest_should_not_print");
+  });
+
+  it("prints a compact human repo manifest", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "manifest"], {
+      from: "user"
+    });
+
+    const text = output.join("\n");
+    expect(text).toContain("Switchboard repo manifest:");
+    expect(text).toContain("Authority:");
+    expect(text).toContain("Audit:");
+    expect(text).toContain("Profiles:");
+    expect(text).toContain("local_echo: generic");
+    expect(text).toContain("Clients:");
+    expect(text).toContain("install: switchboard install codex --write");
+    expect(text).toContain("Secrets:");
+    expect(text).toContain("Safety notes:");
+    expect(text).not.toContain("fixture secret");
+  });
+
   it("prints audit JSON for repo authority posture", async () => {
     const root = makeTempProject();
     mkdirSync(join(root, ".codex"));

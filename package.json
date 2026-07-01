@@ -25,6 +25,7 @@
     "smoke:provider-add": "node scripts/smoke/provider-add.mjs",
     "smoke:import-dry-run": "node scripts/smoke/import-dry-run.mjs",
     "smoke:audit-v0": "node scripts/smoke/audit-v0.mjs",
+    "smoke:repo-manifest": "node scripts/smoke/repo-manifest.mjs",
     "smoke:authority-map-draft": "node scripts/smoke/authority-map-draft.mjs",
     "smoke:provider-presets": "node scripts/smoke/provider-presets.mjs",
     "smoke:package-pack": "node scripts/smoke/package-pack.mjs",
