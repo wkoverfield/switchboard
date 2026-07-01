@@ -1,16 +1,21 @@
 import { Command } from "commander";
 import { execFileSync, spawnSync } from "node:child_process";
-import { realpathSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
   type AuditLogEntry,
   type AuditLogger,
+  checkAuthorityMapDraft,
   type ApprovalRequestWithStatus,
   checkLocalConfigIgnored,
   checkInstalledClientLaunches,
   createChildMandate,
+  draftAuthorityMap,
+  parseAuthorityMapDraft,
+  type AuthorityMapDraft,
+  type AuthorityMapCheckResult,
   createMandate,
   decideApprovalRequest,
   createInitConfigPlan,
@@ -1825,6 +1830,129 @@ export function createProgram(io: ProgramIo = {}): Command {
           code: "tool_surface_failed",
           message,
           nextActions: toolSurfaceFailureNextActions(message, mandate?.id)
+        });
+      }
+    });
+
+  const authority = program
+    .command("authority")
+    .description("Draft and validate repo-scoped tool authority maps.");
+
+  authority
+    .command("draft")
+    .description("Discover a profile tool surface and draft a conservative authority map.")
+    .requiredOption("--profile <name>", "profile to discover and map")
+    .option("--namespace <namespace>", "override the namespace recorded in the draft")
+    .option("--json", "print machine-readable JSON")
+    .action(
+      async (options: {
+        profile: string;
+        namespace?: string;
+        json?: boolean;
+      }) => {
+        const globalOptions = program.opts<{ cwd?: string }>();
+        const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
+
+        if (!validateLoadedConfigForJsonCommand(loaded, options.json)) {
+          return;
+        }
+
+        const profileConfig = loaded.config.profiles[options.profile];
+        if (!profileConfig) {
+          writeCommandError({
+            json: options.json,
+            code: "profile_not_found",
+            message: `profile "${options.profile}" was not found`,
+            nextActions: [
+              "Run switchboard scan to inspect configured profiles.",
+              "Run switchboard setup <preset> to add a provider profile."
+            ]
+          });
+          return;
+        }
+
+        const profiles = await stdioProfilesFromConfigForCommand({
+          profiles: { [options.profile]: profileConfig },
+          cwdBase: configCwdBase(loaded, globalOptions.cwd),
+          secretStore,
+          json: options.json,
+          writeCommandError,
+          writeErr
+        });
+        if (!profiles) {
+          return;
+        }
+
+        const selectedProfile = profiles[0];
+        if (!selectedProfile) {
+          writeCommandError({
+            json: options.json,
+            code: "profile_not_stdio",
+            message: `profile "${options.profile}" does not have a stdio upstream tool surface`,
+            nextActions: [
+              "Run switchboard import --dry-run to inspect MCP configs.",
+              "Run switchboard setup <preset> to add a stdio provider profile."
+            ]
+          });
+          return;
+        }
+
+        try {
+          const tools = await listToolsForProfiles([selectedProfile], {
+            auditLogger
+          });
+          const draft = draftAuthorityMap({
+            profileName: selectedProfile.profileName,
+            namespace: options.namespace ?? selectedProfile.namespace,
+            toolNames: tools.map((tool) => tool.name)
+          });
+          writeOut(
+            options.json
+              ? JSON.stringify(draft, null, 2)
+              : formatAuthorityMapDraft(draft)
+          );
+        } catch (error) {
+          writeCommandError({
+            json: options.json,
+            code: "authority_draft_failed",
+            message: messageFromError(error),
+            nextActions: [
+              `Run switchboard test ${options.profile} to debug the upstream MCP profile.`,
+              "Run switchboard tools --json to inspect the current tool surface."
+            ]
+          });
+        }
+      }
+    );
+
+  authority
+    .command("check <file>")
+    .description("Validate an authority map draft YAML or JSON file.")
+    .option("--json", "print machine-readable JSON")
+    .action((file: string, options: { json?: boolean }) => {
+      try {
+        const globalOptions = program.opts<{ cwd?: string }>();
+        const filePath = isAbsolute(file)
+          ? file
+          : resolve(globalOptions.cwd ?? process.cwd(), file);
+        const draft = parseAuthorityMapDraft(readFileSync(filePath, "utf8"));
+        const result = checkAuthorityMapDraft(draft);
+        writeOut(
+          options.json
+            ? JSON.stringify(result, null, 2)
+            : formatAuthorityMapCheck(result)
+        );
+        if (!result.ok) {
+          process.exitCode = 1;
+        }
+      } catch (error) {
+        writeCommandError({
+          json: options.json,
+          code: "authority_map_check_failed",
+          message: messageFromError(error),
+          nextActions: [
+            "Run switchboard authority draft --profile <name> --json to generate a schema-valid authority map."
+          ]
         });
       }
     });
@@ -5655,6 +5783,82 @@ function formatDaemonTools(
     lines.push("");
     for (const tool of tools) {
       lines.push(`  ${tool.name} (${tool.profileName})`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function formatAuthorityMapDraft(draft: AuthorityMapDraft): string {
+  const lines = [
+    "Switchboard authority map draft",
+    `Profile: ${draft.profileName}`,
+    `Namespace: ${draft.namespace}`,
+    `Discovered ${draft.counts.tools} tools`,
+    `Allowed ${draft.counts.allowed}, approval-required ${draft.counts.approvalRequired}, denied ${draft.counts.denied}, review ${draft.counts.review}`,
+    `Needs human review: ${draft.needsHumanReview ? "yes" : "no"}`
+  ];
+
+  const notableDenied = draft.groups.denied.slice(0, 5);
+  const notableReview = draft.groups.review.slice(0, 5);
+  if (notableDenied.length > 0) {
+    lines.push("", "Denied examples:");
+    for (const tool of notableDenied) {
+      lines.push(`  ${tool.toolName} - ${tool.reason}`);
+    }
+  }
+  if (notableReview.length > 0) {
+    lines.push("", "Review examples:");
+    for (const tool of notableReview) {
+      lines.push(`  ${tool.toolName} - ${tool.reason}`);
+    }
+  }
+  if (draft.warnings.length > 0) {
+    lines.push("", "Warnings:");
+    for (const warning of draft.warnings) {
+      lines.push(`  - ${warning}`);
+    }
+  }
+
+  lines.push("", "Next:");
+  for (const action of draft.nextActions) {
+    lines.push(`  - ${action}`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatAuthorityMapCheck(result: AuthorityMapCheckResult): string {
+  const lines = [
+    result.ok
+      ? "Switchboard authority map check: valid"
+      : "Switchboard authority map check: failed",
+    `Profile: ${result.profileName}`,
+    `Namespace: ${result.namespace}`,
+    `Tools: ${result.counts.tools}`,
+    `Allowed: ${result.counts.allowed}`,
+    `Approval required: ${result.counts.approvalRequired}`,
+    `Denied: ${result.counts.denied}`,
+    `Review: ${result.counts.review}`,
+    `Needs human review: ${result.needsHumanReview ? "yes" : "no"}`
+  ];
+
+  if (result.errors.length > 0) {
+    lines.push("", "Errors:");
+    for (const error of result.errors) {
+      lines.push(`  - ${error}`);
+    }
+  }
+  if (result.warnings.length > 0) {
+    lines.push("", "Warnings:");
+    for (const warning of result.warnings) {
+      lines.push(`  - ${warning}`);
+    }
+  }
+  if (result.nextActions.length > 0) {
+    lines.push("", "Next:");
+    for (const action of result.nextActions) {
+      lines.push(`  - ${action}`);
     }
   }
 

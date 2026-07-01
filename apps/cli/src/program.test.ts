@@ -978,6 +978,262 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("drafts authority maps for one profile as JSON", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_ci:",
+        "    provider: github",
+        "    namespace: github_ci",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      listTools: async () => [
+        namespacedTool("github_ci_checks_list"),
+        namespacedTool("github_ci_issue_comment"),
+        namespacedTool("github_ci_deploy_prod"),
+        namespacedTool("github_ci_sync")
+      ]
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "authority", "draft", "--profile", "github_ci", "--json"],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      schemaVersion: string;
+      profileName: string;
+      namespace: string;
+      counts: {
+        allowed: number;
+        approvalRequired: number;
+        denied: number;
+        review: number;
+      };
+      groups: {
+        allowed: Array<{ toolName: string }>;
+        approvalRequired: Array<{ toolName: string }>;
+        denied: Array<{ toolName: string }>;
+        review: Array<{ toolName: string }>;
+      };
+      suggestedMandatePolicy: {
+        allowedTools: string[];
+        deniedTools: string[];
+        approvalGates: Array<{ toolPattern: string }>;
+      };
+      needsHumanReview: boolean;
+    };
+    expect(parsed.schemaVersion).toBe("switchboard.authority-map-draft.v1");
+    expect(parsed.profileName).toBe("github_ci");
+    expect(parsed.namespace).toBe("github_ci");
+    expect(parsed.counts).toMatchObject({
+      allowed: 1,
+      approvalRequired: 1,
+      denied: 1,
+      review: 1
+    });
+    expect(parsed.groups.allowed[0]?.toolName).toBe("github_ci_checks_list");
+    expect(parsed.groups.approvalRequired[0]?.toolName).toBe(
+      "github_ci_issue_comment"
+    );
+    expect(parsed.groups.denied[0]?.toolName).toBe("github_ci_deploy_prod");
+    expect(parsed.groups.review[0]?.toolName).toBe("github_ci_sync");
+    expect(parsed.suggestedMandatePolicy.allowedTools).toEqual([
+      "github_ci_checks_list"
+    ]);
+    expect(parsed.suggestedMandatePolicy.deniedTools).toEqual([
+      "github_ci_deploy_prod",
+      "github_ci_sync"
+    ]);
+    expect(parsed.suggestedMandatePolicy.approvalGates[0]?.toolPattern).toBe(
+      "github_ci_issue_comment"
+    );
+    expect(parsed.needsHumanReview).toBe(true);
+    expect(output.join("\n")).not.toContain("ghp_secret");
+  });
+
+  it("prints human authority map summaries with next actions", async () => {
+    const root = makeTempProject();
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_ci:",
+        "    provider: github",
+        "    namespace: github_ci",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      listTools: async () => [
+        namespacedTool("github_ci_checks_list"),
+        namespacedTool("github_ci_delete_branch"),
+        namespacedTool("github_ci_sync")
+      ]
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "authority", "draft", "--profile", "github_ci"],
+      { from: "user" }
+    );
+
+    const text = output.join("\n");
+    expect(text).toContain("Switchboard authority map draft");
+    expect(text).toContain("Discovered 3 tools");
+    expect(text).toContain(
+      "Allowed 1, approval-required 0, denied 1, review 1"
+    );
+    expect(text).toContain("Denied examples:");
+    expect(text).toContain("Review examples:");
+    expect(text).toContain("Next:");
+  });
+
+  it("checks authority maps and fails duplicate conflicting groups", async () => {
+    const root = makeTempProject();
+    const mapPath = join(root, "authority-map.yaml");
+    writeFileSync(
+      mapPath,
+      [
+        "schemaVersion: switchboard.authority-map-draft.v1",
+        "profileName: github_ci",
+        "namespace: github_ci",
+        "generatedAt: 2026-06-30T00:00:00.000Z",
+        "source:",
+        "  kind: profile-tools",
+        "  toolCount: 2",
+        "groups:",
+        "  allowed:",
+        "    - toolName: github_ci_update_issue",
+        "      reason: bad manual edit",
+        "      matchedHeuristic: manual",
+        "      confidence: 0.1",
+        "  approvalRequired:",
+        "    - toolName: github_ci_update_issue",
+        "      reason: write-like",
+        "      matchedHeuristic: approval-write-keyword",
+        "      confidence: 0.78",
+        "  denied: []",
+        "  review: []",
+        "suggestedMandatePolicy:",
+        "  allowedTools:",
+        "    - github_ci_update_issue",
+        "  deniedTools: []",
+        "  approvalGates: []",
+        "needsHumanReview: true",
+        "warnings: []",
+        "nextActions: []"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await program.parseAsync(["authority", "check", mapPath, "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      schemaVersion: string;
+      errors: string[];
+      warnings: string[];
+    };
+    expect(parsed.schemaVersion).toBe("switchboard.authority-map-check.v1");
+    expect(parsed.ok).toBe(false);
+    expect(parsed.errors).toContain(
+      'tool "github_ci_update_issue" appears in multiple groups: allowed, approvalRequired'
+    );
+    expect(parsed.warnings).toContain(
+      'allowed tool "github_ci_update_issue" looks sensitive; move it to approvalRequired, denied, or review.'
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("checks relative authority map paths from --cwd", async () => {
+    const root = makeTempProject();
+    writeFileSync(
+      join(root, "authority-map.yaml"),
+      [
+        "schemaVersion: switchboard.authority-map-draft.v1",
+        "profileName: github_ci",
+        "namespace: github_ci",
+        "generatedAt: 2026-06-30T00:00:00.000Z",
+        "source:",
+        "  kind: profile-tools",
+        "  toolCount: 1",
+        "groups:",
+        "  allowed:",
+        "    - toolName: github_ci_list_checks",
+        "      reason: read-like",
+        "      matchedHeuristic: allow-read-keyword",
+        "      confidence: 0.72",
+        "  approvalRequired: []",
+        "  denied: []",
+        "  review: []",
+        "suggestedMandatePolicy:",
+        "  allowedTools:",
+        "    - github_ci_list_checks",
+        "  deniedTools: []",
+        "  approvalGates: []",
+        "needsHumanReview: false",
+        "warnings: []",
+        "nextActions: []"
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await program.parseAsync(
+      ["--cwd", root, "authority", "check", "authority-map.yaml", "--json"],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: true,
+      profileName: "github_ci",
+      namespace: "github_ci"
+    });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("returns structured errors when authority draft profile is missing", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".switchboard.yaml"), "version: 1\nprofiles: {}\n");
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+
+    await program.parseAsync(
+      ["--cwd", root, "authority", "draft", "--profile", "missing", "--json"],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "profile_not_found",
+      message: 'profile "missing" was not found'
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
   it("rejects provider preset checks against the wrong provider profile", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
