@@ -121,6 +121,7 @@ pnpm smoke:provider-presets
 pnpm eval:fresh-agent-import
 pnpm eval:fresh-agent-package-import
 pnpm eval:fresh-agent-github-ci
+pnpm eval:fresh-agent-authority-map
 pnpm eval:fresh-agent-expired-mandate
 pnpm eval:fresh-agent-subagent
 pnpm smoke:mcp-serve-session

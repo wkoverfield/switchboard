@@ -37,6 +37,20 @@ The draft is deterministic and conservative:
 The agent can improve the draft, but Switchboard validates the artifact and the
 human approves before it becomes operational policy.
 
+## Eval
+
+The deterministic fresh-agent eval exercises this flow against an unknown
+fixture provider:
+
+```bash
+pnpm build
+pnpm eval:fresh-agent-authority-map
+```
+
+It checks that an agent can discover the tool surface, draft/check a
+conservative map, keep review visible, avoid secret leakage, avoid config
+mutation, and explain how the JSON becomes a safer mandate proposal.
+
 ## Next Phase
 
 After V0 proves useful, add explicit apply/storage support and a
