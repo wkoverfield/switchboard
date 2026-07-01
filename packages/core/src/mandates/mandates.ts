@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   chmod,
   mkdir,
@@ -16,6 +17,23 @@ import type { PathResolutionOptions } from "../config/paths.js";
 export type MandateRuntimeStatus = "active" | "expired";
 export type MandateHandoffState = "open" | "completed" | "blocked" | "cancelled";
 export type MandateApprovalRisk = "low" | "medium" | "high" | "critical";
+export type MandateAuthoritySourceType =
+  | "preset"
+  | "authority-map"
+  | "parent"
+  | "manual";
+export interface MandateAuthoritySource {
+  type: MandateAuthoritySourceType;
+  ref?: string | undefined;
+}
+export type MandateLeaseEventType = "created" | "renewed";
+export interface MandateLeaseEvent {
+  type: MandateLeaseEventType;
+  at: string;
+  lease: string;
+  expiresAt: string;
+  actor?: string | undefined;
+}
 export interface MandateApprovalGate {
   id: string;
   toolPattern: string;
@@ -57,6 +75,8 @@ interface NormalizedCreateMandateOptions {
   allowedTools: string[];
   deniedTools: string[];
   approvalGates: MandateApprovalGate[];
+  createdBy?: string | undefined;
+  authoritySource?: MandateAuthoritySource | undefined;
   parentMandateId?: string | undefined;
   parentMandateUid?: string | undefined;
   delegatedBy?: string | undefined;
@@ -79,6 +99,19 @@ export const mandateHandoffStateSchema = z.enum([
   "blocked",
   "cancelled"
 ]);
+
+export const mandateAuthoritySourceSchema = z.object({
+  type: z.enum(["preset", "authority-map", "parent", "manual"]),
+  ref: z.string().min(1).optional()
+});
+
+export const mandateLeaseEventSchema = z.object({
+  type: z.enum(["created", "renewed"]),
+  at: z.string().min(1),
+  lease: z.string().min(1),
+  expiresAt: z.string().min(1),
+  actor: z.string().min(1).optional()
+});
 
 export const mandateSchema = z.object({
   version: z.literal(1),
@@ -104,6 +137,10 @@ export const mandateSchema = z.object({
   approvalGates: z
     .array(z.union([mandateApprovalGateSchema, z.string().min(1)]))
     .transform((gates) => normalizeApprovalGates(gates)),
+  createdBy: z.string().min(1).optional(),
+  authoritySource: mandateAuthoritySourceSchema.optional(),
+  policyHash: z.string().min(1).optional(),
+  leaseEvents: z.array(mandateLeaseEventSchema).optional(),
   handoffState: mandateHandoffStateSchema,
   handoffSummary: z.string().min(1).optional(),
   handoffNextSteps: z.array(z.string().min(1)).optional(),
@@ -135,6 +172,8 @@ export interface CreateMandateOptions {
   allowedTools?: string[];
   deniedTools?: string[];
   approvalRequiredTools?: Array<string | CreateMandateApprovalGate>;
+  createdBy?: string | undefined;
+  authoritySource?: MandateAuthoritySource | undefined;
   path?: string;
   now?: () => Date;
 }
@@ -143,6 +182,7 @@ export interface RenewMandateOptions {
   id: string;
   repoPath: string;
   lease: string;
+  actor?: string | undefined;
   path?: string;
   now?: () => Date;
 }
@@ -160,6 +200,8 @@ export interface CreateChildMandateOptions {
   allowedTools?: string[];
   deniedTools?: string[];
   approvalRequiredTools?: Array<string | CreateMandateApprovalGate>;
+  createdBy?: string | undefined;
+  authoritySource?: MandateAuthoritySource | undefined;
   path?: string;
   now?: () => Date;
 }
@@ -252,6 +294,32 @@ export function mandateRuntimeStatus(
   return new Date(mandate.expiresAt).getTime() > now.getTime()
     ? "active"
     : "expired";
+}
+
+export interface MandatePolicyHashInput {
+  profiles: string[];
+  allowedTools: string[];
+  deniedTools: string[];
+  approvalGates: MandateApprovalGate[];
+}
+
+export function computeMandatePolicyHash(
+  input: MandatePolicyHashInput
+): string {
+  const canonical = JSON.stringify({
+    profiles: input.profiles,
+    allowedTools: input.allowedTools,
+    deniedTools: input.deniedTools,
+    approvalGates: input.approvalGates.map((gate) => ({
+      id: gate.id,
+      toolPattern: gate.toolPattern,
+      reason: gate.reason ?? null,
+      risk: gate.risk ?? null,
+      labels: gate.labels ?? []
+    }))
+  });
+
+  return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
 }
 
 export function evaluateMandateToolPolicy(
@@ -392,6 +460,11 @@ export async function createChildMandate(
             : normalizedParent.allowedTools,
         deniedTools: inheritedDeniedTools,
         approvalGates,
+        authoritySource:
+          child.authoritySource ?? {
+            type: "parent",
+            ref: normalizedParent.id
+          },
         parentMandateId: normalizedParent.id,
         parentMandateUid: parentUid,
         delegatedBy: options.delegatedBy?.trim() || normalizedParent.id,
@@ -515,10 +588,21 @@ export async function renewMandate(
       throw new Error("mandate renewal cannot outlive parent mandate lease");
     }
 
+    const actor = normalizeOptionalText(options.actor, "mandate renewal actor");
     const renewedMandate = {
       ...mandate,
       lease: options.lease.trim(),
-      expiresAt
+      expiresAt,
+      leaseEvents: [
+        ...(mandate.leaseEvents ?? []),
+        {
+          type: "renewed" as const,
+          at: renewedAt.toISOString(),
+          lease: options.lease.trim(),
+          expiresAt,
+          ...(actor ? { actor } : {})
+        }
+      ]
     };
     store.mandates[mandateIndex] = renewedMandate;
     await writeMandateStore(store, { path });
@@ -803,8 +887,21 @@ function normalizeCreateMandateOptions(
     leaseMs,
     allowedTools: uniqueTrimmed(options.allowedTools ?? []),
     deniedTools: uniqueTrimmed(options.deniedTools ?? []),
-    approvalGates: normalizeApprovalGates(options.approvalRequiredTools ?? [])
+    approvalGates: normalizeApprovalGates(options.approvalRequiredTools ?? []),
+    createdBy: normalizeOptionalText(options.createdBy, "mandate created by"),
+    authoritySource: normalizeAuthoritySource(options.authoritySource)
   };
+}
+
+function normalizeAuthoritySource(
+  source: MandateAuthoritySource | undefined
+): MandateAuthoritySource | undefined {
+  if (!source) {
+    return undefined;
+  }
+
+  const ref = normalizeOptionalText(source.ref, "authority source ref");
+  return { type: source.type, ...(ref ? { ref } : {}) };
 }
 
 function assertNoActiveDuplicate(
@@ -829,6 +926,10 @@ function buildMandate(
   options: NormalizedCreateMandateOptions,
   createdAt: Date
 ): Mandate {
+  const expiresAt = new Date(
+    createdAt.getTime() + options.leaseMs
+  ).toISOString();
+
   return {
     version: 1,
     id: options.id,
@@ -853,10 +954,29 @@ function buildMandate(
     profiles: options.profiles,
     lease: options.lease,
     createdAt: createdAt.toISOString(),
-    expiresAt: new Date(createdAt.getTime() + options.leaseMs).toISOString(),
+    expiresAt,
     allowedTools: options.allowedTools,
     deniedTools: options.deniedTools,
     approvalGates: options.approvalGates,
+    ...(options.createdBy ? { createdBy: options.createdBy } : {}),
+    ...(options.authoritySource
+      ? { authoritySource: options.authoritySource }
+      : {}),
+    policyHash: computeMandatePolicyHash({
+      profiles: options.profiles,
+      allowedTools: options.allowedTools,
+      deniedTools: options.deniedTools,
+      approvalGates: options.approvalGates
+    }),
+    leaseEvents: [
+      {
+        type: "created",
+        at: createdAt.toISOString(),
+        lease: options.lease,
+        expiresAt,
+        ...(options.createdBy ? { actor: options.createdBy } : {})
+      }
+    ],
     handoffState: "open"
   };
 }

@@ -26,6 +26,8 @@ import {
   listMandates,
   type LoadConfigOptions,
   loadSwitchboardConfig,
+  type MandateAuthoritySource,
+  type MandateLeaseEvent,
   type MandateToolPolicy,
   type MandateWithStatus,
   noopAuditLogger,
@@ -188,6 +190,7 @@ interface MandateMcpLaunchPolicy {
     risk?: string;
     labels?: string[];
   }>;
+  policyHash: string | null;
 }
 
 interface WorkspaceLeasePayload {
@@ -210,6 +213,9 @@ interface WorkspaceLeasePayload {
     allowedTools: string[];
     deniedTools: string[];
     approvalGates: MandateMcpLaunchPolicy["approvalGates"];
+    createdBy: string | null;
+    source: MandateAuthoritySource | null;
+    policyHash: string | null;
     parentMandateId?: string;
     parentMandateUid?: string;
   };
@@ -217,6 +223,7 @@ interface WorkspaceLeasePayload {
     createdAt: string;
     expiresAt: string;
     status: MandateWithStatus["runtimeStatus"];
+    events: MandateLeaseEvent[];
   };
   mcpLaunch: MandateMcpLaunchPayload;
   runLaunch: WorkspaceLeaseRunLaunch;
@@ -271,10 +278,20 @@ interface MandateReportPayload {
   };
   readiness: MandateReportReadiness;
   results: MandateReportResults;
+  evidence: MandateReportEvidence[];
   childrenByParent: Record<string, string[]>;
   mandates: MandateWithStatus[];
   approvalRequests: ApprovalRequestWithStatus[];
   auditEntries: AuditLogEntry[];
+}
+
+interface MandateReportEvidence {
+  id: string;
+  mandateUid: string | null;
+  createdBy: string | null;
+  authoritySource: MandateAuthoritySource | null;
+  policyHash: string | null;
+  leaseEvents: MandateLeaseEvent[];
 }
 
 interface MandateReportReadiness {
@@ -2631,6 +2648,10 @@ export function createProgram(io: ProgramIo = {}): Command {
         )
         .option("--agent <role>", "agent role for this mandate")
         .option(
+          "--actor <name>",
+          "human, harness, or client identity creating the mandate"
+        )
+        .option(
           "--profiles <profiles>",
           "comma-separated Switchboard profiles to bind"
         )
@@ -2687,6 +2708,7 @@ export function createProgram(io: ProgramIo = {}): Command {
               fromAuthority?: string;
               acceptReview?: boolean;
               agent?: string;
+              actor?: string;
               profiles?: string;
               branch?: string;
               lease?: string;
@@ -2910,6 +2932,12 @@ export function createProgram(io: ProgramIo = {}): Command {
               })
             );
 
+            const authoritySource: MandateAuthoritySource = template
+              ? { type: "preset", ref: template.id }
+              : authorityMap
+                ? { type: "authority-map", ref: authorityMap.sourcePath }
+                : { type: "manual" };
+
             try {
               const mandate = await createMandate({
                 path,
@@ -2920,6 +2948,8 @@ export function createProgram(io: ProgramIo = {}): Command {
                 agentRole,
                 profiles,
                 lease,
+                ...(options.actor ? { createdBy: options.actor } : {}),
+                authoritySource,
                 allowedTools: [
                   ...(templatePolicy?.allowedTools ?? []),
                   ...(authorityPolicy?.allowedTools ?? []),
@@ -2994,6 +3024,10 @@ export function createProgram(io: ProgramIo = {}): Command {
         .requiredOption("--lease <duration>", "lease duration, like 30m, 2h, or 1d")
         .option("--delegated-by <actor>", "actor creating the child mandate")
         .option(
+          "--actor <name>",
+          "human, harness, or client identity creating the child mandate (defaults to --delegated-by)"
+        )
+        .option(
           "--allow-tool <pattern>",
           "allow a namespaced tool pattern (repeatable)",
           collectOption,
@@ -3046,6 +3080,7 @@ export function createProgram(io: ProgramIo = {}): Command {
               branch: string;
               lease: string;
               delegatedBy?: string;
+              actor?: string;
               allowTool: string[];
               denyTool: string[];
               requireApprovalTool: string[];
@@ -3151,6 +3186,9 @@ export function createProgram(io: ProgramIo = {}): Command {
                 lease: options.lease,
                 ...(options.delegatedBy
                   ? { delegatedBy: options.delegatedBy }
+                  : {}),
+                ...(options.actor ?? options.delegatedBy
+                  ? { createdBy: options.actor ?? options.delegatedBy }
                   : {}),
                 allowedTools: options.allowTool,
                 deniedTools: options.denyTool,
@@ -3378,11 +3416,15 @@ export function createProgram(io: ProgramIo = {}): Command {
         .description("Renew an open mandate lease from now.")
         .argument("<id>", "mandate id to renew")
         .requiredOption("--lease <duration>", "new lease duration, like 30m, 2h, or 1d")
+        .option(
+          "--actor <name>",
+          "human, harness, or client identity renewing the lease"
+        )
         .option("--json", "print machine-readable JSON")
         .action(
           async (
             id: string,
-            options: { lease: string; json?: boolean }
+            options: { lease: string; actor?: string; json?: boolean }
           ) => {
             const globalOptions = program.opts<{ cwd?: string }>();
             const repoPath = installTargetCwd(globalOptions.cwd);
@@ -3392,9 +3434,13 @@ export function createProgram(io: ProgramIo = {}): Command {
                 path,
                 id,
                 repoPath,
-                lease: options.lease
+                lease: options.lease,
+                ...(options.actor ? { actor: options.actor } : {})
               });
               const result = { path, mandate };
+              const renewals = (mandate.leaseEvents ?? []).filter(
+                (event) => event.type === "renewed"
+              ).length;
               writeOut(
                 options.json
                   ? JSON.stringify(result, null, 2)
@@ -3403,6 +3449,7 @@ export function createProgram(io: ProgramIo = {}): Command {
                       `Runtime: ${mandate.runtimeStatus}`,
                       `Lease: ${mandate.lease}`,
                       `Expires: ${mandate.expiresAt}`,
+                      `Renewals: ${renewals}`,
                       `Store: ${path}`
                     ].join("\n")
               );
@@ -6674,6 +6721,9 @@ function formatMandateCreated(path: string, mandate: MandateWithStatus): string 
     `Allowed tools: ${mandate.allowedTools.length > 0 ? mandate.allowedTools.join(", ") : "all"}`,
     `Denied tools: ${mandate.deniedTools.length > 0 ? mandate.deniedTools.join(", ") : "none"}`,
     `Approval gates: ${formatApprovalGates(mandate.approvalGates)}`,
+    `Created by: ${mandate.createdBy ?? "unrecorded"}`,
+    `Authority source: ${formatAuthoritySource(mandate.authoritySource)}`,
+    `Policy hash: ${mandate.policyHash ?? "unrecorded"}`,
     `Lease: ${mandate.lease}`,
     `Status: ${mandate.runtimeStatus}`,
     `Expires: ${mandate.expiresAt}`,
@@ -6717,7 +6767,8 @@ function createMandateMcpLaunchPayload(
         ...(gate.reason ? { reason: gate.reason } : {}),
         ...(gate.risk ? { risk: gate.risk } : {}),
         ...(gate.labels && gate.labels.length > 0 ? { labels: gate.labels } : {})
-      }))
+      })),
+      policyHash: mandate.policyHash ?? null
     },
     installHint:
       "Use command/args when the switchboard binary is on PATH. If it is not, use a commandCandidates entry such as current-entrypoint."
@@ -6748,6 +6799,9 @@ function createWorkspaceLeasePayload(
       allowedTools: mandate.allowedTools,
       deniedTools: mandate.deniedTools,
       approvalGates: mcpLaunch.policy.approvalGates,
+      createdBy: mandate.createdBy ?? null,
+      source: mandate.authoritySource ?? null,
+      policyHash: mandate.policyHash ?? null,
       ...(mandate.parentMandateId
         ? { parentMandateId: mandate.parentMandateId }
         : {}),
@@ -6758,7 +6812,8 @@ function createWorkspaceLeasePayload(
     lease: {
       createdAt: mandate.createdAt,
       expiresAt: mandate.expiresAt,
-      status: mandate.runtimeStatus
+      status: mandate.runtimeStatus,
+      events: mandate.leaseEvents ?? []
     },
     mcpLaunch,
     runLaunch: createWorkspaceLeaseRunLaunch(mandate, mcpLaunch.env),
@@ -7066,11 +7121,35 @@ async function createMandateReportPayload(options: {
     },
     readiness,
     results,
+    evidence: chain.map((mandate) => mandateReportEvidence(mandate)),
     childrenByParent: childrenByParent(chain),
     mandates: chain,
     approvalRequests,
     auditEntries: limitedAuditEntries
   };
+}
+
+function mandateReportEvidence(
+  mandate: MandateWithStatus
+): MandateReportEvidence {
+  return {
+    id: mandate.id,
+    mandateUid: mandate.mandateUid ?? null,
+    createdBy: mandate.createdBy ?? null,
+    authoritySource: mandate.authoritySource ?? null,
+    policyHash: mandate.policyHash ?? null,
+    leaseEvents: mandate.leaseEvents ?? []
+  };
+}
+
+function formatAuthoritySource(
+  source: MandateAuthoritySource | undefined
+): string {
+  if (!source) {
+    return "unrecorded";
+  }
+
+  return source.ref ? `${source.type} (${source.ref})` : source.type;
 }
 
 function mandateReportReadiness(options: {
@@ -7987,6 +8066,22 @@ function formatMandateReport(report: MandateReportPayload): string {
       );
       if (mandate.handoffSummary) {
         lines.push(`    ${mandate.handoffSummary}`);
+      }
+    }
+  }
+
+  if (report.evidence.length > 0) {
+    lines.push("", "Authority evidence:");
+    for (const evidence of report.evidence) {
+      lines.push(
+        `  ${evidence.id} createdBy:${evidence.createdBy ?? "unrecorded"} source:${formatAuthoritySource(evidence.authoritySource ?? undefined)}`
+      );
+      lines.push(`    Policy hash: ${evidence.policyHash ?? "unrecorded"}`);
+      for (const event of evidence.leaseEvents) {
+        const actor = event.actor ? ` actor:${event.actor}` : "";
+        lines.push(
+          `    Lease ${event.type} at:${event.at} lease:${event.lease} expires:${event.expiresAt}${actor}`
+        );
       }
     }
   }
