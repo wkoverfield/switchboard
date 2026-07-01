@@ -2605,6 +2605,14 @@ export function createProgram(io: ProgramIo = {}): Command {
           "--from <preset>",
           "use a provider safety template to fill mandate defaults and policy"
         )
+        .option(
+          "--from-authority <file>",
+          "use a checked authority map draft file as the mandate policy"
+        )
+        .option(
+          "--accept-review",
+          "acknowledge authority map warnings/review tools before creating the mandate"
+        )
         .option("--agent <role>", "agent role for this mandate")
         .option(
           "--profiles <profiles>",
@@ -2660,6 +2668,8 @@ export function createProgram(io: ProgramIo = {}): Command {
             task: string | undefined,
             options: {
               from?: string;
+              fromAuthority?: string;
+              acceptReview?: boolean;
               agent?: string;
               profiles?: string;
               branch?: string;
@@ -2680,6 +2690,19 @@ export function createProgram(io: ProgramIo = {}): Command {
               return;
             }
 
+            if (options.from && options.fromAuthority) {
+              writeCommandError({
+                json: options.json,
+                code: "conflicting_mandate_sources",
+                message: "use either --from <preset> or --from-authority <file>, not both",
+                nextActions: [
+                  "Use --from <preset> for curated provider templates.",
+                  "Use --from-authority <file> for reviewed authority-map drafts."
+                ]
+              });
+              return;
+            }
+
             const template = options.from
               ? getProviderSafetyTemplate(options.from)
               : undefined;
@@ -2695,11 +2718,48 @@ export function createProgram(io: ProgramIo = {}): Command {
               return;
             }
 
+            const authorityMapResult = options.fromAuthority
+              ? loadAuthorityMapForMandate({
+                  file: options.fromAuthority,
+                  ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+                  config: loaded.config,
+                  ...(options.acceptReview
+                    ? { acceptReview: options.acceptReview }
+                    : {})
+                })
+              : undefined;
+            if (authorityMapResult && !authorityMapResult.ok) {
+              writeCommandError({
+                json: options.json,
+                code: authorityMapResult.error.code,
+                message: authorityMapResult.error.message,
+                nextActions: authorityMapResult.error.nextActions
+              });
+              return;
+            }
+            const authorityMap = authorityMapResult?.map;
+
             const profiles = parseCommaSeparatedList(
               options.profiles ??
+                authorityMap?.profileName ??
                 presetProfileDefaultForConfig(template, loaded.config) ??
                 ""
             );
+            if (
+              authorityMap &&
+              (profiles.length !== 1 || profiles[0] !== authorityMap.profileName)
+            ) {
+              writeCommandError({
+                json: options.json,
+                code: "authority_map_profile_mismatch",
+                message: `authority map "${authorityMap.profileName}" can only create a mandate for that one profile`,
+                nextActions: [
+                  `Use --profiles ${authorityMap.profileName} or omit --profiles.`,
+                  "Create separate authority maps for additional profiles."
+                ]
+              });
+              return;
+            }
             const taskName = task ?? template?.recommendedMandate.task;
             const agentRole = options.agent ?? template?.recommendedMandate.agent;
             const lease = options.lease ?? template?.recommendedMandate.lease;
@@ -2818,6 +2878,7 @@ export function createProgram(io: ProgramIo = {}): Command {
                     template.defaultNamespace
                 )
               : undefined;
+            const authorityPolicy = authorityMap?.draft.suggestedMandatePolicy;
             const manualApprovalGates = options.requireApprovalTool.map(
               (toolPattern, index) => ({
                 toolPattern,
@@ -2845,14 +2906,17 @@ export function createProgram(io: ProgramIo = {}): Command {
                 lease,
                 allowedTools: [
                   ...(templatePolicy?.allowedTools ?? []),
+                  ...(authorityPolicy?.allowedTools ?? []),
                   ...options.allowTool
                 ],
                 deniedTools: [
                   ...(templatePolicy?.deniedTools ?? []),
+                  ...(authorityPolicy?.deniedTools ?? []),
                   ...options.denyTool
                 ],
                 approvalRequiredTools: [
                   ...(templatePolicy?.approvalGates ?? []),
+                  ...(authorityPolicy?.approvalGates ?? []),
                   ...manualApprovalGates
                 ]
               });
@@ -2863,6 +2927,13 @@ export function createProgram(io: ProgramIo = {}): Command {
                     {
                       path,
                       mandate,
+                      ...(authorityMap
+                        ? {
+                            authorityMap: authorityMapMandateMetadata(
+                              authorityMap
+                            )
+                          }
+                        : {}),
                       mcpLaunch,
                       workspaceLease: createWorkspaceLeasePayload(mandate, mcpLaunch)
                     },
@@ -2871,7 +2942,12 @@ export function createProgram(io: ProgramIo = {}): Command {
                   )
                 );
               } else {
-                writeOut(formatMandateCreated(path, mandate));
+                writeOut(
+                  formatMandateCreatedFromAuthority(
+                    formatMandateCreated(path, mandate),
+                    authorityMap
+                  )
+                );
               }
             } catch (error) {
               const commandError = mandateCommandError(
@@ -5980,6 +6056,160 @@ function formatAuthorityMapCheck(result: AuthorityMapCheckResult): string {
   }
 
   return lines.join("\n");
+}
+
+interface AuthorityMapForMandate {
+  sourcePath: string;
+  profileName: string;
+  namespace: string;
+  draft: AuthorityMapDraft;
+  check: AuthorityMapCheckResult;
+  acceptedReview: boolean;
+}
+
+type AuthorityMapForMandateResult =
+  | { ok: true; map: AuthorityMapForMandate }
+  | {
+      ok: false;
+      error: {
+        code: string;
+        message: string;
+        nextActions: string[];
+      };
+    };
+
+function loadAuthorityMapForMandate(options: {
+  file: string;
+  cwd?: string;
+  config: SwitchboardConfig;
+  acceptReview?: boolean;
+}): AuthorityMapForMandateResult {
+  const sourcePath = isAbsolute(options.file)
+    ? options.file
+    : resolve(options.cwd ?? process.cwd(), options.file);
+  try {
+    const draft = parseAuthorityMapDraft(readFileSync(sourcePath, "utf8"));
+    const check = checkAuthorityMapDraft(draft);
+    if (!check.ok) {
+      return {
+        ok: false,
+        error: {
+          code: "authority_map_invalid",
+          message: `authority map "${sourcePath}" is not valid for mandate creation`,
+          nextActions: [
+            `Run switchboard authority check ${shellQuote(sourcePath)} --json and fix every error.`
+          ]
+        }
+      };
+    }
+    if (check.needsHumanReview && !options.acceptReview) {
+      return {
+        ok: false,
+        error: {
+          code: "authority_map_needs_review",
+          message:
+            "authority map has warnings or review tools; acknowledge review before creating runtime authority",
+          nextActions: [
+            `Run switchboard authority check ${shellQuote(sourcePath)}.`,
+            "Review denied/review tools and warnings.",
+            `Re-run with --from-authority ${shellQuote(sourcePath)} --accept-review after review.`
+          ]
+        }
+      };
+    }
+
+    const profile = options.config.profiles[draft.profileName];
+    if (!profile) {
+      return {
+        ok: false,
+        error: {
+          code: "authority_map_profile_not_found",
+          message: `authority map profile "${draft.profileName}" is not configured in this repo`,
+          nextActions: [
+            "Run switchboard scan to inspect configured profiles.",
+            "Run switchboard setup <preset> or switchboard import --dry-run to add the profile."
+          ]
+        }
+      };
+    }
+    const configuredNamespace = profile.namespace ?? draft.profileName;
+    if (configuredNamespace !== draft.namespace) {
+      return {
+        ok: false,
+        error: {
+          code: "authority_map_namespace_mismatch",
+          message: `authority map namespace "${draft.namespace}" does not match configured profile namespace "${configuredNamespace}"`,
+          nextActions: [
+            `Run switchboard authority draft --profile ${draft.profileName} --json to regenerate the map from current config.`
+          ]
+        }
+      };
+    }
+
+    return {
+      ok: true,
+      map: {
+        sourcePath,
+        profileName: draft.profileName,
+        namespace: draft.namespace,
+        draft,
+        check,
+        acceptedReview: Boolean(options.acceptReview)
+      }
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: {
+        code: "authority_map_load_failed",
+        message: messageFromError(error),
+        nextActions: [
+          "Run switchboard authority draft --profile <name> --json to generate a schema-valid authority map."
+        ]
+      }
+    };
+  }
+}
+
+function authorityMapMandateMetadata(map: AuthorityMapForMandate): {
+  schemaVersion: AuthorityMapDraft["schemaVersion"];
+  sourcePath: string;
+  profileName: string;
+  namespace: string;
+  counts: AuthorityMapDraft["counts"];
+  needsHumanReview: boolean;
+  acceptedReview: boolean;
+  warnings: string[];
+} {
+  return {
+    schemaVersion: map.draft.schemaVersion,
+    sourcePath: map.sourcePath,
+    profileName: map.profileName,
+    namespace: map.namespace,
+    counts: map.check.counts,
+    needsHumanReview: map.check.needsHumanReview,
+    acceptedReview: map.acceptedReview,
+    warnings: map.check.warnings
+  };
+}
+
+function formatMandateCreatedFromAuthority(
+  base: string,
+  authorityMap?: AuthorityMapForMandate
+): string {
+  if (!authorityMap) {
+    return base;
+  }
+  return [
+    base,
+    "",
+    "Authority map:",
+    `  Source: ${authorityMap.sourcePath}`,
+    `  Profile: ${authorityMap.profileName}`,
+    `  Tools: allowed ${authorityMap.check.counts.allowed}, approval-required ${authorityMap.check.counts.approvalRequired}, denied ${authorityMap.check.counts.denied}, review ${authorityMap.check.counts.review}`,
+    `  Human review acknowledged: ${authorityMap.acceptedReview ? "yes" : "not required"}`,
+    "  Review tools stay denied by the suggested mandate policy."
+  ].join("\n");
 }
 
 function formatToolSurface(result: {

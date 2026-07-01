@@ -14,14 +14,23 @@ as the basis for a reviewed mandate policy.
 ```bash
 switchboard authority draft --profile github_stockr --json
 switchboard authority check authority-map.yaml --json
+switchboard mandate create inspect-provider \
+  --from-authority authority-map.yaml \
+  --accept-review \
+  --agent reviewer \
+  --lease 1h
 ```
 
-V0 is intentionally non-mutating:
+Draft and check are intentionally non-mutating:
 
 - no `.switchboard.yaml` writes
 - no durable authority-map storage
-- no automatic mandate creation
 - no LLM call inside Switchboard
+
+Mandate creation is explicit. `--from-authority` validates the map, uses its
+single profile, applies `suggestedMandatePolicy`, and refuses maps with warnings
+or review tools unless the user passes `--accept-review`. Review tools remain
+denied by the suggested policy; acknowledging review does not allow them.
 
 ## Draft Posture
 
@@ -48,11 +57,12 @@ pnpm eval:fresh-agent-authority-map
 ```
 
 It checks that an agent can discover the tool surface, draft/check a
-conservative map, keep review visible, avoid secret leakage, avoid config
-mutation, and explain how the JSON becomes a safer mandate proposal.
+conservative map, keep review visible, create a mandate from the reviewed map,
+avoid secret leakage, avoid config mutation, and explain how the JSON becomes
+a safer mandate policy.
 
 ## Next Phase
 
-After V0 proves useful, add explicit apply/storage support and a
-`mandate create --from-authority` path. Those should stay backup-protected and
+After the reviewed mandate path proves useful, add explicit apply/storage
+support for reusable authority maps. That should stay backup-protected and
 human-approved; generated authority should not silently become runtime power.
