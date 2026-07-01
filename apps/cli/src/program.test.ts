@@ -5159,6 +5159,207 @@ describe("switchboard CLI program", () => {
     expect(output[3]).toContain("reason: rerunning CI changes remote state");
   });
 
+  it("creates a mandate from a reviewed authority map", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "main");
+    const mandateStorePath = join(root, "state", "mandates.json");
+    writeMandateConfig(root);
+    const mapPath = join(root, "authority-map.json");
+    writeFileSync(
+      mapPath,
+      JSON.stringify(
+        {
+          schemaVersion: "switchboard.authority-map-draft.v1",
+          profileName: "github_findu",
+          namespace: "github_findu",
+          generatedAt: "2026-07-01T00:00:00.000Z",
+          source: { kind: "profile-tools", toolCount: 4 },
+          groups: {
+            allowed: [
+              {
+                toolName: "github_findu_checks_list",
+                reason: "read-like",
+                matchedHeuristic: "allow-read-keyword",
+                confidence: 0.72
+              }
+            ],
+            approvalRequired: [
+              {
+                toolName: "github_findu_issue_comment",
+                reason: "write-like",
+                matchedHeuristic: "approval-write-keyword",
+                confidence: 0.78
+              }
+            ],
+            denied: [
+              {
+                toolName: "github_findu_delete_branch",
+                reason: "destructive",
+                matchedHeuristic: "deny-risk-keyword",
+                confidence: 0.9
+              }
+            ],
+            review: [
+              {
+                toolName: "github_findu_sync",
+                reason: "ambiguous",
+                matchedHeuristic: "unknown-review",
+                confidence: 0.35
+              }
+            ]
+          },
+          suggestedMandatePolicy: {
+            allowedTools: ["github_findu_checks_list"],
+            deniedTools: ["github_findu_delete_branch", "github_findu_sync"],
+            approvalGates: [
+              {
+                id: "authority-map-gate-1",
+                toolPattern: "github_findu_issue_comment",
+                reason: "write-like",
+                risk: "medium",
+                labels: ["authority-map", "agent-drafted"]
+              }
+            ]
+          },
+          needsHumanReview: true,
+          warnings: ["1 tool(s) still need review."],
+          nextActions: []
+        },
+        null,
+        2
+      )
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "inspect-ci",
+        "--from-authority",
+        "authority-map.json",
+        "--accept-review",
+        "--agent",
+        "reviewer",
+        "--lease",
+        "1h",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      authorityMap: {
+        sourcePath: string;
+        profileName: string;
+        acceptedReview: boolean;
+        counts: { review: number };
+      };
+      mandate: {
+        id: string;
+        profiles: string[];
+        allowedTools: string[];
+        deniedTools: string[];
+        approvalGates: Array<{ toolPattern: string; labels: string[] }>;
+      };
+    };
+    expect(parsed.authorityMap).toMatchObject({
+      sourcePath: mapPath,
+      profileName: "github_findu",
+      acceptedReview: true,
+      counts: { review: 1 }
+    });
+    expect(parsed.mandate).toMatchObject({
+      id: "inspect-ci",
+      profiles: ["github_findu"],
+      allowedTools: ["github_findu_checks_list"],
+      deniedTools: ["github_findu_delete_branch", "github_findu_sync"],
+      approvalGates: [
+        {
+          toolPattern: "github_findu_issue_comment",
+          labels: ["authority-map", "agent-drafted"]
+        }
+      ]
+    });
+  });
+
+  it("requires acknowledgement before creating a mandate from a map with review items", async () => {
+    const root = makeTempProject();
+    initGitRepo(root, "main");
+    writeMandateConfig(root);
+    writeFileSync(
+      join(root, "authority-map.json"),
+      JSON.stringify(
+        {
+          schemaVersion: "switchboard.authority-map-draft.v1",
+          profileName: "github_findu",
+          namespace: "github_findu",
+          generatedAt: "2026-07-01T00:00:00.000Z",
+          source: { kind: "profile-tools", toolCount: 1 },
+          groups: {
+            allowed: [],
+            approvalRequired: [],
+            denied: [],
+            review: [
+              {
+                toolName: "github_findu_sync",
+                reason: "ambiguous",
+                matchedHeuristic: "unknown-review",
+                confidence: 0.35
+              }
+            ]
+          },
+          suggestedMandatePolicy: {
+            allowedTools: [],
+            deniedTools: ["github_findu_sync"],
+            approvalGates: []
+          },
+          needsHumanReview: true,
+          warnings: [],
+          nextActions: []
+        },
+        null,
+        2
+      )
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "inspect-ci",
+        "--from-authority",
+        "authority-map.json",
+        "--agent",
+        "reviewer",
+        "--lease",
+        "1h",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      schemaVersion: "switchboard.error.v1",
+      code: "authority_map_needs_review",
+      nextActions: expect.arrayContaining([
+        "Review denied/review tools and warnings."
+      ])
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
   it("creates a provider-preset mandate with current branch defaults", async () => {
     const root = makeTempProject();
     initGitRepo(root, "main");

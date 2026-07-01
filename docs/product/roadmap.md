@@ -438,8 +438,10 @@ Remaining roadmap should be grouped into these buckets:
   scriptable without making Switchboard the orchestrator. V0 launch payloads
   now include structured follow-up commands and a policy summary.
 - Authority Maps: let agents turn discovered MCP tools into reviewable,
-  deterministic authority drafts. V0 should stay non-mutating; later apply and
-  mandate-from-map flows should require explicit human approval.
+  deterministic authority drafts. Draft/check stay non-mutating, while
+  `mandate create --from-authority <file>` can turn a checked single-profile
+  map into runtime policy only after explicit review acknowledgement when
+  warnings or review tools remain.
 - Real Provider Dogfood: deepen GitHub CI first, then Vercel Preview, using
   least-privilege tokens and real tool names before adding more providers.
   Credential guidance, the live dogfood runbook, and the report template are

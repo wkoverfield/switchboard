@@ -506,10 +506,23 @@ function evalAuthorityMap() {
   const mapPath = join(project, "authority-map.json");
   writeFileSync(mapPath, `${JSON.stringify(draft, null, 2)}\n`);
   const check = runCliJson("authority", "check", mapPath, "--json");
+  const mandate = runCliJson(
+    "mandate",
+    "create",
+    "inspect-unknown-provider",
+    "--from-authority",
+    mapPath,
+    "--accept-review",
+    "--agent",
+    "reviewer",
+    "--lease",
+    "1h",
+    "--json"
+  );
   const human = runCli(["authority", "draft", "--profile", profileName]);
   const afterConfig = readFileSync(configPath, "utf8");
   const valueExplanation =
-    "Switchboard can turn an unknown MCP tool surface into a conservative authority draft: reads are allowed, writes require approval, dangerous prod/secret/admin tools are denied, ambiguous tools stay in review, and agents can use the JSON to propose a mandate without silently gaining power.";
+    "Switchboard can turn an unknown MCP tool surface into a conservative authority draft: reads are allowed, writes require approval, dangerous prod/secret/admin tools are denied, ambiguous tools stay in review, and agents can use the reviewed JSON to create a bounded mandate without silently gaining power.";
 
   score(
     "authority map discovered profile tools",
@@ -536,6 +549,15 @@ function evalAuthorityMap() {
   );
   score("authority map validates clean draft", check.ok === true);
   score(
+    "authority map creates bounded mandate after review",
+    mandate.authorityMap?.acceptedReview === true &&
+      mandate.mandate?.allowedTools?.includes(`${profileName}_list_projects`) &&
+      mandate.mandate?.deniedTools?.includes(`${profileName}_sync`) &&
+      mandate.mandate?.approvalGates?.some?.(
+        (gate) => gate.toolPattern === `${profileName}_create_preview`
+      )
+  );
+  score(
     "authority map keeps human review visible",
     draft.needsHumanReview === true && check.needsHumanReview === true
   );
@@ -552,7 +574,7 @@ function evalAuthorityMap() {
   score(
     "authority map explains setup construction value",
     valueExplanation.includes("conservative authority draft") &&
-      valueExplanation.includes("propose a mandate")
+      valueExplanation.includes("bounded mandate")
   );
 
   return {
@@ -560,6 +582,7 @@ function evalAuthorityMap() {
     schemaVersion: draft.schemaVersion,
     counts: draft.counts,
     checkOk: check.ok,
+    mandateId: mandate.mandate?.id,
     suggestedPolicy: {
       allowedTools: draft.suggestedMandatePolicy?.allowedTools?.length ?? 0,
       approvalGates:
@@ -861,7 +884,7 @@ function evidenceForScenario(name) {
       ...scripted,
       surface: "unknown-provider authority-map fixture",
       acceptance:
-        "The agent can discover an unknown profile's tools, draft/check a conservative authority map, and explain how it becomes a safer mandate proposal without mutating config."
+        "The agent can discover an unknown profile's tools, draft/check a conservative authority map, create a reviewed bounded mandate, and explain the value without mutating config."
     },
     "expired-mandate": {
       ...scripted,

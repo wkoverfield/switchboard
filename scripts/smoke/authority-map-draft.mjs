@@ -85,6 +85,40 @@ try {
   assert(check.ok === true, "check ok");
   assert(check.needsHumanReview === true, "review warning preserved");
 
+  const mandate = runCliJson([
+    "mandate",
+    "create",
+    "inspect-generic-tools",
+    "--from-authority",
+    mapPath,
+    "--accept-review",
+    "--agent",
+    "reviewer",
+    "--lease",
+    "1h",
+    "--json"
+  ]);
+  assert(mandate.authorityMap?.profileName === "generic_tools", "authority metadata");
+  assert(mandate.authorityMap?.acceptedReview === true, "review acknowledged");
+  assert(
+    mandate.mandate?.allowedTools?.includes("generic_tools_list_records"),
+    "map allowed policy applied"
+  );
+  assert(
+    mandate.mandate?.deniedTools?.includes("generic_tools_sync"),
+    "review tool denied in mandate"
+  );
+  assert(
+    mandate.mandate?.approvalGates?.some(
+      (gate) => gate.toolPattern === "generic_tools_create_record"
+    ),
+    "map approval policy applied"
+  );
+  assert(
+    mandate.workspaceLease?.authority?.profiles?.includes("generic_tools"),
+    "workspace lease authority"
+  );
+
   const human = runCli([
     "authority",
     "draft",

@@ -164,6 +164,7 @@ switchboard install <codex|claude> --write
 switchboard install <codex|claude> --rollback <backup>
 switchboard mandate create --from github-ci
 switchboard mandate create --from <github-ci|vercel-preview|stripe-test> --json
+switchboard mandate create <task> --from-authority <authority-map.yaml> --accept-review --agent <role> --lease <duration>
 switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration>
 switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --json
 switchboard mandate create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --allow-tool <pattern> --deny-tool <pattern>
