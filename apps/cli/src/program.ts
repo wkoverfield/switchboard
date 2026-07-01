@@ -7883,6 +7883,13 @@ function formatMandateStatusVerboseLine(mandate: MandateWithStatus): string {
     `    Allowed: ${mandate.allowedTools.length > 0 ? mandate.allowedTools.join(", ") : "all"}`,
     `    Denied: ${mandate.deniedTools.length > 0 ? mandate.deniedTools.join(", ") : "none"}`,
     ...formatApprovalGateDetailLines(mandate.approvalGates, "    "),
+    `  Created by: ${mandate.createdBy ?? "unrecorded"}`,
+    `  Authority source: ${formatAuthoritySource(mandate.authoritySource)}`,
+    `  Policy hash: ${mandate.policyHash ?? "unrecorded"}`,
+    ...(mandate.leaseEvents ?? []).map((event) => {
+      const actor = event.actor ? ` actor:${event.actor}` : "";
+      return `  Lease ${event.type} at:${event.at} lease:${event.lease} expires:${event.expiresAt}${actor}`;
+    }),
     `  Handoff: ${mandate.handoffState}`,
     `  Expires: ${mandate.expiresAt}`,
     "  Commands:",
