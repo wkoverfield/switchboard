@@ -15,6 +15,7 @@ describe("repo audit", () => {
     expect(audit.status).toBe("unsafe");
     expect(audit.findingSummary).toMatchObject({
       bypasses: 1,
+      directClientServers: 0,
       high: 1
     });
     expect(audit.checks).toContainEqual(
@@ -42,6 +43,47 @@ describe("repo audit", () => {
     expect(audit.status).toBe("ready");
     expect(audit.checks.every((check) => check.status === "pass")).toBe(true);
   });
+
+  it("warns on unknown MCP commands and configured surface bloat", () => {
+    const audit = createRepoAudit(
+      scanFixture({
+        authorityStatus: "partial-control",
+        installedClients: true,
+        profiles: [
+          "github_ci",
+          "vercel_preview",
+          "supabase_dev",
+          "stripe_test",
+          "sentry_read",
+          "posthog_read",
+          "linear_read",
+          "notion_read",
+          "figma_read",
+          "docs_read",
+          "ci_read",
+          "preview_read"
+        ],
+        unknownCommandBypass: true,
+        acceptedBypass: true
+      })
+    );
+
+    expect(audit.status).toBe("needs-attention");
+    expect(audit.checks).toContainEqual(
+      expect.objectContaining({
+        id: "unknown-mcp-commands",
+        status: "warn",
+        evidence: ["codex:custom custom-mcp"]
+      })
+    );
+    expect(audit.checks).toContainEqual(
+      expect.objectContaining({
+        id: "configured-surface-bloat",
+        status: "warn"
+      })
+    );
+    expect(audit.findingSummary.switchboardProfiles).toBe(12);
+  });
 });
 
 function scanFixture(options: {
@@ -50,6 +92,8 @@ function scanFixture(options: {
   installedClients?: boolean;
   profiles?: string[];
   mandateSuggestion?: boolean;
+  unknownCommandBypass?: boolean;
+  acceptedBypass?: boolean;
 }): SwitchboardScanResult {
   const bypasses = options.bypasses ?? 0;
   const profiles = options.profiles ?? [];
@@ -121,6 +165,27 @@ function scanFixture(options: {
                 "Use --accept-direct codex:github if intentional."
             }
           ]
+        : options.unknownCommandBypass
+          ? [
+              {
+                id: "codex:custom",
+                client: "codex",
+                targetPath: "/repo/.codex/config.toml",
+                serverName: "custom",
+                provider: "unknown",
+                command: "custom-mcp",
+                args: [],
+                envKeys: [],
+                suggestedProfileName: "custom_repo",
+                severity: "medium",
+                status: options.acceptedBypass ? "accepted" : "unaccepted",
+                riskTags: ["direct-mcp-server"],
+                reasons: ["Direct MCP route can bypass Switchboard."],
+                nextActions: ["switchboard import --dry-run"],
+                acceptedRiskGuidance:
+                  "Use --accept-direct codex:custom if intentional."
+              }
+            ]
         : [],
     authorityStatus: {
       status: options.authorityStatus,

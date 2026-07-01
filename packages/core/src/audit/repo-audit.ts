@@ -20,6 +20,8 @@ export interface RepoAuditFindingSummary {
   bypasses: number;
   risks: number;
   warnings: number;
+  directClientServers: number;
+  switchboardProfiles: number;
   critical: number;
   high: number;
   medium: number;
@@ -43,6 +45,9 @@ export function createRepoAudit(scan: SwitchboardScanResult): RepoAuditResult {
     authorityCheck(scan),
     bypassCheck(scan),
     secretAndProviderCheck(scan),
+    unknownMcpCommandCheck(scan),
+    clientScopeConflictCheck(scan),
+    configuredSurfaceBloatCheck(scan),
     clientInstallCheck(scan),
     mandateReadinessCheck(scan)
   ];
@@ -65,6 +70,94 @@ export function createRepoAudit(scan: SwitchboardScanResult): RepoAuditResult {
         ...checks.flatMap((check) => check.nextActions)
       ])
     ]
+  };
+}
+
+function unknownMcpCommandCheck(scan: SwitchboardScanResult): RepoAuditCheck {
+  const unknown = scan.bypassFindings.filter(
+    (finding) => finding.command && !isKnownMcpLaunchCommand(finding.command)
+  );
+  return {
+    id: "unknown-mcp-commands",
+    title: "Unknown MCP commands",
+    status: unknown.length > 0 ? "warn" : "pass",
+    summary:
+      unknown.length > 0
+        ? `${unknown.length} direct MCP server(s) use commands Switchboard does not recognize yet.`
+        : "No unknown direct MCP launch commands detected.",
+    evidence: unknown
+      .slice(0, 6)
+      .map((finding) => `${finding.client}:${finding.serverName} ${finding.command}`),
+    nextActions: unknown.length > 0 ? ["switchboard import --dry-run"] : []
+  };
+}
+
+function clientScopeConflictCheck(scan: SwitchboardScanResult): RepoAuditCheck {
+  const withDirectServers = scan.clients.filter(
+    (client) => client.otherServerNames.length > 0
+  );
+  const staleOrMissingWithDirect = withDirectServers.filter(
+    (client) => client.status !== "installed"
+  );
+  return {
+    id: "client-scope-conflicts",
+    title: "Client scope conflicts",
+    status:
+      staleOrMissingWithDirect.length > 0
+        ? "fail"
+        : withDirectServers.length > 0
+          ? "warn"
+          : "pass",
+    summary:
+      staleOrMissingWithDirect.length > 0
+        ? "Project client config has direct MCP servers while Switchboard is missing or stale."
+        : withDirectServers.length > 0
+          ? "Project client config has direct MCP servers alongside Switchboard; keep intentional routes visible as accepted risk."
+          : "No project client scope conflicts detected. Global/user client config is not audited in this V1 check.",
+    evidence: withDirectServers.flatMap((client) =>
+      client.otherServerNames.map(
+        (server) => `${client.client}:${server} project-direct`
+      )
+    ),
+    nextActions:
+      staleOrMissingWithDirect.length > 0
+        ? ["switchboard import --dry-run", "switchboard import --write --cleanup-client"]
+        : withDirectServers.length > 0
+          ? ["switchboard import --dry-run"]
+          : []
+  };
+}
+
+function configuredSurfaceBloatCheck(scan: SwitchboardScanResult): RepoAuditCheck {
+  const directServerCount = scan.clients.reduce(
+    (sum, client) => sum + client.otherServerNames.length,
+    0
+  );
+  const profileCount = scan.switchboard.profileNames.length;
+  const totalConfiguredSurface = directServerCount + profileCount;
+  const status =
+    totalConfiguredSurface >= 12 || directServerCount >= 6
+      ? "warn"
+      : "pass";
+  return {
+    id: "configured-surface-bloat",
+    title: "Configured tool surface bloat",
+    status,
+    summary:
+      status === "warn"
+        ? `${totalConfiguredSurface} configured profile/direct MCP surface(s) may expose too much tool context by default.`
+        : "Configured profile/direct MCP surface count is modest.",
+    evidence: [
+      `switchboard profiles: ${profileCount}`,
+      `direct client MCP servers: ${directServerCount}`
+    ],
+    nextActions:
+      status === "warn"
+        ? [
+            "Use switchboard mandate create --from <preset> before launching agents.",
+            "Use switchboard authority draft --profile <name> --json to narrow unknown tool surfaces."
+          ]
+        : []
   };
 }
 
@@ -217,11 +310,31 @@ function findingSummary(scan: SwitchboardScanResult): RepoAuditFindingSummary {
     bypasses: scan.bypassFindings.length,
     risks: scan.riskFindings.length,
     warnings: scan.warnings.length,
+    directClientServers: scan.clients.reduce(
+      (sum, client) => sum + client.otherServerNames.length,
+      0
+    ),
+    switchboardProfiles: scan.switchboard.profileNames.length,
     critical: severities.filter((severity) => severity === "critical").length,
     high: severities.filter((severity) => severity === "high").length,
     medium: severities.filter((severity) => severity === "medium").length,
     info: severities.filter((severity) => severity === "info").length
   };
+}
+
+function isKnownMcpLaunchCommand(command: string): boolean {
+  const base = command.split(/[\\/]/).pop() ?? command;
+  return new Set([
+    "docker",
+    "node",
+    "npx",
+    "npm",
+    "pnpm",
+    "python",
+    "python3",
+    "uvx",
+    "switchboard"
+  ]).has(base);
 }
 
 function auditStatus(

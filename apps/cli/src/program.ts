@@ -121,6 +121,7 @@ const approvalRequestsSchemaVersion = "switchboard.approvals.v1";
 const approvalWatchSchemaVersion = "switchboard.approvals-watch.v1";
 const toolSurfaceSchemaVersion = "switchboard.tool-surface.v1";
 const auditLogSchemaVersion = "switchboard.audit-log.v1";
+const repoAuditExportSchemaVersion = "switchboard.repo-audit-export.v1";
 const secretsSchemaVersion = "switchboard.secrets.v1";
 const providerPresetSchemaVersion = "switchboard.provider-preset.v1";
 const providerPresetCheckSchemaVersion = "switchboard.provider-preset-check.v1";
@@ -630,26 +631,33 @@ export function createProgram(io: ProgramIo = {}): Command {
       );
     });
 
-  program
+  const auditCommand = program
     .command("audit")
     .description("Audit this repo's coding-agent tool authority posture.")
     .option("--json", "print machine-readable JSON")
     .action(async (options: { json?: boolean }) => {
-      const globalOptions = program.opts<{ cwd?: string }>();
-      const launch = resolveInstallLaunch({ commandArgs: [] });
-      const scan = await scanSwitchboardProject({
-        ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
-        command: launch.command,
-        commandArgs: launch.commandArgs
-      });
-      const displayScan = rewriteScanCommandsForCurrentInvocation(scan);
-      const audit = createRepoAudit(displayScan);
+      const audit = await createRepoAuditForCurrentInvocation(program);
 
       writeOut(
         options.json
           ? JSON.stringify(audit, null, 2)
           : formatRepoAudit(audit)
       );
+    });
+
+  auditCommand
+    .command("export")
+    .description("Export the repo authority audit as JSONL evidence.")
+    .option("--format <format>", "export format", "jsonl")
+    .action(async (options: { format?: string }) => {
+      if ((options.format ?? "jsonl") !== "jsonl") {
+        writeErr("error: only --format jsonl is supported");
+        process.exitCode = 1;
+        return;
+      }
+
+      const audit = await createRepoAuditForCurrentInvocation(program);
+      writeOut(formatRepoAuditJsonl(audit));
     });
 
   program
@@ -3999,6 +4007,20 @@ function formatScan(result: SwitchboardScanResult): string {
   return lines.join("\n");
 }
 
+async function createRepoAuditForCurrentInvocation(
+  program: Command
+): Promise<RepoAuditResult> {
+  const globalOptions = program.opts<{ cwd?: string }>();
+  const launch = resolveInstallLaunch({ commandArgs: [] });
+  const scan = await scanSwitchboardProject({
+    ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+    command: launch.command,
+    commandArgs: launch.commandArgs
+  });
+  const displayScan = rewriteScanCommandsForCurrentInvocation(scan);
+  return createRepoAudit(displayScan);
+}
+
 function formatRepoAudit(result: RepoAuditResult): string {
   const lines = [
     `Switchboard audit: ${result.status}`,
@@ -4013,6 +4035,8 @@ function formatRepoAudit(result: RepoAuditResult): string {
     `- bypasses: ${result.findingSummary.bypasses}`,
     `- risks: ${result.findingSummary.risks}`,
     `- warnings: ${result.findingSummary.warnings}`,
+    `- direct client servers: ${result.findingSummary.directClientServers}`,
+    `- switchboard profiles: ${result.findingSummary.switchboardProfiles}`,
     `- severity: critical ${result.findingSummary.critical}, high ${result.findingSummary.high}, medium ${result.findingSummary.medium}, info ${result.findingSummary.info}`,
     "",
     "Checks:"
@@ -4038,6 +4062,34 @@ function formatRepoAudit(result: RepoAuditResult): string {
   }
 
   return lines.join("\n");
+}
+
+function formatRepoAuditJsonl(result: RepoAuditResult): string {
+  const lines = [
+    {
+      schemaVersion: repoAuditExportSchemaVersion,
+      type: "summary",
+      generatedAt: new Date().toISOString(),
+      status: result.status,
+      repo: result.repo,
+      authorityStatus: result.authorityStatus,
+      findingSummary: result.findingSummary,
+      recommendedNextAction: result.recommendedNextAction.primary ?? null,
+      nextActions: result.nextActions
+    },
+    ...result.checks.map((check) => ({
+      schemaVersion: repoAuditExportSchemaVersion,
+      type: "check",
+      repo: {
+        cwd: result.repo.cwd,
+        gitRoot: result.repo.gitRoot,
+        branch: result.repo.branch
+      },
+      auditStatus: result.status,
+      check
+    }))
+  ];
+  return lines.map((line) => JSON.stringify(line)).join("\n");
 }
 
 function rewriteScanCommandsForCurrentInvocation(

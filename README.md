@@ -144,6 +144,7 @@ switchboard scan
 switchboard scan --json
 switchboard audit
 switchboard audit --json
+switchboard audit export --format jsonl
 switchboard import --dry-run
 switchboard import --json
 switchboard import --write
