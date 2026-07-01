@@ -1,6 +1,6 @@
 # Switchboard Roadmap
 
-Last updated: 2026-06-30
+Last updated: 2026-07-01
 
 This is the working roadmap for Switchboard. The source planning documents live in
 `docs/product/source/` and are preserved source material from the original
@@ -143,6 +143,8 @@ Implemented in the current codebase:
 - `switchboard` binary
 - lint, typecheck, test, and CI
 - README, AGENTS.md, llms.txt, llms-full.txt placeholders
+- public GitHub repository
+- MIT license
 - XDG global config path
 - repo `.switchboard.yaml`
 - repo `.switchboard.local.yaml`
@@ -319,6 +321,10 @@ Implemented in the current codebase:
   `@switchboard-mcp/core@0.1.1`,
   `@switchboard-mcp/mcp-runtime@0.1.1`, and
   `@switchboard-mcp/cli@0.1.1`
+- public repo/license patch prepared for
+  `@switchboard-mcp/core@0.1.2`,
+  `@switchboard-mcp/mcp-runtime@0.1.2`, and
+  `@switchboard-mcp/cli@0.1.2` with MIT package metadata
 - `pnpm eval:published-alpha` for public-package install/usefulness checks
 - Bypass Findings V0 in `scan`, `doctor`, and import output, including
   high-risk direct MCP route classification and a failing doctor check for
@@ -433,8 +439,8 @@ Remaining roadmap should be grouped into these buckets:
   shipped; live least-privilege token runs still need a tester-supplied
   credential.
 - Distribution: npm/package metadata, tarball pack smoke, install docs, and
-  client install smokes are shipped for alpha. Demo media, registry assets, and
-  more alpha examples remain.
+  client install smokes are shipped for alpha. The repo is public and
+  MIT-licensed. Demo media, registry assets, and more alpha examples remain.
 
 ## Milestone Status
 

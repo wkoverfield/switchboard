@@ -1,9 +1,9 @@
 {
   "name": "@switchboard-mcp/core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Core config, mandate, approval, provider-template, install, audit, and secret primitives for Switchboard.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "publishConfig": {
     "access": "public"
   },
