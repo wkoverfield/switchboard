@@ -150,6 +150,76 @@ describe("switchboard CLI program", () => {
     expect(text).not.toContain("secret\n");
   });
 
+  it("prints audit JSON for repo authority posture", async () => {
+    const root = makeTempProject();
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      join(root, ".codex", "config.toml"),
+      [
+        "[mcp_servers.github]",
+        'command = "docker"',
+        'args = ["run", "GITHUB_TOKEN=ghp_audit_should_not_print", "ghcr.io/github/github-mcp-server"]',
+        'env = { GITHUB_TOKEN = "ghp_audit_should_not_print" }'
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "audit", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      schemaVersion: string;
+      status: string;
+      findingSummary: { bypasses: number };
+      checks: Array<{ id: string; status: string; nextActions: string[] }>;
+      recommendedNextAction: { primary: { command: string } | null };
+    };
+    const serialized = output.join("\n");
+    expect(parsed.schemaVersion).toBe("switchboard.repo-audit.v1");
+    expect(parsed.status).toBe("unsafe");
+    expect(parsed.findingSummary.bypasses).toBe(1);
+    expect(parsed.checks).toContainEqual(
+      expect.objectContaining({
+        id: "direct-mcp-bypasses",
+        status: "fail",
+        nextActions: ["switchboard import --write --cleanup-client"]
+      })
+    );
+    expect(parsed.recommendedNextAction.primary?.command).toBe(
+      "switchboard import --dry-run"
+    );
+    expect(serialized).not.toContain("ghp_audit_should_not_print");
+  });
+
+  it("prints audit human output with checks and fixes", async () => {
+    const root = makeTempProject();
+    mkdirSync(join(root, ".codex"));
+    writeFileSync(
+      join(root, ".codex", "config.toml"),
+      [
+        "[mcp_servers.github]",
+        'command = "docker"',
+        'args = ["run", "GITHUB_TOKEN=ghp_audit_should_not_print", "ghcr.io/github/github-mcp-server"]'
+      ].join("\n")
+    );
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(["--cwd", root, "audit"], {
+      from: "user"
+    });
+
+    const text = output.join("\n");
+    expect(text).toContain("Switchboard audit: unsafe");
+    expect(text).toContain("Checks:");
+    expect(text).toContain("fail: Direct MCP bypasses");
+    expect(text).toContain("fix: switchboard import --write --cleanup-client");
+    expect(text).toContain("Recommended next:");
+    expect(text).not.toContain("ghp_audit_should_not_print");
+  });
+
   it("prints scan client routes without implying direct servers are Switchboard installs", async () => {
     const root = makeTempProject();
     mkdirSync(join(root, ".codex"));

@@ -142,6 +142,8 @@ pnpm switchboard add github-ci --write
 switchboard --help
 switchboard scan
 switchboard scan --json
+switchboard audit
+switchboard audit --json
 switchboard import --dry-run
 switchboard import --json
 switchboard import --write
