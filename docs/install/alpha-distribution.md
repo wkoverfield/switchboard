@@ -1,15 +1,13 @@
 # Alpha Distribution
 
-This page is for pre-public alpha packaging checks. It does not publish
-Switchboard. It verifies that a fresh developer can build, pack, and run the
-local CLI before a non-Wilson user test.
+This page is for public-alpha packaging checks. It does not publish
+Switchboard by itself. It verifies that a fresh developer can build, pack, and
+run the local CLI before a wider alpha test.
 
 ## Packaged Alpha Install
 
-The package is not published to npm yet. Current alpha testers should use the
-source install below, or a tarball produced by the package pack check.
-
-Once the alpha package is published, a normal tester should start with:
+The alpha CLI is published to npm as `@switchboard-mcp/cli`. A normal tester
+should start with:
 
 ```bash
 npm install -g @switchboard-mcp/cli
@@ -25,7 +23,7 @@ npx -y @switchboard-mcp/cli@latest --help
 The package name is `@switchboard-mcp/cli`; the binary it exposes is always
 `switchboard`.
 
-To verify publish readiness before npm publish:
+To verify publish readiness before an npm patch release:
 
 ```bash
 pnpm build
@@ -39,7 +37,7 @@ pnpm release:npm-alpha:preflight
 runs `npm publish <tarball> --access public --dry-run`. It exits non-zero when
 npm auth is missing so the publish blocker is obvious before a tester sees it.
 
-Current publish blocker: this machine must be authenticated with npm first:
+If npm auth is missing, authenticate first:
 
 ```bash
 npm adduser
@@ -110,7 +108,7 @@ mutating project config.
 
 ## Known Alpha Limitations
 
-- Packages are marked `UNLICENSED` until a release license decision is made.
+- Switchboard is public alpha software under the MIT license.
 - Provider safety templates do not install provider MCP servers or create
   provider tokens.
 - GitHub CI is the primary alpha path; Vercel Preview is the secondary proof.

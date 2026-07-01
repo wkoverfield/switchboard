@@ -9,17 +9,17 @@ const packages = [
   {
     filter: "@switchboard-mcp/core",
     name: "@switchboard-mcp/core",
-    tarball: "switchboard-mcp-core-0.1.1.tgz"
+    tarball: "switchboard-mcp-core-0.1.2.tgz"
   },
   {
     filter: "@switchboard-mcp/mcp-runtime",
     name: "@switchboard-mcp/mcp-runtime",
-    tarball: "switchboard-mcp-mcp-runtime-0.1.1.tgz"
+    tarball: "switchboard-mcp-mcp-runtime-0.1.2.tgz"
   },
   {
     filter: "@switchboard-mcp/cli",
     name: "@switchboard-mcp/cli",
-    tarball: "switchboard-mcp-cli-0.1.1.tgz"
+    tarball: "switchboard-mcp-cli-0.1.2.tgz"
   }
 ];
 
@@ -77,7 +77,7 @@ try {
     nextActions:
       auth.status === 0
         ? [
-            "Run pnpm release:npm-alpha:publish when ready.",
+            "Publish the tarballs above in dependency order with npm publish <tarball> --access public.",
             "Verify npm install -g @switchboard-mcp/cli in a clean temp shell."
           ]
         : [

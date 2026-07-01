@@ -2,9 +2,17 @@
 
 Repo-scoped tool authority for coding agents.
 
+[![CI](https://github.com/wkoverfield/switchboard/actions/workflows/ci.yml/badge.svg)](https://github.com/wkoverfield/switchboard/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@switchboard-mcp/cli)](https://www.npmjs.com/package/@switchboard-mcp/cli)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
+
 Switchboard looks at a repo, finds scattered Claude/Codex MCP config, imports
 or sets up the tools that belong there, and gives agents bounded authority
 instead of permanent mystery access to your whole developer environment.
+
+Public alpha status: Switchboard is open source under the MIT license and the
+CLI is published as `@switchboard-mcp/cli`. The product is still alpha: expect
+rough edges, local-first workflows, and conservative safety claims.
 
 The first 90-second alpha path should be simple:
 
@@ -210,11 +218,12 @@ agent was allowed to do.
 
 ## Alpha Status
 
-Switchboard is alpha software. It is local-first, repo-scoped, and currently
-targets Codex and Claude project MCP setup. It is not a hosted OAuth broker,
-dashboard, sandbox provisioner, or provider marketplace. Runtime readiness
-checks catch lease, branch, worktree, and missing-secret problems, but they do
-not create a filesystem or network sandbox.
+Switchboard is public alpha software, licensed MIT. It is local-first,
+repo-scoped, and currently targets Codex and Claude project MCP setup. It is
+not a hosted OAuth broker, dashboard, sandbox provisioner, or provider
+marketplace. Runtime readiness checks catch lease, branch, worktree, and
+missing-secret problems, but they do not create a filesystem or network
+sandbox.
 
 ## Product Roadmap
 

@@ -9,17 +9,17 @@ const packages = [
   {
     filter: "@switchboard-mcp/core",
     expectedName: "@switchboard-mcp/core",
-    expectedTarball: "switchboard-mcp-core-0.1.1.tgz"
+    expectedTarball: "switchboard-mcp-core-0.1.2.tgz"
   },
   {
     filter: "@switchboard-mcp/mcp-runtime",
     expectedName: "@switchboard-mcp/mcp-runtime",
-    expectedTarball: "switchboard-mcp-mcp-runtime-0.1.1.tgz"
+    expectedTarball: "switchboard-mcp-mcp-runtime-0.1.2.tgz"
   },
   {
     filter: "@switchboard-mcp/cli",
     expectedName: "@switchboard-mcp/cli",
-    expectedTarball: "switchboard-mcp-cli-0.1.1.tgz"
+    expectedTarball: "switchboard-mcp-cli-0.1.2.tgz"
   }
 ];
 
@@ -51,9 +51,9 @@ try {
       run("tar", ["-xOf", tarball, "package/package.json"])
     );
     assert(packageJson.name === packageSpec.expectedName, "package name");
-    assert(packageJson.version === "0.1.1", "package version");
+    assert(packageJson.version === "0.1.2", "package version");
     assert(packageJson.repository?.url, "repository metadata");
-    assert(packageJson.license === "UNLICENSED", "license metadata");
+    assert(packageJson.license === "MIT", "license metadata");
     assert(
       packageJson.publishConfig?.access === "public",
       "scoped package publish access"
@@ -61,11 +61,11 @@ try {
     if (packageSpec.expectedName === "@switchboard-mcp/cli") {
       assert(packageJson.bin?.switchboard === "./dist/index.js", "cli bin");
       assert(
-        packageJson.dependencies?.["@switchboard-mcp/core"] === "0.1.1",
+        packageJson.dependencies?.["@switchboard-mcp/core"] === "0.1.2",
         "cli core dependency is publishable"
       );
       assert(
-        packageJson.dependencies?.["@switchboard-mcp/mcp-runtime"] === "0.1.1",
+        packageJson.dependencies?.["@switchboard-mcp/mcp-runtime"] === "0.1.2",
         "cli runtime dependency is publishable"
       );
     }
