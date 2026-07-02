@@ -68,6 +68,82 @@ try {
     !exported.stdout.includes("ghp_audit_smoke_should_not_print"),
     "redacted export"
   );
+
+  writeFileSync(
+    join(project, ".switchboard.yaml"),
+    ["version: 1", "profiles:", "  github_findu:", "    provider: generic"].join(
+      "\n"
+    )
+  );
+  const created = runCliJson([
+    "mandate",
+    "create",
+    "fix-ci",
+    "--agent",
+    "implementer",
+    "--actor",
+    "human-smoke",
+    "--profiles",
+    "github_findu",
+    "--branch",
+    "main",
+    "--lease",
+    "1h",
+    "--json"
+  ]);
+  assert(created.mandate?.id === "fix-ci", "evidence mandate created");
+  const logDir = join(project, "xdg-state", "switchboard", "logs");
+  mkdirSync(logDir, { recursive: true });
+  writeFileSync(
+    join(logDir, "switchboard.jsonl"),
+    JSON.stringify({
+      version: 1,
+      timestamp: "2026-07-02T15:00:00.000Z",
+      action: "tool_call",
+      status: "ok",
+      profileName: "github_findu",
+      toolName: "github_findu_checks_list",
+      mandateId: "fix-ci",
+      repoPath: project
+    }) + "\n"
+  );
+
+  const evidenceExport = runCli([
+    "audit",
+    "export",
+    "--format",
+    "jsonl",
+    "--include",
+    "all"
+  ]);
+  const evidenceLines = evidenceExport.stdout
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const summaryLine = evidenceLines[0];
+  assert(summaryLine?.type === "summary", "evidence summary line");
+  assert(
+    summaryLine?.evidenceCounts?.mandates === 1 &&
+      summaryLine?.evidenceCounts?.logEntries?.exported === 1,
+    "evidence counts"
+  );
+  const mandateLine = evidenceLines.find((line) => line.type === "mandate");
+  assert(
+    mandateLine?.mandate?.id === "fix-ci" &&
+      mandateLine?.mandate?.createdBy === "human-smoke" &&
+      /^sha256:[0-9a-f]{64}$/.test(mandateLine?.mandate?.policyHash ?? ""),
+    "mandate evidence record"
+  );
+  assert(
+    evidenceLines.some(
+      (line) => line.type === "audit_log" && line.entry?.mandateId === "fix-ci"
+    ),
+    "audit log evidence record"
+  );
+  assert(
+    !evidenceExport.stdout.includes("ghp_audit_smoke_should_not_print"),
+    "redacted evidence export"
+  );
 } finally {
   rmSync(project, { force: true, recursive: true });
 }

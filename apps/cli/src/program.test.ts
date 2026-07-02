@@ -443,6 +443,262 @@ describe("switchboard CLI program", () => {
     expect(output.join("\n")).not.toContain("ghp_export_should_not_print");
   });
 
+  it("exports mandate, approval, and log evidence records with --include", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const approvalStorePath = join(root, "state", "approvals.json");
+    const auditLogPath = join(root, "state", "audit.jsonl");
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath,
+      approvalStorePath,
+      auditLogPath
+    });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "fix-ci",
+        "--agent",
+        "implementer",
+        "--actor",
+        "human-wilson",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "fix/ci",
+        "--lease",
+        "2h",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    writeFileSync(
+      approvalStorePath,
+      JSON.stringify({
+        version: 1,
+        requests: [
+          {
+            version: 1,
+            id: "approval-1",
+            mandateId: "fix-ci",
+            repoPath: root,
+            branch: "fix/ci",
+            toolName: "github_findu_checks_rerun",
+            approvalGateId: "gate-1",
+            approvalGatePattern: "github_findu_checks_rerun",
+            status: "pending",
+            createdAt: "2026-07-02T15:00:00.000Z",
+            expiresAt: "2100-01-01T00:00:00.000Z"
+          }
+        ]
+      })
+    );
+    writeFileSync(
+      auditLogPath,
+      [
+        {
+          version: 1,
+          timestamp: "2026-07-02T15:01:00.000Z",
+          action: "tool_call",
+          status: "ok",
+          profileName: "github_findu",
+          toolName: "github_findu_checks_list",
+          mandateId: "fix-ci",
+          repoPath: root
+        },
+        {
+          version: 1,
+          timestamp: "2026-07-02T15:02:00.000Z",
+          action: "tool_call",
+          status: "ok",
+          profileName: "github_findu",
+          toolName: "github_findu_checks_list",
+          mandateId: "other",
+          repoPath: join(root, "elsewhere")
+        }
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join("\n") + "\n"
+    );
+
+    await program.parseAsync(
+      ["--cwd", root, "audit", "export", "--format", "jsonl", "--include", "all"],
+      { from: "user" }
+    );
+
+    const lines = (output[1] ?? "").trim().split("\n").map(
+      (line) =>
+        JSON.parse(line) as {
+          type: string;
+          evidenceCounts?: {
+            mandates: number | null;
+            approvals: number | null;
+            logEntries: { matched: number; exported: number } | null;
+          };
+          mandate?: {
+            id: string;
+            createdBy?: string;
+            policyHash?: string;
+          };
+          approvalRequest?: { id: string; runtimeStatus: string };
+          entry?: { mandateId?: string; repoPath?: string };
+        }
+    );
+    expect(lines[0]).toMatchObject({
+      type: "summary",
+      evidenceCounts: {
+        mandates: 1,
+        approvals: 1,
+        logEntries: { matched: 1, exported: 1 }
+      }
+    });
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        type: "mandate",
+        mandate: expect.objectContaining({
+          id: "fix-ci",
+          createdBy: "human-wilson",
+          policyHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/)
+        })
+      })
+    );
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        type: "approval_request",
+        approvalRequest: expect.objectContaining({ id: "approval-1" })
+      })
+    );
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        type: "audit_log",
+        entry: expect.objectContaining({ mandateId: "fix-ci" })
+      })
+    );
+    expect(
+      lines.some((line) => line.entry?.mandateId === "other")
+    ).toBe(false);
+
+    await program.parseAsync(
+      ["--cwd", root, "audit", "export", "--format", "jsonl"],
+      { from: "user" }
+    );
+    const defaultLines = (output[2] ?? "").trim().split("\n").map(
+      (line) => JSON.parse(line) as { type: string }
+    );
+    expect(
+      defaultLines.every(
+        (line) => line.type === "summary" || line.type === "check"
+      )
+    ).toBe(true);
+    expect(defaultLines[0]).not.toHaveProperty("evidenceCounts");
+  });
+
+  it("truncates exported log evidence to --log-limit newest entries", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const auditLogPath = join(root, "state", "audit.jsonl");
+    mkdirSync(join(root, "state"), { recursive: true });
+    writeFileSync(
+      auditLogPath,
+      [1, 2, 3]
+        .map((index) =>
+          JSON.stringify({
+            version: 1,
+            timestamp: `2026-07-02T15:0${index}:00.000Z`,
+            action: "tool_call",
+            status: "ok",
+            profileName: "github_findu",
+            toolName: `github_findu_tool_${index}`,
+            mandateId: "fix-ci",
+            repoPath: root
+          })
+        )
+        .join("\n") + "\n"
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      auditLogPath
+    });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "audit",
+        "export",
+        "--include",
+        "logs",
+        "--log-limit",
+        "2"
+      ],
+      { from: "user" }
+    );
+
+    const lines = (output[0] ?? "").trim().split("\n").map(
+      (line) =>
+        JSON.parse(line) as {
+          type: string;
+          evidenceCounts?: {
+            logEntries: { matched: number; exported: number } | null;
+          };
+          entry?: { toolName?: string };
+        }
+    );
+    expect(lines[0]?.evidenceCounts?.logEntries).toEqual({
+      matched: 3,
+      exported: 2
+    });
+    const exportedTools = lines
+      .filter((line) => line.type === "audit_log")
+      .map((line) => line.entry?.toolName);
+    expect(exportedTools).toEqual([
+      "github_findu_tool_2",
+      "github_findu_tool_3"
+    ]);
+  });
+
+  it("rejects a non-positive audit export log limit", async () => {
+    const root = makeTempProject();
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: () => {},
+      writeErr: (message) => errors.push(message)
+    });
+    await program.parseAsync(
+      ["--cwd", root, "audit", "export", "--include", "logs", "--log-limit", "0"],
+      { from: "user" }
+    );
+    expect(errors.join("\n")).toContain(
+      "--log-limit must be a positive integer"
+    );
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+  });
+
+  it("rejects unknown audit export include sections", async () => {
+    const root = makeTempProject();
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: () => {},
+      writeErr: (message) => errors.push(message)
+    });
+    await program.parseAsync(
+      ["--cwd", root, "audit", "export", "--include", "everything"],
+      { from: "user" }
+    );
+    expect(errors.join("\n")).toContain('unknown --include section "everything"');
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+  });
+
   it("prints scan client routes without implying direct servers are Switchboard installs", async () => {
     const root = makeTempProject();
     mkdirSync(join(root, ".codex"));
