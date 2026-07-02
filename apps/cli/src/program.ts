@@ -684,16 +684,54 @@ export function createProgram(io: ProgramIo = {}): Command {
     .command("export")
     .description("Export the repo authority audit as JSONL evidence.")
     .option("--format <format>", "export format", "jsonl")
-    .action(async (options: { format?: string }) => {
-      if ((options.format ?? "jsonl") !== "jsonl") {
-        writeErr("error: only --format jsonl is supported");
-        process.exitCode = 1;
-        return;
-      }
+    .option(
+      "--include <sections>",
+      "comma-separated extra evidence sections: mandates, approvals, logs, or all"
+    )
+    .option(
+      "--log-limit <count>",
+      "maximum audit log entries when logs are included",
+      "200"
+    )
+    .action(
+      async (options: {
+        format?: string;
+        include?: string;
+        logLimit: string;
+      }) => {
+        if ((options.format ?? "jsonl") !== "jsonl") {
+          writeErr("error: only --format jsonl is supported");
+          process.exitCode = 1;
+          return;
+        }
 
-      const audit = await createRepoAuditForCurrentInvocation(program);
-      writeOut(formatRepoAuditJsonl(audit));
-    });
+        const include = parseAuditExportInclude(options.include);
+        if (!include.ok) {
+          writeErr(`error: ${include.message}`);
+          process.exitCode = 1;
+          return;
+        }
+        const logLimit = parsePositiveInteger(options.logLimit);
+        if (logLimit === undefined) {
+          writeErr("error: --log-limit must be a positive integer");
+          process.exitCode = 1;
+          return;
+        }
+
+        const globalOptions = program.opts<{ cwd?: string }>();
+        const audit = await createRepoAuditForCurrentInvocation(program);
+        const evidence = await collectRepoAuditExportEvidence({
+          repoPath: installTargetCwd(globalOptions.cwd),
+          include: include.sections,
+          logLimit,
+          mandateStorePath: io.mandateStorePath ?? resolveMandateStorePath(),
+          approvalStorePath:
+            io.approvalStorePath ?? resolveApprovalRequestStorePath(),
+          auditLogPath: io.auditLogPath ?? resolveAuditLogPath()
+        });
+        writeOut(formatRepoAuditJsonl(audit, evidence));
+      }
+    );
 
   program
     .command("run")
@@ -4205,8 +4243,103 @@ function formatRepoAudit(result: RepoAuditResult): string {
   return lines.join("\n");
 }
 
-function formatRepoAuditJsonl(result: RepoAuditResult): string {
-  const lines = [
+interface RepoAuditExportInclude {
+  mandates: boolean;
+  approvals: boolean;
+  logs: boolean;
+}
+
+interface RepoAuditExportEvidence {
+  include: RepoAuditExportInclude;
+  mandates: MandateWithStatus[];
+  approvals: ApprovalRequestWithStatus[];
+  logEntries: AuditLogEntry[];
+  logCounts: { matched: number; exported: number } | null;
+}
+
+function parseAuditExportInclude(
+  value: string | undefined
+):
+  | { ok: true; sections: RepoAuditExportInclude }
+  | { ok: false; message: string } {
+  const sections: RepoAuditExportInclude = {
+    mandates: false,
+    approvals: false,
+    logs: false
+  };
+  for (const raw of (value ?? "").split(",")) {
+    const section = raw.trim().toLowerCase();
+    if (!section) {
+      continue;
+    }
+    if (section === "all") {
+      return {
+        ok: true,
+        sections: { mandates: true, approvals: true, logs: true }
+      };
+    }
+    if (section === "mandates" || section === "approvals" || section === "logs") {
+      sections[section] = true;
+      continue;
+    }
+    return {
+      ok: false,
+      message: `unknown --include section "${section}"; use mandates, approvals, logs, or all`
+    };
+  }
+
+  return { ok: true, sections };
+}
+
+async function collectRepoAuditExportEvidence(options: {
+  repoPath: string;
+  include: RepoAuditExportInclude;
+  logLimit: number;
+  mandateStorePath: string;
+  approvalStorePath: string;
+  auditLogPath: string;
+}): Promise<RepoAuditExportEvidence> {
+  const mandates = options.include.mandates
+    ? await listMandates({
+        path: options.mandateStorePath,
+        repoPath: options.repoPath
+      })
+    : [];
+  const approvals = options.include.approvals
+    ? await listApprovalRequests({
+        path: options.approvalStorePath,
+        repoPath: options.repoPath
+      })
+    : [];
+  let logEntries: AuditLogEntry[] = [];
+  let logCounts: RepoAuditExportEvidence["logCounts"] = null;
+  if (options.include.logs) {
+    const matched = (
+      await readAuditLogEntries({ path: options.auditLogPath })
+    ).filter((entry) => entry.repoPath === options.repoPath);
+    logEntries = matched.slice(Math.max(matched.length - options.logLimit, 0));
+    logCounts = { matched: matched.length, exported: logEntries.length };
+  }
+
+  return {
+    include: options.include,
+    mandates,
+    approvals,
+    logEntries,
+    logCounts
+  };
+}
+
+function formatRepoAuditJsonl(
+  result: RepoAuditResult,
+  evidence?: RepoAuditExportEvidence
+): string {
+  const repo = {
+    cwd: result.repo.cwd,
+    gitRoot: result.repo.gitRoot,
+    branch: result.repo.branch
+  };
+  const lines: Array<Record<string, unknown>> = [
     {
       schemaVersion: repoAuditExportSchemaVersion,
       type: "summary",
@@ -4216,18 +4349,45 @@ function formatRepoAuditJsonl(result: RepoAuditResult): string {
       authorityStatus: result.authorityStatus,
       findingSummary: result.findingSummary,
       recommendedNextAction: result.recommendedNextAction.primary ?? null,
-      nextActions: result.nextActions
+      nextActions: result.nextActions,
+      ...(evidence
+        ? {
+            evidenceCounts: {
+              mandates: evidence.include.mandates
+                ? evidence.mandates.length
+                : null,
+              approvals: evidence.include.approvals
+                ? evidence.approvals.length
+                : null,
+              logEntries: evidence.logCounts
+            }
+          }
+        : {})
     },
     ...result.checks.map((check) => ({
       schemaVersion: repoAuditExportSchemaVersion,
       type: "check",
-      repo: {
-        cwd: result.repo.cwd,
-        gitRoot: result.repo.gitRoot,
-        branch: result.repo.branch
-      },
+      repo,
       auditStatus: result.status,
       check
+    })),
+    ...(evidence?.mandates ?? []).map((mandate) => ({
+      schemaVersion: repoAuditExportSchemaVersion,
+      type: "mandate",
+      repo,
+      mandate
+    })),
+    ...(evidence?.approvals ?? []).map((approvalRequest) => ({
+      schemaVersion: repoAuditExportSchemaVersion,
+      type: "approval_request",
+      repo,
+      approvalRequest
+    })),
+    ...(evidence?.logEntries ?? []).map((entry) => ({
+      schemaVersion: repoAuditExportSchemaVersion,
+      type: "audit_log",
+      repo,
+      entry
     }))
   ];
   return lines.map((line) => JSON.stringify(line)).join("\n");
