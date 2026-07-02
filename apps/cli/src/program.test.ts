@@ -205,6 +205,20 @@ describe("switchboard CLI program", () => {
         directServerNames: string[];
         rendered: { content: string } | null;
       }>;
+      diff: {
+        status: string;
+        counts: Record<string, number>;
+        clients: Array<{
+          client: string;
+          status: string;
+          findings: Array<{
+            type: string;
+            severity: string;
+            serverName?: string;
+            resolveCommand: string | null;
+          }>;
+        }>;
+      };
       secrets: {
         usages: Array<{ ref: string; envName: string }>;
         missing: Array<{ ref: string }>;
@@ -255,6 +269,28 @@ describe("switchboard CLI program", () => {
     expect(parsed.secrets.missing).toContainEqual(
       expect.objectContaining({ ref: "github/example/dev/token" })
     );
+    expect(parsed.diff.status).toBe("drift");
+    expect(parsed.diff.counts).toMatchObject({ clients: 2, drift: 2, inSync: 0 });
+    const codexDiff = parsed.diff.clients.find(
+      (client) => client.client === "codex"
+    );
+    expect(codexDiff?.status).toBe("drift");
+    expect(codexDiff?.findings).toContainEqual(
+      expect.objectContaining({
+        type: "switchboard-route-missing",
+        severity: "warning",
+        resolveCommand: "switchboard install codex --write"
+      })
+    );
+    expect(codexDiff?.findings).toContainEqual(
+      expect.objectContaining({
+        type: "direct-route",
+        severity: "warning",
+        serverName: "github",
+        resolveCommand:
+          "switchboard import --write --cleanup-client --accept-direct codex:github"
+      })
+    );
     expect(parsed.safetyNotes.join("\n")).toContain("not a sandbox");
     expect(output.join("\n")).not.toContain("ghp_manifest_should_not_print");
   });
@@ -277,6 +313,10 @@ describe("switchboard CLI program", () => {
     expect(text).toContain("local_echo: generic");
     expect(text).toContain("Clients:");
     expect(text).toContain("install: switchboard install codex --write");
+    expect(text).toContain("Route drift: drift");
+    expect(text).toContain(
+      "resolve: switchboard install codex --write"
+    );
     expect(text).toContain("Secrets:");
     expect(text).toContain("Safety notes:");
     expect(text).not.toContain("fixture secret");

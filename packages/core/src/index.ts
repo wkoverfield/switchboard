@@ -10,6 +10,7 @@ export * from "./daemon/daemon-state.js";
 export * from "./install/client-config.js";
 export * from "./import/import-plan.js";
 export * from "./mandates/mandates.js";
+export * from "./manifest/route-diff.js";
 export * from "./namespaces/namespaces.js";
 export * from "./next-actions/next-actions.js";
 export * from "./onboarding/init-config.js";
