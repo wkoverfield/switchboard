@@ -597,6 +597,90 @@ describe("switchboard CLI program", () => {
         (line) => line.type === "summary" || line.type === "check"
       )
     ).toBe(true);
+    expect(defaultLines[0]).not.toHaveProperty("evidenceCounts");
+  });
+
+  it("truncates exported log evidence to --log-limit newest entries", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const auditLogPath = join(root, "state", "audit.jsonl");
+    mkdirSync(join(root, "state"), { recursive: true });
+    writeFileSync(
+      auditLogPath,
+      [1, 2, 3]
+        .map((index) =>
+          JSON.stringify({
+            version: 1,
+            timestamp: `2026-07-02T15:0${index}:00.000Z`,
+            action: "tool_call",
+            status: "ok",
+            profileName: "github_findu",
+            toolName: `github_findu_tool_${index}`,
+            mandateId: "fix-ci",
+            repoPath: root
+          })
+        )
+        .join("\n") + "\n"
+    );
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      auditLogPath
+    });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "audit",
+        "export",
+        "--include",
+        "logs",
+        "--log-limit",
+        "2"
+      ],
+      { from: "user" }
+    );
+
+    const lines = (output[0] ?? "").trim().split("\n").map(
+      (line) =>
+        JSON.parse(line) as {
+          type: string;
+          evidenceCounts?: {
+            logEntries: { matched: number; exported: number } | null;
+          };
+          entry?: { toolName?: string };
+        }
+    );
+    expect(lines[0]?.evidenceCounts?.logEntries).toEqual({
+      matched: 3,
+      exported: 2
+    });
+    const exportedTools = lines
+      .filter((line) => line.type === "audit_log")
+      .map((line) => line.entry?.toolName);
+    expect(exportedTools).toEqual([
+      "github_findu_tool_2",
+      "github_findu_tool_3"
+    ]);
+  });
+
+  it("rejects a non-positive audit export log limit", async () => {
+    const root = makeTempProject();
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: () => {},
+      writeErr: (message) => errors.push(message)
+    });
+    await program.parseAsync(
+      ["--cwd", root, "audit", "export", "--include", "logs", "--log-limit", "0"],
+      { from: "user" }
+    );
+    expect(errors.join("\n")).toContain(
+      "--log-limit must be a positive integer"
+    );
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
   });
 
   it("rejects unknown audit export include sections", async () => {

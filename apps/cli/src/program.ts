@@ -720,15 +720,22 @@ export function createProgram(io: ProgramIo = {}): Command {
 
         const globalOptions = program.opts<{ cwd?: string }>();
         const audit = await createRepoAuditForCurrentInvocation(program);
-        const evidence = await collectRepoAuditExportEvidence({
-          repoPath: installTargetCwd(globalOptions.cwd),
-          include: include.sections,
-          logLimit,
-          mandateStorePath: io.mandateStorePath ?? resolveMandateStorePath(),
-          approvalStorePath:
-            io.approvalStorePath ?? resolveApprovalRequestStorePath(),
-          auditLogPath: io.auditLogPath ?? resolveAuditLogPath()
-        });
+        const includesEvidence =
+          include.sections.mandates ||
+          include.sections.approvals ||
+          include.sections.logs;
+        const evidence = includesEvidence
+          ? await collectRepoAuditExportEvidence({
+              repoPath: installTargetCwd(globalOptions.cwd),
+              include: include.sections,
+              logLimit,
+              mandateStorePath:
+                io.mandateStorePath ?? resolveMandateStorePath(),
+              approvalStorePath:
+                io.approvalStorePath ?? resolveApprovalRequestStorePath(),
+              auditLogPath: io.auditLogPath ?? resolveAuditLogPath()
+            })
+          : undefined;
         writeOut(formatRepoAuditJsonl(audit, evidence));
       }
     );
