@@ -24,9 +24,11 @@ import {
   inspectProjectClientConfigs,
   listApprovalRequests,
   listMandates,
+  diffManifestClientRoutes,
   type LoadConfigOptions,
   loadSwitchboardConfig,
   type MandateAuthoritySource,
+  type ManifestRouteDiff,
   type MandateLeaseEvent,
   type MandateToolPolicy,
   type MandateWithStatus,
@@ -4265,6 +4267,7 @@ interface RepoManifest {
       content: string;
     } | null;
   }>;
+  diff: ManifestRouteDiff;
   secrets: {
     usages: ReturnType<typeof collectSecretRefUsages>;
     missing: MissingSecretRef[];
@@ -4305,6 +4308,12 @@ async function createRepoManifestForCurrentInvocation(
   const configValid = !loaded.diagnostics.some(
     (diagnostic) => diagnostic.level === "error"
   );
+  const manifestClients = createManifestClientEntries({
+    scan: displayScan,
+    cwd,
+    launch,
+    configValid
+  });
 
   return {
     schemaVersion: repoManifestSchemaVersion,
@@ -4333,10 +4342,18 @@ async function createRepoManifestForCurrentInvocation(
         .filter((usage) => usage.profileName === name)
         .map((usage) => usage.ref)
     })),
-    clients: createManifestClientEntries({
-      scan: displayScan,
-      cwd,
-      launch,
+    clients: manifestClients,
+    diff: diffManifestClientRoutes({
+      clients: manifestClients.map((client) => ({
+        client: client.client,
+        status: client.status,
+        directServerNames: client.directServerNames,
+        renderedAvailable: client.rendered !== null
+      })),
+      acceptedDirectRisks: loaded.config.acceptedRisks.directMcp.map((risk) => ({
+        client: risk.client,
+        serverName: risk.serverName
+      })),
       configValid
     }),
     secrets: {
@@ -4438,6 +4455,17 @@ function formatRepoManifest(manifest: RepoManifest): string {
     lines.push(`  install: ${formatHumanCommand(client.installCommand)}`);
     if (client.directServerNames.length > 0) {
       lines.push(`  direct routes: ${client.directServerNames.join(", ")}`);
+    }
+  }
+
+  lines.push("", `Route drift: ${manifest.diff.status}`);
+  for (const client of manifest.diff.clients) {
+    lines.push(`- ${client.client}: ${client.status}`);
+    for (const finding of client.findings) {
+      lines.push(`  ${finding.severity}: ${finding.message}`);
+      if (finding.resolveCommand) {
+        lines.push(`    resolve: ${formatHumanCommand(finding.resolveCommand)}`);
+      }
     }
   }
 

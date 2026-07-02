@@ -17,7 +17,10 @@ try {
     [
       "[mcp_servers.github]",
       'command = "docker"',
-      'args = ["run", "GITHUB_TOKEN=ghp_manifest_smoke_should_not_print"]'
+      'args = ["run", "GITHUB_TOKEN=ghp_manifest_smoke_should_not_print"]',
+      "[mcp_servers.sentry]",
+      'command = "npx"',
+      'args = ["-y", "sentry-mcp"]'
     ].join("\n")
   );
   writeFileSync(
@@ -33,7 +36,13 @@ try {
       "      command: node",
       "      env:",
       "        GITHUB_TOKEN:",
-      "          secretRef: github/example/dev/token"
+      "          secretRef: github/example/dev/token",
+      "acceptedRisks:",
+      "  directMcp:",
+      "    - id: accept-codex-sentry",
+      "      client: codex",
+      "      serverName: sentry",
+      "      reason: smoke fixture accepted bypass"
     ].join("\n")
   );
 
@@ -75,10 +84,47 @@ try {
     "redacted manifest"
   );
 
+  assert(manifest.diff?.status === "drift", "diff status");
+  const codexDiff = manifest.diff?.clients?.find(
+    (client) => client.client === "codex"
+  );
+  assert(codexDiff?.status === "drift", "codex diff status");
+  assert(
+    codexDiff?.findings?.some(
+      (finding) =>
+        finding.type === "direct-route" &&
+        finding.serverName === "github" &&
+        finding.resolveCommand ===
+          "switchboard import --write --cleanup-client --accept-direct codex:github"
+    ),
+    "codex unaccepted direct-route finding"
+  );
+  assert(
+    codexDiff?.findings?.some(
+      (finding) =>
+        finding.type === "accepted-direct-route" &&
+        finding.serverName === "sentry" &&
+        finding.severity === "info" &&
+        finding.resolveCommand === null
+    ),
+    "codex accepted direct-route finding"
+  );
+  assert(
+    codexDiff?.findings?.some(
+      (finding) => finding.type === "switchboard-route-missing"
+    ),
+    "codex missing switchboard route finding"
+  );
+
   const human = runCli(["manifest"]);
   assert(human.stdout.includes("Switchboard repo manifest:"), "human title");
   assert(human.stdout.includes("Profiles:"), "human profiles");
   assert(human.stdout.includes("Clients:"), "human clients");
+  assert(human.stdout.includes("Route drift: drift"), "human drift status");
+  assert(
+    human.stdout.includes("accepted risk"),
+    "human accepted drift finding"
+  );
   assert(
     !human.stdout.includes("ghp_manifest_smoke_should_not_print"),
     "redacted human"
