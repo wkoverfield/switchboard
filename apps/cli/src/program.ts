@@ -645,14 +645,14 @@ export function createProgram(io: ProgramIo = {}): Command {
   program
     .name("switchboard")
     .description(
-      "Local mandate layer and MCP profile router for coding agents."
+      "Take control of what your AI coding agents can reach: see the tools and tokens they can touch in a repo, get secrets out of plaintext config, and scope each agent's access."
     )
     .version(version)
     .option("--cwd <path>", "resolve repo config from this directory");
 
   program
     .command("scan")
-    .description("Inspect this repo and suggest production-safe agent setup.")
+    .description("See which MCP servers and tokens your agents can reach in this repo — and what's exposed.")
     .option("--json", "print machine-readable JSON")
     .action(async (options: { json?: boolean }) => {
       const globalOptions = program.opts<{ cwd?: string }>();
@@ -911,7 +911,7 @@ export function createProgram(io: ProgramIo = {}): Command {
 
   program
     .command("import")
-    .description("Plan a cleanup of existing project MCP config into Switchboard.")
+    .description("Consolidate scattered MCP config and move plaintext tokens into your keychain — reversibly, with backups.")
     .option("--dry-run", "print the import plan without writing")
     .option("--write", "apply the import plan")
     .option("--cleanup-client", "remove direct MCP bypass routes from active project client config with backups")
@@ -973,7 +973,7 @@ export function createProgram(io: ProgramIo = {}): Command {
 
   program
     .command("status")
-    .description("Show active Switchboard config sources and profiles.")
+    .description("Show which config and agent profiles are active in this repo.")
     .option("--json", "print machine-readable JSON")
     .action((options: { json?: boolean }) => {
       const globalOptions = program.opts<{ cwd?: string }>();
@@ -1001,7 +1001,7 @@ export function createProgram(io: ProgramIo = {}): Command {
 
   program
     .command("doctor")
-    .description("Run basic Switchboard config checks.")
+    .description("Check your setup and tell you the next thing to fix or run.")
     .option("--json", "print machine-readable JSON")
     .action(async (options: { json?: boolean }) => {
       const globalOptions = program.opts<{ cwd?: string }>();
@@ -1051,11 +1051,11 @@ export function createProgram(io: ProgramIo = {}): Command {
 
   const secrets = program
     .command("secrets")
-    .description("Manage local Switchboard secret references.");
+    .description("Store your tokens in your OS keychain so they stay out of repo and client config.");
 
   secrets
     .command("set <ref>")
-    .description("Store or update a local secret value by secretRef.")
+    .description("Save a token in your keychain under a ref your config can point to.")
     .option("--value-stdin", "read the secret value from stdin")
     .option("--json", "print machine-readable JSON")
     .action(
@@ -1189,7 +1189,7 @@ export function createProgram(io: ProgramIo = {}): Command {
 
   secrets
     .command("doctor")
-    .description("Check configured secretRefs without printing values.")
+    .description("Check your keychain and which configured tokens are set — never printing their values.")
     .option("--json", "print machine-readable JSON")
     .action(async (options: { json?: boolean }) => {
       const globalOptions = program.opts<{ cwd?: string }>();
@@ -1236,7 +1236,7 @@ export function createProgram(io: ProgramIo = {}): Command {
 
   program
     .command("auth <preset>")
-    .description("Store the recommended local token for a provider preset.")
+    .description("Save a provider's token (like GitHub or Vercel) into your keychain, the easy way.")
     .option("--secret-ref <ref>", "override the preset secretRef")
     .option(
       "--value-stdin",
@@ -3970,7 +3970,7 @@ export function createProgram(io: ProgramIo = {}): Command {
   program
     .command("install <client>")
     .description(
-      "Print or write an MCP client config snippet for routing through Switchboard."
+      "Point Claude Code or Codex at Switchboard: prints the MCP client config, or writes it with --write (with a backup)."
     )
     .option("--json", "print machine-readable JSON")
     .option("--write", "write project-scoped client config")
