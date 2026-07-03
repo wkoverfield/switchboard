@@ -260,6 +260,15 @@ export interface SecretStoreProbeResult {
 export async function probeSecretStore(
   store: SecretStore
 ): Promise<SecretStoreProbeResult> {
+  // Preserve any real value that happens to live at the probe ref so a health
+  // check can never destroy user data (the ref is also reserved at input).
+  let existing: string | null = null;
+  try {
+    existing = await store.get(secretStoreProbeRef);
+  } catch {
+    // If reading fails, the round-trip below surfaces the real failure.
+  }
+
   try {
     await store.set(secretStoreProbeRef, secretStoreProbeValue);
   } catch (error) {
@@ -278,7 +287,11 @@ export async function probeSecretStore(
   } catch (error) {
     return { ok: false, error: messageFromUnknownError(error) };
   } finally {
-    await store.delete(secretStoreProbeRef).catch(() => {});
+    if (existing === null) {
+      await store.delete(secretStoreProbeRef).catch(() => {});
+    } else {
+      await store.set(secretStoreProbeRef, existing).catch(() => {});
+    }
   }
 }
 

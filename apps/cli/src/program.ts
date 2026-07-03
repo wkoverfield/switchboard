@@ -53,6 +53,7 @@ import {
   type SecretBackendErrorHelp,
   getProviderSafetyTemplate,
   probeSecretStore,
+  secretStoreProbeRef,
   providerSafetyTemplatePolicy,
   type PathResolutionOptions,
   findMissingSecretRefs,
@@ -1067,6 +1068,17 @@ export function createProgram(io: ProgramIo = {}): Command {
             message: validation.errors.join("; "),
             nextActions: [
               "Use a lowercase path-like ref such as github/findu/dev/token."
+            ]
+          });
+          return;
+        }
+        if (ref === secretStoreProbeRef) {
+          writeCommandError({
+            json: options.json,
+            code: "reserved_secret_ref",
+            message: `"${secretStoreProbeRef}" is reserved for the switchboard secrets doctor health check and cannot store a secret.`,
+            nextActions: [
+              "Choose a different ref such as github/findu/dev/token."
             ]
           });
           return;

@@ -241,6 +241,17 @@ describe("secret refs", () => {
     expect(await store.get(secretStoreProbeRef)).toBeNull();
   });
 
+  it("preserves a real value that already lives at the probe ref", async () => {
+    const store = createMemorySecretStore({
+      [secretStoreProbeRef]: "someone-really-stored-this"
+    });
+    const probe = await probeSecretStore(store);
+    expect(probe).toEqual({ ok: true });
+    expect(await store.get(secretStoreProbeRef)).toBe(
+      "someone-really-stored-this"
+    );
+  });
+
   it("reports a probe failure when the backend cannot write", async () => {
     const failing: SecretStore = {
       get: async () => null,

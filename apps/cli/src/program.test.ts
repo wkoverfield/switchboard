@@ -2228,6 +2228,37 @@ describe("switchboard CLI program", () => {
     expect(parsed.backend.message).toContain("unsafe backend rejected");
   });
 
+  it("refuses to store a secret at the reserved probe ref", async () => {
+    const root = makeTempProject();
+    const store = createMemorySecretStore();
+    const output: string[] = [];
+    const program = createProgram({
+      secretStore: store,
+      secretIndexPath: join(root, "state", "secrets", "index.json"),
+      readSecretFromStdin: async () => "ghp_secret",
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "secrets",
+        "set",
+        "switchboard/diagnostics/probe",
+        "--value-stdin",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      code: "reserved_secret_ref"
+    });
+    expect(await store.get("switchboard/diagnostics/probe")).toBeNull();
+  });
+
   it("diagnoses a backend that initializes but cannot read/write", async () => {
     const root = makeTempProject();
     writeMandateConfig(root);
