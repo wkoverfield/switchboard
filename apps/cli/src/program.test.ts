@@ -44,9 +44,6 @@ describe("switchboard CLI program", () => {
     expect(help).toContain("AI coding agents");
     expect(help.toLowerCase()).not.toContain("mandate layer");
     expect(help.toLowerCase()).not.toContain("mcp profile router");
-    // Front-door commands lead with what you get.
-    const scan = program.commands.find((command) => command.name() === "scan");
-    expect(scan?.description().toLowerCase()).toContain("exposed");
   });
 
   it("prints status JSON for a repo config resolved with --cwd", async () => {

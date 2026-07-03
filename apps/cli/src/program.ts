@@ -645,7 +645,7 @@ export function createProgram(io: ProgramIo = {}): Command {
   program
     .name("switchboard")
     .description(
-      "A local safety layer for your AI coding agents: see what tools and tokens they can reach in a repo, get secrets out of plaintext config, and scope each agent's access."
+      "Take control of what your AI coding agents can reach: see the tools and tokens they can touch in a repo, get secrets out of plaintext config, and scope each agent's access."
     )
     .version(version)
     .option("--cwd <path>", "resolve repo config from this directory");
@@ -911,7 +911,7 @@ export function createProgram(io: ProgramIo = {}): Command {
 
   program
     .command("import")
-    .description("Move scattered MCP config and plaintext tokens into one safe local setup, with backups.")
+    .description("Consolidate scattered MCP config and move plaintext tokens into your keychain — reversibly, with backups.")
     .option("--dry-run", "print the import plan without writing")
     .option("--write", "apply the import plan")
     .option("--cleanup-client", "remove direct MCP bypass routes from active project client config with backups")
@@ -3970,7 +3970,7 @@ export function createProgram(io: ProgramIo = {}): Command {
   program
     .command("install <client>")
     .description(
-      "Point Claude Code or Codex at Switchboard by writing its MCP client config (with a backup)."
+      "Point Claude Code or Codex at Switchboard: prints the MCP client config, or writes it with --write (with a backup)."
     )
     .option("--json", "print machine-readable JSON")
     .option("--write", "write project-scoped client config")
