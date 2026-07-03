@@ -49,7 +49,11 @@ import {
   createSwitchboardImportPlan,
   createProviderAddPlan,
   createKeychainSecretStore,
+  describeSecretBackendError,
+  type SecretBackendErrorHelp,
   getProviderSafetyTemplate,
+  probeSecretStore,
+  secretStoreProbeRef,
   providerSafetyTemplatePolicy,
   type PathResolutionOptions,
   findMissingSecretRefs,
@@ -572,6 +576,22 @@ export function createProgram(io: ProgramIo = {}): Command {
     }
     process.exitCode = 1;
   };
+  // Secret-store failures are recoverable, but only if we show the recovery
+  // steps. Human errors normally omit nextActions, so surface them here.
+  const writeSecretBackendError = async (
+    json: boolean | undefined,
+    error: unknown,
+    code: string
+  ): Promise<void> => {
+    const envelope = await secretBackendErrorEnvelope(secretStore, error, code);
+    writeCommandError({ json, ...envelope });
+    if (!json && envelope.nextActions.length > 0) {
+      writeErr("To fix:");
+      for (const action of envelope.nextActions) {
+        writeErr(`  ${action}`);
+      }
+    }
+  };
   const originalParseAsync = program.parseAsync.bind(program);
   program.parseAsync = async (...args: Parameters<Command["parseAsync"]>) => {
     currentParseArgs = userArgsFromParseInput(args[0], args[1]);
@@ -1052,6 +1072,17 @@ export function createProgram(io: ProgramIo = {}): Command {
           });
           return;
         }
+        if (ref === secretStoreProbeRef) {
+          writeCommandError({
+            json: options.json,
+            code: "reserved_secret_ref",
+            message: `"${secretStoreProbeRef}" is reserved for the switchboard secrets doctor health check and cannot store a secret.`,
+            nextActions: [
+              "Choose a different ref such as github/findu/dev/token."
+            ]
+          });
+          return;
+        }
         if (!options.valueStdin && options.json) {
           writeCommandError({
             json: options.json,
@@ -1092,14 +1123,7 @@ export function createProgram(io: ProgramIo = {}): Command {
           };
           writeOut(options.json ? JSON.stringify(result, null, 2) : `Stored secretRef ${ref}`);
         } catch (error) {
-          writeCommandError({
-            json: options.json,
-            code: "secret_set_failed",
-            message: messageFromError(error),
-            nextActions: [
-              `For scripts or non-interactive shells, use: switchboard secrets set ${ref} --value-stdin`
-            ]
-          });
+          await writeSecretBackendError(options.json, error, "secret_set_failed");
         }
       }
     );
@@ -1159,11 +1183,7 @@ export function createProgram(io: ProgramIo = {}): Command {
             : `Removed secretRef ${ref}`
         );
       } catch (error) {
-        writeCommandError({
-          json: options.json,
-          code: "secret_remove_failed",
-          message: messageFromError(error)
-        });
+        await writeSecretBackendError(options.json, error, "secret_remove_failed");
       }
     });
 
@@ -1174,14 +1194,23 @@ export function createProgram(io: ProgramIo = {}): Command {
     .action(async (options: { json?: boolean }) => {
       const globalOptions = program.opts<{ cwd?: string }>();
       const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
-      const missingSecrets = await findMissingSecretRefs(
-        loaded.config,
-        secretStore
-      );
       const backend = await diagnoseSecretStore(secretStore);
+      const probe = await probeSecretStore(secretStore);
+      const backendHelp = probe.ok
+        ? undefined
+        : describeSecretBackendError(
+            new Error(probe.error ?? "the secret store failed a read/write check"),
+            secretBackendContextFromDiagnostic(backend)
+          );
+      // Skip the per-ref lookups when the store itself can't read/write —
+      // they would all fail with the same underlying error and bury the cause.
+      const missingSecrets = probe.ok
+        ? await findMissingSecretRefs(loaded.config, secretStore)
+        : [];
       const result = {
         ok:
           isSecretBackendDiagnosticOk(backend) &&
+          probe.ok &&
           missingSecrets.length === 0 &&
           !loaded.diagnostics.some((item) => item.level === "error"),
         schemaVersion: secretsSchemaVersion,
@@ -1189,6 +1218,8 @@ export function createProgram(io: ProgramIo = {}): Command {
           secretIndexOptions(io.secretIndexPath)
         ),
         backend,
+        backendReadWriteOk: probe.ok,
+        ...(backendHelp ? { backendHelp } : {}),
         diagnostics: loaded.diagnostics,
         usages: collectSecretRefUsages(loaded.config),
         missing: missingSecrets
@@ -1309,18 +1340,22 @@ export function createProgram(io: ProgramIo = {}): Command {
           );
         } catch (error) {
           const message = messageFromError(error);
-          writeCommandError({
-            json: options.json,
-            code: "provider_auth_failed",
-            message,
-            ...(message.includes("--value-stdin")
-              ? {
-                  nextActions: [
-                    `Pipe the token with: pbpaste | ${formatHumanCommand(`switchboard auth ${preset} --value-stdin`)}`
-                  ]
-                }
-              : {})
-          });
+          if (message.includes("--value-stdin")) {
+            writeCommandError({
+              json: options.json,
+              code: "provider_auth_failed",
+              message,
+              nextActions: [
+                `Pipe the token with: pbpaste | ${formatHumanCommand(`switchboard auth ${preset} --value-stdin`)}`
+              ]
+            });
+            return;
+          }
+          await writeSecretBackendError(
+            options.json,
+            error,
+            "provider_auth_failed"
+          );
         }
       }
     );
@@ -1570,18 +1605,22 @@ export function createProgram(io: ProgramIo = {}): Command {
           );
         } catch (error) {
           const message = messageFromError(error);
-          writeCommandError({
-            json: options.json,
-            code: "provider_setup_failed",
-            message,
-            ...(message.includes("--value-stdin")
-              ? {
-                nextActions: [
-                    `Pipe the token with: pbpaste | ${formatHumanCommand(rewriteSwitchboardCommand(`switchboard setup ${preset} --value-stdin`, switchboardCommandPrefixForRepo(cwd)))}`
-                  ]
-                }
-              : {})
-          });
+          if (message.includes("--value-stdin")) {
+            writeCommandError({
+              json: options.json,
+              code: "provider_setup_failed",
+              message,
+              nextActions: [
+                `Pipe the token with: pbpaste | ${formatHumanCommand(rewriteSwitchboardCommand(`switchboard setup ${preset} --value-stdin`, switchboardCommandPrefixForRepo(cwd)))}`
+              ]
+            });
+            return;
+          }
+          await writeSecretBackendError(
+            options.json,
+            error,
+            "provider_setup_failed"
+          );
         }
       }
     );
@@ -6340,6 +6379,8 @@ function formatSecretsDoctor(result: {
   ok: boolean;
   indexPath: string;
   backend?: Record<string, unknown>;
+  backendReadWriteOk?: boolean;
+  backendHelp?: SecretBackendErrorHelp;
   diagnostics: Array<{ level: string; message: string }>;
   usages: ReturnType<typeof collectSecretRefUsages>;
   missing: MissingSecretRef[];
@@ -6350,11 +6391,39 @@ function formatSecretsDoctor(result: {
   ];
 
   if (result.backend) {
-    lines.push(`Backend: ${formatSecretBackendDiagnostic(result.backend)}`);
+    const readWrite =
+      result.backendReadWriteOk === false
+        ? " — read/write check failed"
+        : result.backendReadWriteOk === true
+          ? " — read/write OK"
+          : "";
+    lines.push(`Backend: ${formatSecretBackendDiagnostic(result.backend)}${readWrite}`);
   }
 
   for (const diagnostic of result.diagnostics) {
     lines.push(`${diagnostic.level}: ${diagnostic.message}`);
+  }
+
+  // A broken backend is the root cause — lead with it and its recovery path,
+  // not with per-ref "set" commands that would crash the same way.
+  if (result.backendHelp) {
+    lines.push("", `Secret store problem: ${result.backendHelp.summary}`);
+    if (result.backendHelp.detail) {
+      lines.push(`  ${result.backendHelp.detail}`);
+    }
+    if (result.backendHelp.nextActions.length > 0) {
+      lines.push("", "To fix:");
+      for (const action of result.backendHelp.nextActions) {
+        lines.push(`  ${action}`);
+      }
+    }
+    if (result.usages.length > 0) {
+      lines.push(
+        "",
+        `Waiting on the store above: ${result.usages.length} configured secretRef${result.usages.length === 1 ? "" : "s"}.`
+      );
+    }
+    return lines.join("\n");
   }
 
   if (result.usages.length === 0) {
@@ -6392,6 +6461,44 @@ async function diagnoseSecretStore(
   } catch (error) {
     return { ok: false, error: messageFromError(error) };
   }
+}
+
+function secretBackendContextFromDiagnostic(
+  diagnostic: Record<string, unknown>
+): { backendId?: string; dataRoot?: string; configPath?: string } {
+  const backend = diagnostic.backend;
+  if (typeof backend !== "object" || backend === null) {
+    return {};
+  }
+  const record = backend as Record<string, unknown>;
+  return {
+    ...(typeof record.id === "string" ? { backendId: record.id } : {}),
+    ...(typeof record.dataRoot === "string" ? { dataRoot: record.dataRoot } : {}),
+    ...(typeof record.configPath === "string"
+      ? { configPath: record.configPath }
+      : {})
+  };
+}
+
+/**
+ * Turns a raw secret-store failure into an actionable error envelope by asking
+ * the backend to describe itself, so the message names the backend and offers a
+ * recovery path instead of leaking a bare crypto exception.
+ */
+async function secretBackendErrorEnvelope(
+  store: SecretStore,
+  error: unknown,
+  code: string
+): Promise<{ code: string; message: string; nextActions: string[] }> {
+  const diagnostic = await diagnoseSecretStore(store).catch(() => ({}));
+  const help = describeSecretBackendError(error, {
+    ...secretBackendContextFromDiagnostic(diagnostic)
+  });
+  return {
+    code,
+    message: help.detail ? `${help.summary} (${help.detail})` : help.summary,
+    nextActions: help.nextActions
+  };
 }
 
 function formatSecretBackendDiagnostic(

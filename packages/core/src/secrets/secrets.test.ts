@@ -10,15 +10,19 @@ import {
   createMemorySecretStore,
   crossKeychainBackendEnv,
   defaultAllowedKeychainBackendIds,
+  describeSecretBackendError,
   diagnoseKeychainBackendPolicy,
   findMissingSecretRefs,
   forgetSecretRef,
   isAllowedKeychainBackendId,
   listSecretRefs,
   keychainAccountForSecretRef,
+  probeSecretStore,
   rememberSecretRef,
   resolveEnvSecretRefs,
   resolveSecretIndexPath,
+  secretStoreProbeRef,
+  type SecretStore,
   unsafeKeychainBackendIds
 } from "./secrets.js";
 import { validateSecretRef } from "./secret-refs.js";
@@ -228,5 +232,84 @@ describe("secret refs", () => {
         homeDir: "/home/alex"
       })
     ).toBe("/state/switchboard/secrets/index.json");
+  });
+
+  it("probes a healthy store with a round-trip and cleans up", async () => {
+    const store = createMemorySecretStore();
+    const probe = await probeSecretStore(store);
+    expect(probe).toEqual({ ok: true });
+    expect(await store.get(secretStoreProbeRef)).toBeNull();
+  });
+
+  it("preserves a real value that already lives at the probe ref", async () => {
+    const store = createMemorySecretStore({
+      [secretStoreProbeRef]: "someone-really-stored-this"
+    });
+    const probe = await probeSecretStore(store);
+    expect(probe).toEqual({ ok: true });
+    expect(await store.get(secretStoreProbeRef)).toBe(
+      "someone-really-stored-this"
+    );
+  });
+
+  it("reports a probe failure when the backend cannot write", async () => {
+    const failing: SecretStore = {
+      get: async () => null,
+      set: async () => {
+        throw new Error("Unsupported state or unable to authenticate data");
+      },
+      delete: async () => {}
+    };
+    const probe = await probeSecretStore(failing);
+    expect(probe.ok).toBe(false);
+    expect(probe.error).toContain("unable to authenticate data");
+  });
+
+  it("reports a probe failure when the read-back value does not match", async () => {
+    const lying: SecretStore = {
+      get: async () => "something-else",
+      set: async () => {},
+      delete: async () => {}
+    };
+    const probe = await probeSecretStore(lying);
+    expect(probe.ok).toBe(false);
+    expect(probe.error).toContain("different value");
+  });
+
+  it("explains an undecryptable file vault with a recovery path", () => {
+    const help = describeSecretBackendError(
+      new Error("Unsupported state or unable to authenticate data"),
+      {
+        env: { [crossKeychainBackendEnv]: "file" } as NodeJS.ProcessEnv,
+        backendId: "file",
+        dataRoot: "/home/alex/.local/share/keyring",
+        configPath: "/home/alex/.config/keyring/keyring.config.json"
+      }
+    );
+    expect(help.summary).toContain("cannot decrypt its saved vault");
+    expect(help.nextActions.join("\n")).toContain(crossKeychainBackendEnv);
+    expect(help.nextActions.join("\n")).toContain(
+      "/home/alex/.local/share/keyring"
+    );
+    expect(help.nextActions.join("\n")).toContain("secrets doctor");
+  });
+
+  it("passes Switchboard's own backend refusal through unchanged", () => {
+    const help = describeSecretBackendError(
+      new Error('Switchboard refused keychain backend "file" for local secrets.')
+    );
+    expect(help.summary).toContain("refused keychain backend");
+    expect(help.nextActions).toEqual([]);
+  });
+
+  it("falls back to a generic backend message for unknown errors", () => {
+    const help = describeSecretBackendError(new Error("socket hang up"), {
+      backendId: "native-macos"
+    });
+    expect(help.summary).toContain("native-macos");
+    expect(help.detail).toBe("socket hang up");
+    expect(help.nextActions).toContain(
+      "Run switchboard secrets doctor to check the backend."
+    );
   });
 });
