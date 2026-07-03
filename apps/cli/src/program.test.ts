@@ -2228,6 +2228,58 @@ describe("switchboard CLI program", () => {
     expect(parsed.backend.message).toContain("unsafe backend rejected");
   });
 
+  it("diagnoses a backend that initializes but cannot read/write", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+
+    // The backend initializes fine (diagnose ok) but every read/write throws —
+    // exactly the undecryptable-vault case a shallow check would miss.
+    const brokenStore: SecretStore = {
+      async get() {
+        throw new Error("Unsupported state or unable to authenticate data");
+      },
+      async set() {
+        throw new Error("Unsupported state or unable to authenticate data");
+      },
+      async delete() {},
+      async diagnose() {
+        return { ok: true, backend: { id: "file" } };
+      }
+    };
+    const output: string[] = [];
+    const program = createProgram({
+      secretStore: brokenStore,
+      writeOut: (message) => output.push(message)
+    });
+
+    // JSON: probe fails, help is attached, refs are not probed per-item.
+    await program.parseAsync(["--cwd", root, "secrets", "doctor", "--json"], {
+      from: "user"
+    });
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      backendReadWriteOk: boolean;
+      backendHelp?: { summary: string; nextActions: string[] };
+      missing: unknown[];
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.backendReadWriteOk).toBe(false);
+    expect(parsed.backendHelp?.summary).toContain("cannot decrypt");
+    expect(parsed.backendHelp?.nextActions.join("\n")).toContain("secrets doctor");
+    expect(parsed.missing).toEqual([]);
+
+    // Human: leads with the store problem + recovery, never the crashing
+    // "secrets set ... --value-stdin" loop.
+    await program.parseAsync(["--cwd", root, "secrets", "doctor"], {
+      from: "user"
+    });
+    const human = output[1] ?? "";
+    expect(human).toContain("read/write check failed");
+    expect(human).toContain("Secret store problem:");
+    expect(human).toContain("To fix:");
+    expect(human).not.toContain("secrets set");
+  });
+
   it("sets, lists, and removes secret refs without printing values", async () => {
     const root = makeTempProject();
     const output: string[] = [];
@@ -2543,12 +2595,21 @@ describe("switchboard CLI program", () => {
     expect(existsSync(join(root, "state", "secrets", "index.json"))).toBe(false);
     const text = [...output, ...errors].join("\n");
     expect(text).not.toContain("ghp_secret");
-    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+    const errorEnvelope = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      code: string;
+      message: string;
+      nextActions: string[];
+    };
+    expect(errorEnvelope).toMatchObject({
       ok: false,
       schemaVersion: "switchboard.error.v1",
-      code: "provider_setup_failed",
-      message: "keychain unavailable"
+      code: "provider_setup_failed"
     });
+    // The raw backend error is wrapped into an actionable, named message.
+    expect(errorEnvelope.message).toContain("secret store");
+    expect(errorEnvelope.message).toContain("keychain unavailable");
+    expect(errorEnvelope.nextActions.join("\n")).toContain("secrets doctor");
     expect(process.exitCode).toBe(1);
   });
 

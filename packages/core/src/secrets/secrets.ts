@@ -244,6 +244,109 @@ function messageFromUnknownError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+export const secretStoreProbeRef = "switchboard/diagnostics/probe";
+const secretStoreProbeValue = "switchboard-secret-store-probe";
+
+export interface SecretStoreProbeResult {
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Round-trips a throwaway value through the store so a health check reflects
+ * real read/write, not just backend initialization. Some backends init fine
+ * but cannot decrypt an existing vault; only a round-trip surfaces that.
+ */
+export async function probeSecretStore(
+  store: SecretStore
+): Promise<SecretStoreProbeResult> {
+  try {
+    await store.set(secretStoreProbeRef, secretStoreProbeValue);
+  } catch (error) {
+    return { ok: false, error: messageFromUnknownError(error) };
+  }
+
+  try {
+    const readBack = await store.get(secretStoreProbeRef);
+    if (readBack !== secretStoreProbeValue) {
+      return {
+        ok: false,
+        error: "the secret store returned a different value than was written"
+      };
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: messageFromUnknownError(error) };
+  } finally {
+    await store.delete(secretStoreProbeRef).catch(() => {});
+  }
+}
+
+export interface SecretBackendErrorHelp {
+  summary: string;
+  detail?: string;
+  nextActions: string[];
+}
+
+export interface SecretBackendErrorContext {
+  env?: NodeJS.ProcessEnv;
+  backendId?: string;
+  dataRoot?: string;
+  configPath?: string;
+}
+
+/**
+ * Maps a raw secret-backend failure into a human-actionable message. The most
+ * common opaque failure is a keyring vault that initializes but cannot be
+ * decrypted (created by another user/machine, or with a different passphrase),
+ * which surfaces as a bare "unable to authenticate data" crypto error.
+ */
+export function describeSecretBackendError(
+  error: unknown,
+  context: SecretBackendErrorContext = {}
+): SecretBackendErrorHelp {
+  const raw = messageFromUnknownError(error);
+  const requestedBackend = (context.env ?? process.env)[crossKeychainBackendEnv];
+  const backendLabel =
+    context.backendId ?? requestedBackend ?? "your OS keychain";
+
+  // Switchboard's own policy refusals already carry a clear message.
+  if (/refused keychain backend/i.test(raw)) {
+    return { summary: raw, nextActions: [] };
+  }
+
+  const looksUndecryptable =
+    /unable to authenticate data|unsupported state|bad decrypt|wrong final block length|error:0[0-9a-f]+/i.test(
+      raw
+    );
+  if (looksUndecryptable) {
+    const nextActions: string[] = [];
+    if (requestedBackend === "file" || context.backendId === "file") {
+      nextActions.push(
+        `Prefer your OS keychain: unset ${crossKeychainBackendEnv} and ${allowUnsafeSecretBackendsEnv}, then run the command again.`
+      );
+      if (context.dataRoot) {
+        nextActions.push(
+          `Or reset the fallback vault: remove ${context.dataRoot}${context.configPath ? ` and ${context.configPath}` : ""}, then run the command again.`
+        );
+      }
+    }
+    nextActions.push("Run switchboard secrets doctor to re-check the backend.");
+    return {
+      summary: `Your local secret store (${backendLabel}) started up but cannot decrypt its saved vault.`,
+      detail:
+        "The vault was most likely created by another user or machine, or with a different passphrase, so it cannot be unlocked here.",
+      nextActions
+    };
+  }
+
+  return {
+    summary: `Your local secret store (${backendLabel}) could not complete that operation.`,
+    detail: raw,
+    nextActions: ["Run switchboard secrets doctor to check the backend."]
+  };
+}
+
 export function createMemorySecretStore(
   initial: Record<string, string> = {}
 ): SecretStore {
