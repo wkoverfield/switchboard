@@ -37,6 +37,18 @@ describe("switchboard CLI program", () => {
     process.exitCode = undefined;
   });
 
+  it("describes itself in plain, human terms rather than internal jargon", () => {
+    const program = createProgram({ writeOut: () => {} });
+    const help = program.helpInformation();
+    // First contact should read like a benefit, not an architecture label.
+    expect(help).toContain("AI coding agents");
+    expect(help.toLowerCase()).not.toContain("mandate layer");
+    expect(help.toLowerCase()).not.toContain("mcp profile router");
+    // Front-door commands lead with what you get.
+    const scan = program.commands.find((command) => command.name() === "scan");
+    expect(scan?.description().toLowerCase()).toContain("exposed");
+  });
+
   it("prints status JSON for a repo config resolved with --cwd", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
