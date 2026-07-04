@@ -42,6 +42,7 @@ jobs:
       - run: pnpm smoke:harness-subagent-proof
       - run: pnpm smoke:vercel-preview-dogfood
       - run: pnpm smoke:package-pack
+      - run: pnpm smoke:grant-badge
       - run: pnpm smoke:mandate-lifecycle
       - run: pnpm smoke:mandate-lease-evidence
       - run: pnpm smoke:mandate-walkthrough

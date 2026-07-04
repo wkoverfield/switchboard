@@ -35,6 +35,7 @@ import {
   noopAuditLogger,
   namespacesForProfiles,
   normalizeMandateId,
+  parseMandateLease,
   readAuditLogEntries,
   renewMandate,
   renderSwitchboardClientConfig,
@@ -2712,6 +2713,198 @@ export function createProgram(io: ProgramIo = {}): Command {
         }
       }
     );
+
+  program
+    .command("grant")
+    .description("Give this repo's agent a scoped pass that expires on its own.")
+    .option("--as <role>", "who the agent is acting as", "agent")
+    .option("--for <duration>", "how long the pass lasts, like 30m, 2h, or 1d", "4h")
+    .option(
+      "--profiles <profiles>",
+      "comma-separated profiles to include (default: every profile in this repo)"
+    )
+    .option("--json", "print machine-readable JSON")
+    .action(
+      async (options: {
+        as: string;
+        for: string;
+        profiles?: string;
+        json?: boolean;
+      }) => {
+        const globalOptions = program.opts<{ cwd?: string }>();
+        const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
+        if (!validateLoadedConfigForJsonCommand(loaded, options.json)) {
+          return;
+        }
+
+        const allProfiles = Object.keys(loaded.config.profiles);
+        const profiles = options.profiles
+          ? parseCommaSeparatedList(options.profiles)
+          : allProfiles;
+        if (profiles.length === 0) {
+          writeCommandError({
+            json: options.json,
+            code: "grant_no_profiles",
+            message:
+              "this repo has no configured profiles yet, so there is nothing to grant.",
+            nextActions: [
+              "Run switchboard scan to see what's here, then switchboard import to set it up."
+            ]
+          });
+          return;
+        }
+        const missingProfiles = profiles.filter(
+          (profile) => !loaded.config.profiles[profile]
+        );
+        if (missingProfiles.length > 0) {
+          writeCommandError({
+            json: options.json,
+            code: "grant_profiles_not_found",
+            message: `these profiles were not found: ${missingProfiles.join(", ")}`,
+            nextActions: ["Run switchboard status to list configured profiles."]
+          });
+          return;
+        }
+
+        try {
+          parseMandateLease(options.for);
+        } catch (error) {
+          writeCommandError({
+            json: options.json,
+            code: "grant_invalid_duration",
+            message: messageFromError(error),
+            nextActions: ["Use a duration like 30m, 2h, or 1d."]
+          });
+          return;
+        }
+
+        const repoPath = configCwdBase(loaded, globalOptions.cwd);
+        let gitBinding: { worktreePath: string; branch: string } | undefined;
+        try {
+          gitBinding = resolveGitWorktreeBinding(repoPath);
+        } catch (error) {
+          writeCommandError({
+            json: options.json,
+            code: "grant_git_binding_failed",
+            message: messageFromError(error),
+            nextActions: ["Run switchboard grant from inside a git repository."]
+          });
+          return;
+        }
+        const branch = gitBinding?.branch ?? "main";
+
+        // Scope the pass to exactly the tools of the included profiles.
+        const namespaceByProfile = new Map(
+          namespacesForProfiles(loaded.config.profiles).map((entry) => [
+            entry.profile,
+            entry.namespace
+          ])
+        );
+        const allowedTools = profiles.map(
+          (profile) => `${namespaceByProfile.get(profile) ?? profile}_*`
+        );
+
+        const agentRole = options.as.trim() || "agent";
+        const path = io.mandateStorePath ?? resolveMandateStorePath();
+        const authoritySource: MandateAuthoritySource = { type: "manual", ref: "grant" };
+
+        try {
+          const mandate = await createMandate({
+            path,
+            task: `grant/${branch}`,
+            repoPath,
+            worktreePath: gitBinding?.worktreePath ?? repoPath,
+            branch,
+            agentRole,
+            profiles,
+            lease: options.for,
+            allowedTools,
+            createdBy: agentRole,
+            authoritySource
+          });
+          if (options.json) {
+            const mcpLaunch = createMandateMcpLaunchPayload(mandate);
+            writeOut(
+              JSON.stringify(
+                {
+                  path,
+                  mandate,
+                  workspaceLease: createWorkspaceLeasePayload(mandate, mcpLaunch)
+                },
+                null,
+                2
+              )
+            );
+          } else {
+            writeOut(
+              formatGrantBadge(mandate, {
+                secretRefs: grantSecretRefs(loaded.config, profiles)
+              })
+            );
+          }
+        } catch (error) {
+          const commandError = mandateCommandError(error, "grant_failed");
+          const alreadyGranted = /already exists/.test(commandError.message);
+          writeCommandError({
+            json: options.json,
+            code: alreadyGranted ? "grant_already_active" : commandError.code,
+            message: alreadyGranted
+              ? `this repo already has an active pass on "${branch}".`
+              : commandError.message,
+            nextActions: alreadyGranted
+              ? [
+                  "End it early with switchboard revoke, or wait for it to expire.",
+                  "See it with switchboard mandate status."
+                ]
+              : commandError.nextActions
+          });
+        }
+      }
+    );
+
+  program
+    .command("revoke")
+    .description("End this repo's active pass now, before it expires.")
+    .option("--json", "print machine-readable JSON")
+    .action(async (options: { json?: boolean }) => {
+      const globalOptions = program.opts<{ cwd?: string }>();
+      const repoPath = installTargetCwd(globalOptions.cwd);
+      const path = io.mandateStorePath ?? resolveMandateStorePath();
+      const active = (await listMandates({ path, repoPath })).find(
+        (mandate) => mandate.runtimeStatus === "active"
+      );
+      if (!active) {
+        writeCommandError({
+          json: options.json,
+          code: "revoke_nothing_active",
+          message: "this repo has no active pass to revoke.",
+          nextActions: ["Give one out with switchboard grant."]
+        });
+        return;
+      }
+      try {
+        const mandate = await updateMandateHandoff({
+          path,
+          id: active.id,
+          repoPath,
+          state: "cancelled",
+          summary: "revoked via switchboard revoke"
+        });
+        writeOut(
+          options.json
+            ? JSON.stringify({ path, mandate }, null, 2)
+            : `Revoked the pass for ${mandate.branch}. The agent's scoped access is off now.`
+        );
+      } catch (error) {
+        const commandError = mandateCommandError(error, "revoke_failed");
+        writeCommandError({
+          json: options.json,
+          code: commandError.code,
+          message: commandError.message,
+          nextActions: commandError.nextActions
+        });
+      }
+    });
 
   program
     .command("mandate")
@@ -7001,6 +7194,56 @@ function currentGitBranch(cwd: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function grantSecretRefs(
+  config: SwitchboardConfig,
+  profiles: string[]
+): string[] {
+  const included = new Set(profiles);
+  const refs = collectSecretRefUsages(config)
+    .filter((usage) => included.has(usage.profileName))
+    .map((usage) => usage.ref);
+  return [...new Set(refs)];
+}
+
+function formatGrantBadge(
+  mandate: MandateWithStatus,
+  options: { secretRefs: string[] }
+): string {
+  const repoName = basename(mandate.repoPath);
+  const reach =
+    mandate.allowedTools.length > 0 ? mandate.allowedTools : ["everything"];
+  const body: string[] = [
+    "",
+    `  ${repoName} · ${mandate.branch}`,
+    `  acting as ${mandate.agentRole}`,
+    "",
+    "  can reach"
+  ];
+  for (const tool of reach) {
+    body.push(`    → ${tool}`);
+  }
+  body.push("  everything else denied", "");
+  if (options.secretRefs.length > 0) {
+    body.push(
+      `  secrets  ${options.secretRefs.map((ref) => `🔒 ${ref}`).join("   ")}`,
+      "  held in your keychain · never printed, never committed",
+      ""
+    );
+  }
+  body.push(
+    `  expires in ${mandate.lease}   (${mandate.expiresAt})`,
+    "  ends on its own · revoke early with: switchboard revoke",
+    `  pass id ${mandate.id}`,
+    ""
+  );
+
+  // Left-railed card so emoji display width can't break a right border.
+  const title = "SWITCHBOARD · PASS GRANTED";
+  const rule = `╭─ ${title} ${"─".repeat(Math.max(4, 48 - title.length))}`;
+  const lines = [rule, ...body.map((line) => `│${line}`), `╰${"─".repeat(rule.length - 1)}`];
+  return lines.join("\n");
 }
 
 function formatMandateCreated(path: string, mandate: MandateWithStatus): string {
