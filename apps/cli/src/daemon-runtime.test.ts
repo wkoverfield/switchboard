@@ -161,9 +161,9 @@ describe("daemon runtime mandate context", () => {
       id: "list",
       ok: false,
       error: expect.stringContaining(
-        'mandate "fix-ci" is scoped to branch "fix/ci", but current git branch is "main"'
+        'pass "fix-ci" is scoped to branch "fix/ci", but current git branch is "main"'
       ),
-      nextActions: ["git switch fix/ci", "switchboard mandate status fix-ci"]
+      nextActions: ["git switch fix/ci", "switchboard pass status fix-ci"]
     });
   });
 
@@ -185,9 +185,9 @@ describe("daemon runtime mandate context", () => {
       id: "call",
       ok: false,
       error: expect.stringContaining(
-        'mandate "fix-ci" is scoped to branch "fix/ci", but current git branch is "main"'
+        'pass "fix-ci" is scoped to branch "fix/ci", but current git branch is "main"'
       ),
-      nextActions: ["git switch fix/ci", "switchboard mandate status fix-ci"]
+      nextActions: ["git switch fix/ci", "switchboard pass status fix-ci"]
     });
   });
 
@@ -206,10 +206,10 @@ describe("daemon runtime mandate context", () => {
     ).resolves.toMatchObject({
       id: "expired",
       ok: false,
-      error: 'mandate "fix-ci" is expired',
+      error: 'pass "fix-ci" is expired',
       nextActions: [
-        "switchboard mandate renew fix-ci --lease 2h",
-        "switchboard mandate status fix-ci"
+        "switchboard pass renew fix-ci --lease 2h",
+        "switchboard pass status fix-ci"
       ]
     });
   });
@@ -231,7 +231,7 @@ describe("daemon runtime mandate context", () => {
     ).resolves.toMatchObject({
       id: "call",
       ok: false,
-      error: 'tool "github_findu_whoami" is not allowed by mandate policy'
+      error: 'tool "github_findu_whoami" is not allowed by pass policy'
     });
     await expect(
       readAuditLogEntries({ path: resolveAuditLogPath(), mandateId: "fix-ci" })
@@ -282,11 +282,11 @@ describe("daemon runtime mandate context", () => {
     ).resolves.toMatchObject({
       id: "call",
       ok: false,
-      error: 'tool "github_findu_whoami" is not allowed by mandate policy',
+      error: 'tool "github_findu_whoami" is not allowed by pass policy',
       mcpError: {
         schemaVersion: "switchboard.mcp-error.v1",
         code: "denied",
-        message: 'tool "github_findu_whoami" is not allowed by mandate policy',
+        message: 'tool "github_findu_whoami" is not allowed by pass policy',
         nextActions: [],
         mandateId: "fix-ci",
         toolName: "github_findu_whoami"
@@ -312,7 +312,7 @@ describe("daemon runtime mandate context", () => {
       id: "call",
       ok: false,
       error:
-        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 is pending; inspect it with: switchboard approvals --mandate fix-ci; approve it with: switchboard approve approval-1 --reason "<why this is safe>"; or deny it with: switchboard deny approval-1 --reason "<why this should not run>"; then retry the original github_findu_echo tool call if approved',
+        'tool "github_findu_echo" requires approval by pass gate "gate-1"; approval request approval-1 is pending; inspect it with: switchboard approvals --mandate fix-ci; approve it with: switchboard approve approval-1 --reason "<why this is safe>"; or deny it with: switchboard deny approval-1 --reason "<why this should not run>"; then retry the original github_findu_echo tool call if approved',
       mcpError: {
         schemaVersion: "switchboard.mcp-error.v1",
         code: "approval_required",
@@ -428,7 +428,7 @@ describe("daemon runtime mandate context", () => {
       id: "call",
       ok: false,
       error:
-        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 was denied.',
+        'tool "github_findu_echo" requires approval by pass gate "gate-1"; approval request approval-1 was denied.',
       mcpError: {
         schemaVersion: "switchboard.mcp-error.v1",
         code: "approval_denied",
@@ -478,7 +478,7 @@ describe("daemon runtime mandate context", () => {
       id: "call",
       ok: false,
       error:
-        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 is stale because the client disconnected.'
+        'tool "github_findu_echo" requires approval by pass gate "gate-1"; approval request approval-1 is stale because the client disconnected.'
     });
     await abort;
     await expect(
@@ -513,7 +513,7 @@ describe("daemon runtime mandate context", () => {
       id: "call",
       ok: false,
       error:
-        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 is stale. Retry the original gated tool call to create a fresh approval request.'
+        'tool "github_findu_echo" requires approval by pass gate "gate-1"; approval request approval-1 is stale. Retry the original gated tool call to create a fresh approval request.'
     });
     await stale;
   });
@@ -537,7 +537,7 @@ describe("daemon runtime mandate context", () => {
       id: "call",
       ok: false,
       error:
-        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 is pending; inspect it with: switchboard approvals --mandate fix-ci; approve it with: switchboard approve approval-1 --reason "<why this is safe>"; or deny it with: switchboard deny approval-1 --reason "<why this should not run>"; then retry the original github_findu_echo tool call if approved'
+        'tool "github_findu_echo" requires approval by pass gate "gate-1"; approval request approval-1 is pending; inspect it with: switchboard approvals --mandate fix-ci; approve it with: switchboard approve approval-1 --reason "<why this is safe>"; or deny it with: switchboard deny approval-1 --reason "<why this should not run>"; then retry the original github_findu_echo tool call if approved'
     });
   });
 
@@ -666,7 +666,7 @@ describe("daemon runtime mandate context", () => {
       id: "call",
       ok: false,
       error:
-        'tool "github_findu_echo" requires approval by mandate gate "gate-1"; approval request approval-1 is pending; inspect it with: switchboard approvals --mandate fix-ci; approve it with: switchboard approve approval-1 --reason "<why this is safe>"; or deny it with: switchboard deny approval-1 --reason "<why this should not run>"; then retry the original github_findu_echo tool call if approved'
+        'tool "github_findu_echo" requires approval by pass gate "gate-1"; approval request approval-1 is pending; inspect it with: switchboard approvals --mandate fix-ci; approve it with: switchboard approve approval-1 --reason "<why this is safe>"; or deny it with: switchboard deny approval-1 --reason "<why this should not run>"; then retry the original github_findu_echo tool call if approved'
     });
   });
 });

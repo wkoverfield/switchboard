@@ -446,7 +446,7 @@ async function listConfiguredTools(
     return {
       id,
       ok: false,
-      error: routerResult.error,
+      error: mandateMessageInPassVocabulary(routerResult.error),
       nextActions: routerResult.nextActions ?? [],
       mcpError: createStructuredMcpError({
         message: routerResult.error,
@@ -470,7 +470,7 @@ async function listConfiguredTools(
     return {
       id,
       ok: false,
-      error: message,
+      error: mandateMessageInPassVocabulary(message),
       nextActions: daemonRecoveryNextActions(message),
       mcpError: createStructuredMcpError({
         message,
@@ -507,7 +507,7 @@ async function callConfiguredTool(
     return {
       id,
       ok: false,
-      error: routerResult.error,
+      error: mandateMessageInPassVocabulary(routerResult.error),
       nextActions: routerResult.nextActions ?? [],
       mcpError: createStructuredMcpError({
         message: routerResult.error,
@@ -615,10 +615,11 @@ async function callConfiguredTool(
               return {
                 id,
                 ok: false,
-                error:
+                error: mandateMessageInPassVocabulary(
                   staleRequest.runtimeStatus === "stale"
                     ? error
-                    : `${policyDecision.reason}; approval request ${request.id} is ${staleRequest.runtimeStatus}.`,
+                    : `${policyDecision.reason}; approval request ${request.id} is ${staleRequest.runtimeStatus}.`
+                ),
                 mcpError: createStructuredMcpError({
                   code: "approval_required",
                   message:
@@ -648,7 +649,7 @@ async function callConfiguredTool(
               return {
                 id,
                 ok: false,
-                error,
+                error: mandateMessageInPassVocabulary(error),
                 mcpError: createStructuredMcpError({
                   code: "approval_denied",
                   message: error,
@@ -671,7 +672,7 @@ async function callConfiguredTool(
               return {
                 id,
                 ok: false,
-                error,
+                error: mandateMessageInPassVocabulary(error),
                 mcpError: createStructuredMcpError({
                   code: "approval_required",
                   message: error,
@@ -694,7 +695,7 @@ async function callConfiguredTool(
               return {
                 id,
                 ok: false,
-                error,
+                error: mandateMessageInPassVocabulary(error),
                 mcpError: createStructuredMcpError({
                   code: "approval_required",
                   message: error,
@@ -740,14 +741,16 @@ async function callConfiguredTool(
                 })
               }
             : {}),
-          error: approvalRequestId
-            ? approvalRequiredErrorMessage({
-                reason: policyDecision.reason,
-                mandateId: routerResult.mandate.id,
-                toolName: name,
-                approvalRequestId
-              })
-            : policyDecision.reason,
+          error: mandateMessageInPassVocabulary(
+            approvalRequestId
+              ? approvalRequiredErrorMessage({
+                  reason: policyDecision.reason,
+                  mandateId: routerResult.mandate.id,
+                  toolName: name,
+                  approvalRequestId
+                })
+              : policyDecision.reason
+          ),
           mcpError: createStructuredMcpError({
             code: approvalRequestId ? "approval_required" : "denied",
             message: approvalRequestId
@@ -786,7 +789,7 @@ async function callConfiguredTool(
     return {
       id,
       ok: false,
-      error: message,
+      error: mandateMessageInPassVocabulary(message),
       mcpError: createStructuredMcpError({
         message,
         nextActions: daemonRecoveryNextActions(message),
@@ -828,7 +831,7 @@ function createStructuredMcpError(options: {
   return {
     schemaVersion: mcpErrorSchemaVersion,
     code: options.code ?? inferMcpErrorCode(options.message),
-    message: options.message,
+    message: mandateMessageInPassVocabulary(options.message),
     nextActions: options.nextActions ?? daemonRecoveryNextActions(options.message),
     ...(options.mandateId ? { mandateId: options.mandateId } : {}),
     ...(options.toolName ? { toolName: options.toolName } : {}),
@@ -836,6 +839,16 @@ function createStructuredMcpError(options: {
       ? { approvalRequestId: options.approvalRequestId }
       : {})
   };
+}
+
+// Core error and policy prose still says "mandate" (packages/core is
+// unchanged); rewrite the outgoing agent-facing text to the "pass"
+// vocabulary at the response boundary. Classifiers (inferMcpErrorCode,
+// daemonRecoveryNextActions) and audit log entries keep the raw message.
+// The lookbehind spares flag tokens like `--mandate`, which are still the
+// real CLI flag names.
+function mandateMessageInPassVocabulary(message: string): string {
+  return message.replace(/(?<!-)\bmandate\b/g, "pass");
 }
 
 function inferMcpErrorCode(message: string): StructuredMcpError["code"] {
@@ -998,8 +1011,8 @@ function daemonRecoveryNextActions(message: string): string[] {
   const expired = /^mandate "([^"]+)" is expired$/.exec(message);
   if (expired?.[1]) {
     return [
-      `switchboard mandate renew ${expired[1]} --lease 2h`,
-      `switchboard mandate status ${expired[1]}`
+      `switchboard pass renew ${expired[1]} --lease 2h`,
+      `switchboard pass status ${expired[1]}`
     ];
   }
 
@@ -1039,7 +1052,7 @@ async function routerForConfiguredProfiles(
           error: `mandate "${mandate.id}" is scoped to branch "${mandate.branch}", but current git branch is "${gitBinding.branch}" in ${gitBinding.worktreePath}`,
           nextActions: [
             `git switch ${mandate.branch}`,
-            `switchboard mandate status ${mandate.id}`
+            `switchboard pass status ${mandate.id}`
           ]
         };
       }
