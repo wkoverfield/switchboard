@@ -11,7 +11,11 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import process from "node:process";
 
-const packageSpec = process.argv[2] ?? "@switchboard-mcp/cli@0.1.2";
+const packageSpec = process.argv[2] ?? "@switchboard-mcp/cli@latest";
+// The expected version comes from the spec (e.g. ...@0.1.3); "latest" skips
+// the exact-version assertion since it resolves to whatever npm serves.
+const expectedVersion = packageSpec.split("@").pop();
+const expectVersionMatch = /^\d+\.\d+\.\d+/.test(expectedVersion ?? "");
 const repo = resolve(import.meta.dirname, "..", "..");
 const outputRoot = join(repo, ".switchboard-evals");
 const root = mkdtempSync(join(tmpdir(), "switchboard-published-alpha-"));
@@ -29,7 +33,12 @@ try {
   installPublishedCli();
   const cliPath = join(installDir, "node_modules", ".bin", "switchboard");
   score("published CLI installed", existsSync(cliPath));
-  score("published CLI reports version", runCli(["--version"]).stdout.trim() === "0.1.2");
+  if (expectVersionMatch) {
+    score(
+      "published CLI reports version",
+      runCli(["--version"]).stdout.trim() === expectedVersion
+    );
+  }
 
   const cleanRepo = createRepo("clean", "main");
   const cleanScan = runCliJson(["--cwd", cleanRepo, "scan", "--json"]);
@@ -106,7 +115,10 @@ try {
     "switchboard",
     "--version"
   ]).stdout.trim();
-  score("npx/npm exec works", npxVersion === "0.1.2");
+  score(
+    "npx/npm exec works",
+    expectVersionMatch ? npxVersion === expectedVersion : npxVersion.length > 0
+  );
 
   score("transcript avoids raw secret", !transcriptText().includes(rawSecret));
 

@@ -120,7 +120,14 @@ import {
   type StopDaemonResult
 } from "./daemon-runtime.js";
 
-const version = "0.1.2";
+// Read the version from package.json so it never drifts from the published
+// package. "../package.json" resolves the same from dist/program.js and from
+// src/program.ts (both sit one level under the package root).
+const version = (
+  JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8")
+  ) as { version: string }
+).version;
 const mandateMcpLaunchSchemaVersion = "switchboard.mcp-launch.v1";
 const workspaceLeaseSchemaVersion = "switchboard.workspace-lease.v1";
 const mandateStatusSchemaVersion = "switchboard.mandate-status.v1";
