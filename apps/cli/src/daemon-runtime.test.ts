@@ -291,6 +291,24 @@ describe("daemon runtime mandate context", () => {
     });
   });
 
+  it("auto-binds the live pass when no mandate is given (user-level install)", async () => {
+    // The repo has one active pass. An agent connecting with NO mandateId
+    // should still be scoped by it, so a user-level install works without
+    // threading --mandate per repo.
+    const root = await makePolicyRepo();
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({ id: "auto", type: "list_tools" }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "auto",
+      ok: true,
+      tools: [expect.objectContaining({ name: "github_findu_echo" })]
+    });
+  });
+
   it("rejects denied daemon calls before opening upstream sessions", async () => {
     const root = await makeBrokenPolicyRepo();
 
