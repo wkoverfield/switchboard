@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6
+
+- Added the `mcpName` field to the published package so the official MCP registry can validate npm ownership.
+
 ## 0.1.5
 
 - Multiplexed the daemon: one daemon serves many repos concurrently, routing each request by its own cwd. Removes the single-repo "daemon is running for X" collision.
