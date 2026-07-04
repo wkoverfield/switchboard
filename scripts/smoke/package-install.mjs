@@ -1,22 +1,31 @@
 #!/usr/bin/env node
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import process from "node:process";
+
+// Derive versions from package.json so a version bump never breaks this smoke.
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const versionOf = (dir) =>
+  JSON.parse(readFileSync(join(repoRoot, dir, "package.json"), "utf8")).version;
+const coreVersion = versionOf("packages/core");
+const runtimeVersion = versionOf("packages/mcp-runtime");
+const cliVersion = versionOf("apps/cli");
 
 const packages = [
   {
     filter: "@switchboard-mcp/core",
-    tarball: "switchboard-mcp-core-0.1.2.tgz"
+    tarball: `switchboard-mcp-core-${coreVersion}.tgz`
   },
   {
     filter: "@switchboard-mcp/mcp-runtime",
-    tarball: "switchboard-mcp-mcp-runtime-0.1.2.tgz"
+    tarball: `switchboard-mcp-mcp-runtime-${runtimeVersion}.tgz`
   },
   {
     filter: "@switchboard-mcp/cli",
-    tarball: "switchboard-mcp-cli-0.1.2.tgz"
+    tarball: `switchboard-mcp-cli-${cliVersion}.tgz`
   }
 ];
 
@@ -44,15 +53,15 @@ try {
         dependencies: {
           "@switchboard-mcp/core": `file:${join(
             packDir,
-            "switchboard-mcp-core-0.1.2.tgz"
+            `switchboard-mcp-core-${coreVersion}.tgz`
           )}`,
           "@switchboard-mcp/mcp-runtime": `file:${join(
             packDir,
-            "switchboard-mcp-mcp-runtime-0.1.2.tgz"
+            `switchboard-mcp-mcp-runtime-${runtimeVersion}.tgz`
           )}`,
           "@switchboard-mcp/cli": `file:${join(
             packDir,
-            "switchboard-mcp-cli-0.1.2.tgz"
+            `switchboard-mcp-cli-${cliVersion}.tgz`
           )}`
         }
       },

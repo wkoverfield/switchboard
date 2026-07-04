@@ -1,25 +1,37 @@
 #!/usr/bin/env node
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import process from "node:process";
+
+// Derive versions from package.json so a version bump never breaks this smoke.
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const versionOf = (dir) =>
+  JSON.parse(readFileSync(join(repoRoot, dir, "package.json"), "utf8")).version;
+const coreVersion = versionOf("packages/core");
+const runtimeVersion = versionOf("packages/mcp-runtime");
+const cliVersion = versionOf("apps/cli");
 
 const packages = [
   {
     filter: "@switchboard-mcp/core",
     expectedName: "@switchboard-mcp/core",
-    expectedTarball: "switchboard-mcp-core-0.1.2.tgz"
+    version: coreVersion,
+    expectedTarball: `switchboard-mcp-core-${coreVersion}.tgz`
   },
   {
     filter: "@switchboard-mcp/mcp-runtime",
     expectedName: "@switchboard-mcp/mcp-runtime",
-    expectedTarball: "switchboard-mcp-mcp-runtime-0.1.2.tgz"
+    version: runtimeVersion,
+    expectedTarball: `switchboard-mcp-mcp-runtime-${runtimeVersion}.tgz`
   },
   {
     filter: "@switchboard-mcp/cli",
     expectedName: "@switchboard-mcp/cli",
-    expectedTarball: "switchboard-mcp-cli-0.1.2.tgz"
+    version: cliVersion,
+    expectedTarball: `switchboard-mcp-cli-${cliVersion}.tgz`
   }
 ];
 
@@ -51,7 +63,7 @@ try {
       run("tar", ["-xOf", tarball, "package/package.json"])
     );
     assert(packageJson.name === packageSpec.expectedName, "package name");
-    assert(packageJson.version === "0.1.2", "package version");
+    assert(packageJson.version === packageSpec.version, "package version");
     assert(packageJson.repository?.url, "repository metadata");
     assert(packageJson.license === "MIT", "license metadata");
     assert(
@@ -61,11 +73,12 @@ try {
     if (packageSpec.expectedName === "@switchboard-mcp/cli") {
       assert(packageJson.bin?.switchboard === "./dist/index.js", "cli bin");
       assert(
-        packageJson.dependencies?.["@switchboard-mcp/core"] === "0.1.2",
+        packageJson.dependencies?.["@switchboard-mcp/core"] === coreVersion,
         "cli core dependency is publishable"
       );
       assert(
-        packageJson.dependencies?.["@switchboard-mcp/mcp-runtime"] === "0.1.2",
+        packageJson.dependencies?.["@switchboard-mcp/mcp-runtime"] ===
+          runtimeVersion,
         "cli runtime dependency is publishable"
       );
     }
