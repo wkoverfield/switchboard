@@ -5631,6 +5631,44 @@ describe("switchboard CLI program", () => {
     expect(parsed.activePassesError).toBeTruthy();
   });
 
+  it("grant badge colors only when asked, and stays byte-plain otherwise", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const output: string[] = [];
+    const colored = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath: join(root, "state", "mandates.json"),
+      color: true
+    });
+    await colored.parseAsync(["--cwd", root, "grant", "--for", "2h"], {
+      from: "user"
+    });
+    const badge = output[0] ?? "";
+    expect(badge).toContain("[");
+    // Substring assertions must survive coloring: whole phrases are
+    // wrapped, never split mid-phrase.
+    expect(badge).toContain("everything else denied");
+    expect(badge).toContain("expires in 2h");
+    // The frame stays aligned: top rule and bottom rule have the same
+    // visible width once ANSI codes are stripped.
+    // eslint-disable-next-line no-control-regex
+    const stripped = badge.replace(/\[[0-9;]*m/g, "").split("\n");
+    const top = stripped[0] ?? "";
+    const bottom = stripped.find((line) => line.startsWith("╰")) ?? "";
+    expect(bottom.length).toBe(top.length);
+
+    const plainOutput: string[] = [];
+    const plain = createProgram({
+      writeOut: (message) => plainOutput.push(message),
+      mandateStorePath: join(root, "state", "mandates2.json"),
+      color: false
+    });
+    await plain.parseAsync(["--cwd", root, "grant", "--for", "2h"], {
+      from: "user"
+    });
+    expect(plainOutput[0]).not.toContain("[");
+  });
+
   it("grant says honestly when no client enforces the pass yet", async () => {
     const root = makeTempProject();
     writeMandateConfig(root);
