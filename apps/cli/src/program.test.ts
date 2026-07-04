@@ -5026,6 +5026,53 @@ describe("switchboard CLI program", () => {
     });
   });
 
+  it("prints a user-scoped install command that serves every repo", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(
+      ["--cwd", root, "install", "claude", "--scope", "user", "--json"],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      client: string;
+      scope: string;
+      addCommand: string[];
+    };
+    expect(parsed.client).toBe("claude");
+    expect(parsed.scope).toBe("user");
+    // User scope registers one server with `claude mcp add --scope user`, and
+    // the server runs with no --cwd and no --mandate (it resolves the repo and
+    // pass at launch), so it serves every repo.
+    expect(parsed.addCommand.slice(0, 5)).toEqual([
+      "claude",
+      "mcp",
+      "add",
+      "--scope",
+      "user"
+    ]);
+    expect(parsed.addCommand).toContain("mcp");
+    expect(parsed.addCommand).not.toContain("--cwd");
+    expect(parsed.addCommand).not.toContain("--mandate");
+  });
+
+  it("rejects an unknown install scope", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+    const errors: string[] = [];
+    const program = createProgram({ writeErr: (message) => errors.push(message) });
+    await program.parseAsync(
+      ["--cwd", root, "install", "claude", "--scope", "bogus"],
+      { from: "user" }
+    );
+    expect(errors).toEqual(["error: --scope must be project or user"]);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+  });
+
   it("uses the source checkout entrypoint for install snippets run through pnpm switchboard", async () => {
     const root = makeTempProject();
     writeStdioConfig(root);
