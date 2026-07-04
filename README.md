@@ -205,6 +205,9 @@ pnpm switchboard --help
 pnpm test
 ```
 
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md), and report
+vulnerabilities privately per [SECURITY.md](SECURITY.md).
+
 Smoke tests and fresh-agent evals live in `scripts/`; CI runs the full set.
 Deeper docs: [quickstart](docs/install/quickstart.md),
 [trust model](docs/security/trust-model.md),
