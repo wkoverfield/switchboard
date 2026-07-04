@@ -1,0 +1,35 @@
+name: Bug report
+description: Something broke that the other templates do not cover.
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you run, what did you expect, what did you get?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Smallest repro
+      description: The shortest sequence of commands that shows the problem.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Redacted doctor output
+      description: Paste `switchboard doctor` output. Remove anything private. Never paste real tokens, even expired ones.
+      render: shell
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Version and platform
+      placeholder: "switchboard 0.1.2, macOS 15, Node 22"
+    validations:
+      required: true
