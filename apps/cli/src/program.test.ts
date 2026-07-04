@@ -5655,6 +5655,7 @@ describe("switchboard CLI program", () => {
     const stripped = badge.replace(/\[[0-9;]*m/g, "").split("\n");
     const top = stripped[0] ?? "";
     const bottom = stripped.find((line) => line.startsWith("╰")) ?? "";
+    expect(bottom).not.toBe("");
     expect(bottom.length).toBe(top.length);
 
     const plainOutput: string[] = [];
