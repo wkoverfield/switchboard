@@ -1,63 +1,200 @@
 # Switchboard
 
-Repo-scoped tool authority for coding agents.
+A firewall and password manager for your AI coding agents.
 
 [![CI](https://github.com/wkoverfield/switchboard/actions/workflows/ci.yml/badge.svg)](https://github.com/wkoverfield/switchboard/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@switchboard-mcp/cli)](https://www.npmjs.com/package/@switchboard-mcp/cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 
-Switchboard looks at a repo, finds scattered Claude/Codex MCP config, imports
-or sets up the tools that belong there, and gives agents bounded authority
-instead of permanent mystery access to your whole developer environment.
+Switchboard controls what Claude Code and Codex can reach in a repo. It finds
+the MCP servers and tokens your agents can already touch, gets secrets out of
+plaintext config and behind named keychain refs, and puts each agent on a
+scoped pass that expires on its own.
 
-Public alpha status: Switchboard is open source under the MIT license and the
-CLI is published as `@switchboard-mcp/cli`. The product is still alpha: expect
-rough edges, local-first workflows, and conservative safety claims.
+```text
+$ switchboard grant --for 4h
 
-The first 90-second alpha path should be simple:
-
-```bash
-switchboard scan
-switchboard import --dry-run
-switchboard import --write --cleanup-client
-switchboard doctor
-switchboard setup github-ci
-switchboard pass create --from github-ci --json
+╭─ SWITCHBOARD · PASS GRANTED ──────────────────────
+│
+│  acme-app · main
+│  acting as agent
+│
+│  can reach
+│    → github_ci_*
+│    → vercel_preview_*
+│  everything else denied
+│
+│  secrets  🔒 github/ci/token   🔒 vercel/preview/token
+│  held in your keychain · never printed, never committed
+│
+│  expires in 4h   (2026-07-04T07:35:49.259Z)
+│  ends on its own · revoke early with: switchboard revoke
+│  pass id grant-main
+│
+╰───────────────────────────────────────────────────
 ```
 
-Import/cleanup is the front door: one project Switchboard endpoint, local
-`secretRef`s, backups, rollback commands, and clear authority status. Passes
-and workspace leases are the deeper layer: temporary, task-scoped records that
-bind repo, worktree, branch, agent role, profiles, allowed/denied tools,
-approval gates, lease expiry, audit state, and a harness-friendly MCP launch
-payload.
+Everything runs locally. No account, no hosted service, no telemetry.
 
-Backup hygiene: Switchboard's cleaned active config is `secretRef`-based, but
-rollback backups are exact copies of the original client config. If those files
-already contained raw tokens or env values, the backups may contain them too;
-keep backups local/private and rotate or remove old secrets after migration.
+## What it does
 
-Switchboard is not a sandbox. It controls routed Switchboard MCP and
-`switchboard run` paths. Direct MCP routes, raw env vars, browser sessions,
-provider CLIs, and unrestricted shell access can bypass it unless you clean
-them up or intentionally mark them as accepted risk.
+- `switchboard scan` shows which MCP servers and tokens agents can reach in
+  this repo, and which routes bypass Switchboard entirely.
+- `switchboard import` consolidates scattered Claude/Codex MCP config into one
+  Switchboard route, with timestamped backups and exact rollback commands.
+- Secrets live in your OS keychain as named refs. Config files carry
+  `secretRef: "github/ci/token"`, never the token itself.
+- `switchboard grant` puts the agent on a pass: named tools reachable,
+  everything else denied, gone in a few hours.
+- `switchboard status` answers whether a pass is live right now.
+  `switchboard revoke` ends one early.
+- Every tool call routed through Switchboard lands in a local audit log.
+  `switchboard logs` reads it.
 
 ## Install
 
-Install from npm:
-
 ```bash
 npm install -g @switchboard-mcp/cli
-switchboard --help
 ```
 
-For one-off or harness use without a global install:
+Or without installing:
 
 ```bash
-npx -y @switchboard-mcp/cli@latest --help
+npx -y @switchboard-mcp/cli@latest scan
 ```
 
-To work from source:
+Requires Node 22 or newer. Daily use is on macOS, CI runs on Linux, and a
+Windows keychain backend exists but gets less exercise.
+
+## Quickstart
+
+Start in a repo where your agents already work:
+
+```text
+$ switchboard scan
+
+This looks like acme-app.
+
+Detected:
+- Codex Switchboard route missing
+- Claude Switchboard route missing
+- Claude direct MCP server "github" detected
+
+Authority bypasses:
+  high claude:github (github; direct-mcp-server, secret-env-name)
+
+Warnings:
+- 1 direct MCP bypass finding(s), including 1 high-risk finding(s), were detected.
+```
+
+That high-risk finding is a GitHub token sitting in plaintext in `.mcp.json`.
+Move it behind Switchboard:
+
+```bash
+switchboard import --dry-run          # see the plan first
+switchboard import --write --cleanup-client
+switchboard secrets set <ref>         # store the token; import prints the exact command
+switchboard install claude --write    # route the agent through Switchboard
+```
+
+Import rewrites client config to a single Switchboard route, replaces the
+plaintext token with a named keychain ref, and leaves a backup plus the exact
+rollback command. Import never reads secret values itself; the `secrets set`
+step is where the token actually enters your keychain. Then scope the agent:
+
+```bash
+switchboard grant --for 4h
+```
+
+You get the pass above. When you want it gone early:
+
+```text
+$ switchboard revoke
+Revoked pass grant-main (main). The agent's scoped access is off now.
+```
+
+`switchboard doctor` tells you the next thing to fix at any point. If a repo
+has no MCP config yet, `switchboard setup github-ci` starts from a safe
+provider template instead.
+
+## What Switchboard does not do
+
+- **It is not a sandbox.** Switchboard governs the paths routed through it:
+  Switchboard MCP endpoints and `switchboard run`. An agent with raw shell
+  access, a provider CLI, a browser session, or a direct MCP route can bypass
+  it. `switchboard scan` reports those bypass routes so you can clean them up
+  or accept them deliberately.
+- **Backups keep your old config exactly as it was.** If a token was in
+  plaintext before import, the backup still contains it. Rotate old tokens
+  after migrating, and keep backups private.
+- **A pass only binds routed agents.** `switchboard grant` says so itself when
+  no client is wired up yet, and `switchboard install <claude|codex>` closes
+  the gap.
+- **It is alpha software.** Local-first workflows, conservative claims, rough
+  edges. The pass and audit contracts are versioned JSON, but expect change.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `switchboard scan` | Show what agents can reach in this repo, including bypass routes |
+| `switchboard import` | Consolidate Claude/Codex MCP config into one guarded route |
+| `switchboard grant` / `revoke` | Give the repo's agent an expiring scoped pass, or end it now |
+| `switchboard status` | Is a pass live right now, and which config is active |
+| `switchboard doctor` | Check the setup and print the next thing to fix |
+| `switchboard setup <preset>` | Guided setup from a provider safety template (`switchboard presets list` shows them) |
+| `switchboard auth <preset>` | Store the provider token for a preset in the keychain |
+| `switchboard secrets` | Set, list, remove, and doctor named secret refs |
+| `switchboard run` | Run an allowed provider command with pass-scoped credentials and audit |
+| `switchboard install <client>` | Route Claude Code or Codex through Switchboard, with backup |
+| `switchboard pass` | Create and inspect task-scoped passes with leases, gates, handoffs |
+| `switchboard approvals` | Review and decide approval-gated tool calls |
+| `switchboard tools` | List the tool surface a pass exposes |
+| `switchboard logs` | Read the local audit log |
+| `switchboard audit` | Repo authority posture report, exportable as JSONL |
+
+Commands that report state take `--json` for scripts and harnesses, with
+versioned schemas. `switchboard <command> --help` has the rest.
+
+## How it works
+
+Switchboard reads layered YAML config (global, then `.switchboard.yaml`, then
+`.switchboard.local.yaml`). Each profile names an upstream MCP server and the
+secret refs it needs. At runtime, Switchboard mounts permitted profiles as one
+MCP endpoint, resolves secret refs from the OS keychain only at launch, and
+namespaces every tool so a pass can allow `github_ci_*` and deny everything
+else. Passes, approvals, and audit entries are plain local files that reference
+secrets by name, never by value.
+
+Secret storage uses OS keychain backends by default. Plaintext fallbacks exist
+for dev machines and CI, and require an explicit
+`SWITCHBOARD_ALLOW_UNSAFE_SECRET_BACKENDS=1` opt-in.
+
+## For harnesses and subagent systems
+
+`switchboard pass create --from github-ci --json` returns a
+`workspaceLease.mcpLaunch` payload: the exact command to launch a
+pass-scoped stdio MCP endpoint, plus the pass policy and lease. Switchboard
+grants and audits authority; your harness owns scheduling, retries, and agent
+processes. JSON contracts are documented in
+[docs/use-cases/harness-json-contracts.md](docs/use-cases/harness-json-contracts.md).
+
+## Alternatives
+
+- **Project MCP config alone** works, but it is static wiring with tokens in
+  files. Switchboard imports that wiring, moves the tokens, and adds scoped
+  expiring access on top.
+- **Docker MCP Gateway and MCP runtimes** run and package MCP servers well.
+  Switchboard is the local authority layer above them, deciding which profile,
+  tools, and lease an agent gets for a task. A gateway can be an upstream
+  behind a Switchboard profile.
+- **Hosted tool platforms** (Composio, Arcade) offer managed OAuth and broad
+  SaaS coverage. Switchboard is local-first for coding-agent repos: local
+  secrets, local audit, no hosted dependency.
+- **Just giving the agent a token** is fast until the token is broad, live, or
+  copied into the wrong file. That is the failure mode Switchboard exists for.
+
+## Development
 
 ```bash
 git clone https://github.com/wkoverfield/switchboard.git
@@ -65,223 +202,15 @@ cd switchboard
 pnpm install
 pnpm build
 pnpm switchboard --help
+pnpm test
 ```
 
-Then run the 90-second demo path from the project you want agents to work in:
+Smoke tests and fresh-agent evals live in `scripts/`; CI runs the full set.
+Deeper docs: [quickstart](docs/install/quickstart.md),
+[trust model](docs/security/trust-model.md),
+[provider safety templates](docs/providers/safety-templates.md),
+[roadmap](docs/product/roadmap.md).
 
-```bash
-switchboard scan
-switchboard import --dry-run
-switchboard import --write --cleanup-client
-switchboard doctor
-switchboard setup github-ci
-switchboard pass create --from github-ci --json
-```
+## License
 
-For a full local Codex client run, continue:
-
-```bash
-switchboard install codex --write
-switchboard mcp --mandate fix-ci
-switchboard pass report fix-ci --json
-```
-
-For Claude Code:
-
-```bash
-switchboard install claude --write
-```
-
-For harnesses and subagent systems:
-
-```bash
-switchboard pass create --from github-ci --json
-```
-
-Read `workspaceLease.mcpLaunch` from the JSON response and launch the returned
-stdio MCP endpoint. Switchboard grants and audits authority; your harness still
-owns scheduling, retries, agent processes, and long-running loops.
-
-## Install From Source
-
-```bash
-pnpm install
-pnpm build
-pnpm switchboard --help
-pnpm smoke:profile-test
-pnpm smoke:secret-ref-profile
-pnpm smoke:mandate-secret-ref
-pnpm smoke:provider-add
-pnpm smoke:import-dry-run
-pnpm smoke:github-ci-first-loop
-pnpm smoke:harness-subagent-proof
-pnpm smoke:vercel-preview-dogfood
-pnpm smoke:mandate-runtime-readiness
-pnpm smoke:provider-presets
-pnpm eval:fresh-agent-import
-pnpm eval:fresh-agent-package-import
-pnpm eval:fresh-agent-github-ci
-pnpm eval:fresh-agent-authority-map
-pnpm eval:fresh-agent-expired-mandate
-pnpm eval:fresh-agent-subagent
-pnpm smoke:mcp-serve-session
-```
-
-From a source checkout, use `pnpm switchboard ...` in place of a globally
-installed `switchboard` binary:
-
-```bash
-pnpm switchboard doctor
-pnpm switchboard scan
-pnpm switchboard add github-ci --write
-```
-
-## Current Commands
-
-```bash
-switchboard --help
-switchboard scan
-switchboard scan --json
-switchboard manifest
-switchboard manifest --json
-switchboard audit
-switchboard audit --json
-switchboard audit export --format jsonl
-switchboard audit export --format jsonl --include mandates,approvals,logs
-switchboard audit export --format jsonl --include all --log-limit 500
-switchboard import --dry-run
-switchboard import --json
-switchboard import --write
-switchboard import --write --cleanup-client
-switchboard import --write --cleanup-client --accept-direct <client:server>
-switchboard init
-switchboard setup <github-ci|vercel-preview|stripe-test>
-switchboard add <github-ci|vercel-preview|stripe-test>
-switchboard add <github-ci|vercel-preview|stripe-test> --write
-switchboard status
-switchboard doctor
-switchboard demo pass [profile]
-switchboard test <profile>
-switchboard auth <github-ci|vercel-preview|stripe-test>
-switchboard install <codex|claude>
-switchboard install <codex|claude> --write
-switchboard install <codex|claude> --rollback <backup>
-switchboard grant
-switchboard grant --as <role> --for <duration> --profiles <profiles>
-switchboard grant --json
-switchboard revoke
-switchboard pass create --from github-ci
-switchboard pass create --from <github-ci|vercel-preview|stripe-test> --json
-switchboard pass create <task> --from-authority <authority-map.yaml> --accept-review --agent <role> --lease <duration>
-switchboard pass create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration>
-switchboard pass create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --json
-switchboard pass create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --allow-tool <pattern> --deny-tool <pattern>
-switchboard pass create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --require-approval-tool <pattern> --require-approval-reason <reason>
-switchboard pass create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --require-approval-tool <pattern> --require-approval-risk <risk> --require-approval-label <label>
-switchboard pass child <task> --parent <id> --agent <role> --profiles <profiles> --branch <branch> --lease <duration>
-switchboard pass create <task> --agent <role> --profiles <profiles> --branch <branch> --lease <duration> --actor <name>
-switchboard pass renew <id> --lease <duration>
-switchboard pass renew <id> --lease <duration> --actor <name>
-switchboard pass status [id]
-switchboard tools
-switchboard tools --mandate <id> --json
-switchboard approvals
-switchboard approvals --status <pending|approved|denied|stale|expired>
-switchboard approvals --mandate <id> --watch
-switchboard approvals --watch --timeout 0 --json
-switchboard approve <approval-id>
-switchboard deny <approval-id>
-switchboard secrets set <ref>
-switchboard secrets set <ref> --value-stdin
-switchboard secrets list
-switchboard secrets remove <ref>
-switchboard secrets doctor
-switchboard presets list
-switchboard presets show <github-ci|vercel-preview|stripe-test>
-switchboard presets check <github-ci|vercel-preview|stripe-test> --profile <profile>
-switchboard logs
-switchboard logs --mandate <id>
-switchboard daemon <status|start|ping|tools|stop>
-switchboard mcp
-switchboard mcp --mandate <id>
-switchboard mcp --mandate <id> --approval-wait <duration>
-switchboard serve
-switchboard serve --mandate <id>
-```
-
-## Why Not Existing Options?
-
-**Claude/Codex project MCP config:** project config is useful, but it is still
-mostly static wiring. Switchboard can import that wiring, keep secrets out of
-repo/client files, and add scoped leases, approval gates, runtime readiness,
-audit, and handoff reports.
-
-**Docker MCP Gateway:** a gateway is a good way to run or package MCP servers.
-Switchboard is the local authority layer above that: which profile, account,
-repo, branch, tools, approvals, and lease should this agent get for this task?
-Docker can be one upstream runtime behind a Switchboard profile.
-
-**Composio, Arcade, and hosted tool platforms:** hosted platforms can be great
-for managed OAuth and broad SaaS coverage. Switchboard is local-first for
-coding-agent repos: project-scoped config, local secret refs, local audit, and
-harness-friendly JSON contracts without becoming your orchestrator.
-
-**Just give the agent a token:** that is fast until the token is broad, stale,
-live/prod, or copied into the wrong config. Switchboard keeps the token behind a
-local `secretRef`, narrows exposed tools through passes, and records what the
-agent was allowed to do.
-
-## Alpha Status
-
-Switchboard is public alpha software, licensed MIT. It is local-first,
-repo-scoped, and currently targets Codex and Claude project MCP setup. It is
-not a hosted OAuth broker, dashboard, sandbox provisioner, or provider
-marketplace. Runtime readiness checks catch lease, branch, worktree, and
-missing-secret problems, but they do not create a filesystem or network
-sandbox.
-
-## Product Roadmap
-
-The current working roadmap lives at `docs/product/roadmap.md`. The pass
-strategy lives at `docs/product/mandate-strategy.md`. Original planning-thread
-source docs are preserved in `docs/product/source/`.
-Alpha packaging and tarball checks live in
-`docs/install/alpha-distribution.md`.
-The accepted local secrets/keychain direction lives at
-`docs/security/secrets-keychain-architecture.md`; provider templates use that
-work through local `secretRef`s. Local secrets use OS-protected keychain
-backends by default;
-file/null/CLI fallbacks require an explicit
-`SWITCHBOARD_ALLOW_UNSAFE_SECRET_BACKENDS=1` dev or demo opt-in.
-Harness-facing JSON contracts, including `switchboard.error.v1` failure
-envelopes for pass `--json` commands, are summarized in
-`docs/use-cases/harness-json-contracts.md`. For a local human dogfood path,
-use `docs/use-cases/mandate-demo-runbook.md`. For the alpha GitHub CI path, use
-`docs/use-cases/github-ci-alpha-golden-path.md`. Provider safety templates for
-value-free GitHub/Vercel-style profile setup live in
-`docs/providers/safety-templates.md`; live provider testing should follow
-`docs/use-cases/provider-dogfood-runbook.md`.
-
-## Config Files
-
-Switchboard reads layered YAML config:
-
-```text
-$XDG_CONFIG_HOME/switchboard/config.yaml
-~/.config/switchboard/config.yaml
-.switchboard.yaml
-.switchboard.local.yaml
-```
-
-This repo includes a safe `.switchboard.yaml` fixture so `switchboard status` and `switchboard doctor` exercise repo config discovery. Copy `.switchboard.local.example.yaml` to `.switchboard.local.yaml` for local-only overrides; the real local override file is gitignored.
-
-Precedence, highest to lowest:
-
-1. CLI overrides
-2. environment variables
-3. `.switchboard.local.yaml`
-4. nearest `.switchboard.yaml`
-5. global config
-6. built-in defaults
-
-Start with `docs/install/quickstart.md`. `switchboard init` prints or writes a starter repo config, and `switchboard doctor` tells you the next command to run, including whether project Codex/Claude config is missing, stale, installed, invalid, or missing referenced local secrets. `switchboard auth <preset>` stores the recommended provider token for a preset without making humans type the internal ref. `switchboard secrets set <ref>` is the lower-level human prompt, while `switchboard secrets set <ref> --value-stdin`, `switchboard secrets list`, `switchboard secrets remove <ref>`, and `switchboard secrets doctor` remain scriptable secret primitives backed by the OS keychain adapter; lists and JSON output never print secret values. Config can reference upstream env secrets as `{ secretRef: "github/findu/dev/token" }`, and runtime commands resolve those refs only before launching permitted upstream profiles. `pnpm smoke:secret-ref-profile` proves this path end to end with an isolated dev-only backend and a fixture MCP server that reports only whether the env value is present. `pnpm smoke:mandate-secret-ref` proves the same secret-backed profile can be mounted through `serve --mandate`, produces pass-linked audit entries, and keeps the raw secret out of CLI output, MCP responses, audit logs, and pass reports. `switchboard test <profile>` checks that a configured stdio upstream starts and lists tools. `switchboard tools --mandate <id> --json` gives scripts and harnesses the repo/pass-scoped tool surface, including approval-gated tool metadata, without launching an agent client; the response is tagged with `schemaVersion: "switchboard.tool-surface.v1"`. `switchboard mcp` auto-starts the local daemon when needed and supports daemon-backed tool listing and routed tool calls; add `--mandate <id>` to validate an active pass, mount that pass's profiles, enforce its allow/deny/approval-required tool patterns, and attach the pass id to tool-call audit entries. Approval-required tools remain discoverable with `_meta.switchboard.approvalRequired`, but execution still creates a local approval request and returns retry instructions by default; when the connected MCP client advertises form elicitation support, Switchboard can ask for an in-client approve/deny decision, persist it through the same local approval store, and retry approved calls. Add `--approval-wait 30s` or another duration up to `10m` to keep gated tool calls pending while a local `switchboard approve <id>` or `switchboard deny <id>` decision arrives. If the MCP client disconnects during a wait, or a daemon starts for the repo with leftover pending requests, those requests are marked `stale` and cannot be approved later. Use `switchboard approvals --json`, `switchboard approve <id>`, and `switchboard deny <id>` to inspect and decide requests; add `--mandate <id> --include-children` to see a versioned `switchboard.approvals.v1` approval queue across a parent/child pass tree. Use `switchboard approvals --watch` for a live human queue, or `switchboard approvals --watch --timeout 0 --json` for a bounded `switchboard.approvals-watch.v1` snapshot. `switchboard install <codex|claude>` prints dry-run client config snippets for the daemon-backed MCP adapter; add `--write` to update project-scoped client config with a timestamped backup, or `--rollback <backup>` to restore one. `switchboard pass create` persists a local task-scoped authority record bound to a repo, worktree, branch, agent role, profiles, lease, and optional `--allow-tool` / `--deny-tool` / `--require-approval-tool` namespaced tool patterns; each pass also records additive authority evidence: an optional `--actor` creator identity, an authority source (`preset`, `authority-map`, `parent`, or `manual`), a deterministic `sha256` policy hash, and a lease event history that `pass renew --actor <name>` extends; pair approval gates with `--require-approval-reason`, `--require-approval-risk`, and `--require-approval-label` to show structured context in `pass status` and `approvals`. `switchboard pass child` creates a narrower child pass from an active parent, inheriting parent denies and approval gates while requiring the child repo, worktree, branch, profiles, allowed tools, and lease to stay within parent scope. `switchboard pass handoff <id>` closes a pass with `completed`, `blocked`, or `cancelled` handoff state; parent passes cannot hand off while child passes remain open, and handoff refuses local readiness blockers by default; `--ignore-readiness` only skips softer local blockers such as pending approvals. `switchboard pass report <id> --json` emits a versioned `switchboard.mandate-report.v1` tree report with parent/child state, readiness blockers, result rollups, related audit entries, and approval requests. `switchboard pass escalate <id> --json` emits a versioned `switchboard.mandate-escalation.v1` local escalation plan with pending approvals, open child passes, blocked/cancelled handoffs, suggested commands, and copy text. `switchboard pass create --json` and `switchboard pass child --json` also return an `mcpLaunch` payload with the schema version, pass id, repo cwd, command, args, and additive command candidates a harness can use to launch `switchboard --cwd <repo> mcp --mandate <id>` even when the CLI is not on `PATH`. `switchboard pass status --json` lists those records with `schemaVersion: "switchboard.mandate-status.v1"`. `switchboard serve` exposes configured stdio upstream profiles as one daemonless MCP server for debugging and CI, with the same `--mandate <id>` runtime context option; approval request creation is daemon-backed, so use `switchboard mcp --mandate <id>` for approval workflows. `switchboard audit export --format jsonl` emits `switchboard.repo-audit-export.v1` records (`summary`, `check`); add `--include mandates,approvals,logs` (or `all`) to append repo-scoped `mandate`, `approval_request`, and `audit_log` evidence records — including pass lease/actor/policy-hash evidence — so teams can ship one JSONL stream to SIEM-style ingestion without a hosted service; secret values never appear because passes, approvals, and audit entries only ever reference `secretRef` names, and `--log-limit` bounds log volume with matched/exported counts in the summary record. Consumers should ignore unknown record types. `switchboard manifest --json` emits the versioned `switchboard.repo-manifest.v1` read-only source-of-truth view over repo config, profiles, clients, rendered Codex/Claude routes, secretRefs, audit posture, authority status, and next actions; its additive `diff` block compares the intended Switchboard route against active client configs and reports per-client `in-sync` / `drift` / `unknown` status with typed findings (missing or stale Switchboard routes, unparseable client config, direct routes, accepted direct routes) and exact resolve commands. `switchboard logs --json` reads the local JSONL audit log through `schemaVersion: "switchboard.audit-log.v1"` and can filter entries with `--mandate <id>`. `switchboard daemon <status|start|ping|tools|stop>` manages the local daemon lifecycle foundation and daemon-side tool discovery. Provider integrations and a full approval broker come in later milestones.
+MIT. See [LICENSE](./LICENSE).

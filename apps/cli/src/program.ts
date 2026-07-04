@@ -948,7 +948,7 @@ export function createProgram(io: ProgramIo = {}): Command {
 
   program
     .command("import")
-    .description("Consolidate scattered MCP config and move plaintext tokens into your keychain — reversibly, with backups.")
+    .description("Consolidate scattered MCP config and swap plaintext tokens for keychain refs. Reversible, with backups.")
     .option("--dry-run", "print the import plan without writing")
     .option("--write", "apply the import plan")
     .option("--cleanup-client", "remove direct MCP bypass routes from active project client config with backups")
