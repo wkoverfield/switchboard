@@ -60,7 +60,7 @@ export type DaemonResponse =
 
 export type DaemonRequest =
   | { id: string; type: "ping" }
-  | { id: string; type: "list_tools"; mandateId?: string }
+  | { id: string; type: "list_tools"; mandateId?: string; cwd?: string }
   | {
       id: string;
       type: "call_tool";
@@ -68,12 +68,17 @@ export type DaemonRequest =
       arguments?: Record<string, unknown>;
       mandateId?: string;
       approvalWaitMs?: number;
+      cwd?: string;
     };
 
 export interface DaemonClientOptions {
   timeoutMs?: number;
   mandateId?: string;
   approvalWaitMs?: number;
+  // Per-connection repo cwd. Lets one daemon serve many repos: each request
+  // resolves config/profiles/mandate/audit against its own cwd rather than a
+  // single daemon-bound directory.
+  cwd?: string;
 }
 
 export async function pingDaemon(
@@ -110,6 +115,9 @@ export async function listDaemonTools(
   };
   if (options.mandateId) {
     request.mandateId = options.mandateId;
+  }
+  if (options.cwd) {
+    request.cwd = options.cwd;
   }
   const response = await requestDaemon(
     socketPath,
@@ -150,6 +158,9 @@ export async function callDaemonTool(
   }
   if (options.approvalWaitMs !== undefined) {
     request.approvalWaitMs = options.approvalWaitMs;
+  }
+  if (options.cwd) {
+    request.cwd = options.cwd;
   }
   const response = await requestDaemon(socketPath, request, {
     timeoutMs: options.timeoutMs ?? daemonToolCallTimeoutMs(options)

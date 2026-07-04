@@ -553,7 +553,7 @@ export interface ProgramIo {
   startDaemon?: typeof startDaemon;
   serveDaemonMcp?: (
     socketPath: string,
-    options?: { mandateId?: string; approvalWaitMs?: number }
+    options?: { mandateId?: string; approvalWaitMs?: number; cwd?: string }
   ) => Promise<void>;
   secretStore?: SecretStore;
   secretIndexPath?: string;
@@ -2489,6 +2489,7 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--json", "print machine-readable JSON")
     .option("--runtime-dir <path>", "override daemon runtime directory")
     .action(async (options: { json?: boolean; runtimeDir?: string }) => {
+      const globalOptions = program.opts<{ cwd?: string }>();
       const status = await getDaemonStatus(optionsFromRuntimeDir(options.runtimeDir));
       if (status.state !== "running") {
         const result = {
@@ -2506,7 +2507,10 @@ export function createProgram(io: ProgramIo = {}): Command {
       }
 
       try {
-        const response = await listDaemonTools(status.daemon.socketPath);
+        // Send our own cwd so a shared daemon lists this repo's tools.
+        const response = await listDaemonTools(status.daemon.socketPath, {
+          cwd: resolve(globalOptions.cwd ?? process.cwd())
+        });
         const result = { ok: true, status, response };
         if (options.json) {
           writeOut(JSON.stringify(result, null, 2));
@@ -2561,16 +2565,11 @@ export function createProgram(io: ProgramIo = {}): Command {
           ...optionsFromRuntimeDir(options.runtimeDir),
           ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
         };
+        // One daemon serves many repos: this connection sends its own cwd on
+        // every request, so we reuse whatever daemon is running regardless of
+        // which directory it was started in.
         const desiredCwd = resolve(globalOptions.cwd ?? process.cwd());
         let status = await getDaemonStatus(daemonOptions);
-        if (status.state === "running" && status.daemon.cwd !== desiredCwd) {
-          writeErr(
-            `error: Switchboard daemon is running for ${status.daemon.cwd ?? "an unknown cwd"}; stop it or use --runtime-dir for a separate daemon before serving ${desiredCwd}`
-          );
-          process.exitCode = 1;
-          return;
-        }
-
         if (status.state !== "running") {
           if (options.autoStart === false) {
             writeErr(
@@ -2587,13 +2586,6 @@ export function createProgram(io: ProgramIo = {}): Command {
             return;
           }
           status = started.status;
-          if (status.daemon.cwd !== desiredCwd) {
-            writeErr(
-              `error: Switchboard daemon is running for ${status.daemon.cwd ?? "an unknown cwd"}; stop it or use --runtime-dir for a separate daemon before serving ${desiredCwd}`
-            );
-            process.exitCode = 1;
-            return;
-          }
         }
 
         const mandate = options.mandate
@@ -2620,6 +2612,7 @@ export function createProgram(io: ProgramIo = {}): Command {
         await serveDaemonMcp(
           status.daemon.socketPath,
           {
+            cwd: desiredCwd,
             ...(mandate ? { mandateId: mandate.id } : {}),
             ...(approvalWaitMs > 0 ? { approvalWaitMs } : {})
           }

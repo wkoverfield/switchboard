@@ -246,6 +246,32 @@ describe("daemon runtime mandate context", () => {
     ]);
   });
 
+  it("routes a request against its own cwd, not the daemon-bound cwd (multiplexing)", async () => {
+    // The daemon is "bound" to an unrelated empty dir, but the request carries
+    // the real repo cwd. Multiplexing means the request cwd wins, so the
+    // repo's pass policy is what gets enforced.
+    const repo = await makePolicyRepo();
+    const unrelated = await mkdtemp(join(tmpdir(), "switchboard-daemon-other-"));
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "routed",
+          type: "call_tool",
+          name: "github_findu_whoami",
+          mandateId: "fix-ci",
+          arguments: {},
+          cwd: repo
+        }),
+        { cwd: unrelated }
+      )
+    ).resolves.toMatchObject({
+      id: "routed",
+      ok: false,
+      error: 'tool "github_findu_whoami" is not allowed by pass policy'
+    });
+  });
+
   it("filters daemon list_tools results through mandate policy", async () => {
     const root = await makePolicyRepo();
 
