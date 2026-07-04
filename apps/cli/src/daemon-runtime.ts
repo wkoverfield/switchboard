@@ -333,6 +333,7 @@ export async function handleDaemonRequest(
       arguments?: unknown;
       mandateId?: unknown;
       approvalWaitMs?: unknown;
+      cwd?: unknown;
     };
     const id = typeof request.id === "string" ? request.id : "unknown";
     if (request.type === "ping") {
@@ -343,6 +344,28 @@ export async function handleDaemonRequest(
         version: daemonProtocolVersion
       };
     }
+
+    // Per-request cwd lets one daemon serve many repos: each connection
+    // resolves config/profiles/mandate/audit against its own repo instead of a
+    // single daemon-bound directory. The socket is a local 0700 unix socket, so
+    // the cwd comes from the same user's own proxy.
+    // A present-but-empty cwd is rejected rather than silently falling back to
+    // the daemon's startup repo, so a bad client can't be served the wrong
+    // repo. Omitting cwd entirely keeps the legacy single-repo fallback.
+    if (
+      request.cwd !== undefined &&
+      (typeof request.cwd !== "string" || request.cwd.length === 0)
+    ) {
+      return {
+        id,
+        ok: false,
+        error: "Daemon request cwd must be a non-empty string."
+      };
+    }
+    const requestContext: DaemonSocketContext =
+      typeof request.cwd === "string"
+        ? { ...context, cwd: resolve(request.cwd) }
+        : context;
     if (request.type === "list_tools") {
       if (
         request.mandateId !== undefined &&
@@ -354,7 +377,7 @@ export async function handleDaemonRequest(
           error: "Daemon request mandateId must be a non-empty string."
         };
       }
-      return await listConfiguredTools(id, context, request.mandateId);
+      return await listConfiguredTools(id, requestContext, request.mandateId);
     }
     if (request.type === "call_tool") {
       if (typeof request.name !== "string" || request.name.length === 0) {
@@ -398,7 +421,7 @@ export async function handleDaemonRequest(
 
       return await callConfiguredTool(
         id,
-        context,
+        requestContext,
         request.name,
         request.arguments,
         request.mandateId,

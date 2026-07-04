@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -3699,11 +3699,11 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it("refuses daemon-backed mcp when the running daemon uses another cwd", async () => {
+  it("reuses a daemon started for another cwd and serves this repo (multiplexing)", async () => {
     const root = makeTempProject();
     const otherRoot = makeTempProject();
     const errors: string[] = [];
-    const servedSockets: string[] = [];
+    const served: Array<{ socket: string; cwd: string | undefined }> = [];
     const program = createProgram({
       writeErr: (message) => errors.push(message),
       daemonStatus: async () => ({
@@ -3718,11 +3718,13 @@ describe("switchboard CLI program", () => {
           pid: process.pid,
           startedAt: "2026-06-19T16:00:00.000Z",
           socketPath: join(root, "daemon.sock"),
+          // Daemon was started for a different repo; multiplexing means we
+          // reuse it and send our own cwd per request instead of refusing.
           cwd: otherRoot
         }
       }),
-      serveDaemonMcp: async (socket) => {
-        servedSockets.push(socket);
+      serveDaemonMcp: async (socket, options) => {
+        served.push({ socket, cwd: options?.cwd });
       }
     });
 
@@ -3730,11 +3732,12 @@ describe("switchboard CLI program", () => {
       from: "user"
     });
 
-    expect(errors).toEqual([
-      `error: Switchboard daemon is running for ${otherRoot}; stop it or use --runtime-dir for a separate daemon before serving ${root}`
-    ]);
-    expect(servedSockets).toEqual([]);
-    expect(process.exitCode).toBe(1);
+    expect(errors).toEqual([]);
+    expect(served).toHaveLength(1);
+    expect(served[0]?.socket).toBe(join(root, "daemon.sock"));
+    // The connection carries this repo's cwd so the daemon routes to it.
+    expect(served[0]?.cwd).toBe(resolve(root));
+    expect(process.exitCode).toBeUndefined();
   });
 
   it("fails daemon-backed mcp when auto-start fails", async () => {

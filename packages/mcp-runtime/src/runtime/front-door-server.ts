@@ -37,6 +37,8 @@ export interface SwitchboardMcpServerOptions {
 export interface DaemonBackedMcpServerOptions extends SwitchboardMcpServerOptions {
   mandateId?: string;
   approvalWaitMs?: number;
+  // Repo cwd sent with every daemon request so one daemon can serve many repos.
+  cwd?: string;
   listTools?: () => Promise<NamespacedTool[]>;
   callTool?: (
     name: string,
@@ -100,10 +102,10 @@ export function createDaemonBackedSwitchboardMcpServer(
   const listTools =
     options.listTools ??
     (async () => {
-      const response = await listDaemonTools(
-        socketPath,
-        options.mandateId ? { mandateId: options.mandateId } : {}
-      );
+      const response = await listDaemonTools(socketPath, {
+        ...(options.mandateId ? { mandateId: options.mandateId } : {}),
+        ...(options.cwd ? { cwd: options.cwd } : {})
+      });
       return response.tools;
     });
   const callDaemon =
@@ -117,7 +119,8 @@ export function createDaemonBackedSwitchboardMcpServer(
           ...(options.mandateId ? { mandateId: options.mandateId } : {}),
           ...(options.approvalWaitMs !== undefined
             ? { approvalWaitMs: options.approvalWaitMs }
-            : {})
+            : {}),
+          ...(options.cwd ? { cwd: options.cwd } : {})
         }
       );
       return response.result;
