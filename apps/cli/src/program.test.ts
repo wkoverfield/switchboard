@@ -5600,6 +5600,37 @@ describe("switchboard CLI program", () => {
     );
   });
 
+  it("status says unknown, not none, when the mandate store is corrupt", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    mkdirSync(join(root, "state"), { recursive: true });
+    writeFileSync(mandateStorePath, "{ not json");
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+    await program.parseAsync(["--cwd", root, "status"], { from: "user" });
+
+    const rendered = output[0] ?? "";
+    // The health command must not crash — and must not claim "none".
+    expect(rendered).toContain("Switchboard status");
+    expect(rendered).toContain("Active passes: unknown");
+    expect(rendered).not.toContain("Active passes: none");
+
+    await program.parseAsync(["--cwd", root, "status", "--json"], {
+      from: "user"
+    });
+    const parsed = JSON.parse(output[1] ?? "{}") as {
+      activePasses: unknown[];
+      activePassesError: string | null;
+    };
+    expect(parsed.activePasses).toEqual([]);
+    expect(parsed.activePassesError).toBeTruthy();
+  });
+
   it("grant says honestly when no client enforces the pass yet", async () => {
     const root = makeTempProject();
     writeMandateConfig(root);
@@ -5662,9 +5693,9 @@ describe("switchboard CLI program", () => {
         { from: "user" }
       );
       const parsed = JSON.parse(output[0] ?? "{}") as {
-        enforcement: { routedClients: string[]; enforced: boolean };
+        enforcement: { routedClients: string[]; anyClientRouted: boolean };
       };
-      expect(parsed.enforcement.enforced).toBe(true);
+      expect(parsed.enforcement.anyClientRouted).toBe(true);
       expect(parsed.enforcement.routedClients).toContain("claude");
     } finally {
       process.env.PATH = originalPath;

@@ -983,23 +983,40 @@ export function createProgram(io: ProgramIo = {}): Command {
       const repoPaths = resolveRepoConfigPaths(configOptions);
 
       // "Is a pass live right now?" is the first question status should
-      // answer, so gather the repo's active passes up front.
-      const repoPath = configCwdBase(loaded, globalOptions.cwd);
+      // answer, so gather the repo's active passes up front. Use the
+      // config-file location (not parse success) to anchor the repo path,
+      // so a broken repo config can't make status miss a live pass.
+      const repoPath = installTargetCwd(globalOptions.cwd);
       const mandateStorePath = io.mandateStorePath ?? resolveMandateStorePath();
-      const activePasses = (
-        await listMandates({ path: mandateStorePath, repoPath })
-      )
-        .filter((mandate) => mandate.runtimeStatus === "active")
-        .map((mandate) => ({
-          id: mandate.id,
-          branch: mandate.branch,
-          agentRole: mandate.agentRole,
-          profiles: mandate.profiles,
-          allowedTools: mandate.allowedTools,
-          lease: mandate.lease,
-          expiresAt: mandate.expiresAt,
-          grantedViaGrant: mandate.authoritySource?.ref === "grant"
-        }));
+      let activePasses: Array<{
+        id: string;
+        branch: string;
+        agentRole: string;
+        profiles: string[];
+        allowedTools: string[];
+        lease: string;
+        expiresAt: string;
+        grantedViaGrant: boolean;
+      }> = [];
+      let activePassesError: string | null = null;
+      try {
+        activePasses = (await listMandates({ path: mandateStorePath, repoPath }))
+          .filter((mandate) => mandate.runtimeStatus === "active")
+          .map((mandate) => ({
+            id: mandate.id,
+            branch: mandate.branch,
+            agentRole: mandate.agentRole,
+            profiles: mandate.profiles,
+            allowedTools: mandate.allowedTools,
+            lease: mandate.lease,
+            expiresAt: mandate.expiresAt,
+            grantedViaGrant: mandate.authoritySource?.ref === "grant"
+          }));
+      } catch (error) {
+        // A corrupt mandate store must not crash the health command;
+        // degrade to "unknown" and say so instead of guessing.
+        activePassesError = messageFromError(error);
+      }
 
       const status = {
         globalConfigPath: resolveGlobalConfigPath(),
@@ -1010,6 +1027,7 @@ export function createProgram(io: ProgramIo = {}): Command {
         workspaceCount: Object.keys(loaded.config.workspaces).length,
         namespaces: namespacesForProfiles(loaded.config.profiles),
         activePasses,
+        activePassesError,
         diagnostics: loaded.diagnostics
       };
 
@@ -2865,7 +2883,8 @@ export function createProgram(io: ProgramIo = {}): Command {
 
           // A pass only binds agents that are actually routed through
           // Switchboard; say so honestly when no client is wired up yet.
-          let routedClients: string[] = [];
+          // null means detection failed — unknown, not "none".
+          let routedClients: string[] | null = null;
           try {
             const launch = resolveInstallLaunch({ commandArgs: [] });
             const clientConfigs = await inspectProjectClientConfigs({
@@ -2888,9 +2907,13 @@ export function createProgram(io: ProgramIo = {}): Command {
                   path,
                   mandate,
                   workspaceLease: createWorkspaceLeasePayload(mandate, mcpLaunch),
+                  // anyClientRouted only claims a client config routes
+                  // through Switchboard — not that every path is governed.
+                  // null = detection failed, routing status unknown.
                   enforcement: {
                     routedClients,
-                    enforced: routedClients.length > 0
+                    anyClientRouted:
+                      routedClients === null ? null : routedClients.length > 0
                   }
                 },
                 null,
@@ -2901,8 +2924,10 @@ export function createProgram(io: ProgramIo = {}): Command {
             const badge = formatGrantBadge(mandate, {
               secretRefs: grantSecretRefs(loaded.config, profiles)
             });
+            // Only assert "nothing enforces this" on a confirmed zero;
+            // a failed detection stays silent rather than stating a guess.
             const nudge =
-              routedClients.length === 0
+              routedClients !== null && routedClients.length === 0
                 ? [
                     "",
                     "Heads up: no agent client is routed through Switchboard here yet,",
@@ -4465,12 +4490,17 @@ function formatStatus(status: {
     lease: string;
     expiresAt: string;
   }>;
+  activePassesError: string | null;
   diagnostics: Array<{ level: string; message: string }>;
 }): string {
   const lines = ["Switchboard status"];
 
   // Answer "is a pass live right now?" before anything else.
-  if (status.activePasses.length === 0) {
+  if (status.activePassesError !== null) {
+    lines.push(
+      `Active passes: unknown (mandate store unreadable: ${status.activePassesError})`
+    );
+  } else if (status.activePasses.length === 0) {
     lines.push(
       "Active passes: none (give one out with switchboard grant)"
     );
