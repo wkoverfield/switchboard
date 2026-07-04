@@ -11,28 +11,7 @@ the MCP servers and tokens your agents can already touch, gets secrets out of
 plaintext config and behind named keychain refs, and puts each agent on a
 scoped pass that expires on its own.
 
-```text
-$ switchboard grant --for 4h
-
-╭─ SWITCHBOARD · PASS GRANTED ──────────────────────
-│
-│  acme-app · main
-│  acting as agent
-│
-│  can reach
-│    → github_ci_*
-│    → vercel_preview_*
-│  everything else denied
-│
-│  secrets  🔒 github/ci/token   🔒 vercel/preview/token
-│  held in your keychain · never printed, never committed
-│
-│  expires in 4h   (2026-07-04T07:35:49.259Z)
-│  ends on its own · revoke early with: switchboard revoke
-│  pass id grant-main
-│
-╰───────────────────────────────────────────────────
-```
+![Switchboard grant: an agent is put on a scoped, expiring pass. It can reach only the named tools, everything else is denied, secrets stay in the keychain, and the pass ends on its own or with switchboard revoke.](https://raw.githubusercontent.com/wkoverfield/switchboard/main/examples/switchboard.gif)
 
 Everything runs locally. No account, no hosted service, no telemetry.
 
@@ -209,6 +188,7 @@ Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md), and report
 vulnerabilities privately per [SECURITY.md](SECURITY.md).
 
 Smoke tests and fresh-agent evals live in `scripts/`; CI runs the full set.
+The top demo is a VHS tape: `brew install vhs && pnpm build && vhs examples/switchboard.tape`.
 Deeper docs: [quickstart](docs/install/quickstart.md),
 [trust model](docs/security/trust-model.md),
 [provider safety templates](docs/providers/safety-templates.md),
