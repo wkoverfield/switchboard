@@ -125,7 +125,7 @@ provider template instead.
 | `switchboard auth <preset>` | Store the provider token for a preset in the keychain |
 | `switchboard secrets` | Set, list, remove, and doctor named secret refs |
 | `switchboard run` | Run an allowed provider command with pass-scoped credentials and audit |
-| `switchboard install <client>` | Route Claude Code or Codex through Switchboard, with backup |
+| `switchboard install <client>` | Route Claude Code or Codex through Switchboard (add `--scope user` for one server across every repo) |
 | `switchboard pass` | Create and inspect task-scoped passes with leases, gates, handoffs |
 | `switchboard approvals` | Review and decide approval-gated tool calls |
 | `switchboard tools` | List the tool surface a pass exposes |

@@ -4364,6 +4364,11 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--json", "print machine-readable JSON")
     .option("--write", "write project-scoped client config")
     .option("--rollback <backup>", "restore project-scoped client config backup")
+    .option(
+      "--scope <scope>",
+      "project (per-repo, default) or user (one trusted server for every repo)",
+      "project"
+    )
     .option("--server-name <name>", "MCP server name to register", "switchboard")
     .option("--command <command>", "Switchboard executable command")
     .option(
@@ -4379,6 +4384,7 @@ export function createProgram(io: ProgramIo = {}): Command {
           json?: boolean;
           write?: boolean;
           rollback?: string;
+          scope: string;
           serverName: string;
           command?: string;
           commandArg: string[];
@@ -4389,6 +4395,36 @@ export function createProgram(io: ProgramIo = {}): Command {
         if (!supportedClient) {
           writeErr("error: supported install clients are: codex, claude");
           process.exitCode = 1;
+          return;
+        }
+
+        if (options.scope !== "project" && options.scope !== "user") {
+          writeErr("error: --scope must be project or user");
+          process.exitCode = 1;
+          return;
+        }
+
+        // User scope: one trusted Switchboard server for every repo. The server
+        // runs with no --cwd and no --mandate; each agent session launches it
+        // in the project dir, so it resolves that repo's config and auto-binds
+        // the live pass. We print the one-time client command rather than
+        // editing the client's global config file directly.
+        if (options.scope === "user") {
+          const launch = resolveInstallLaunch({
+            ...(options.command !== undefined ? { command: options.command } : {}),
+            commandArgs: options.commandArg
+          });
+          const result = renderUserScopeInstall(
+            supportedClient,
+            options.serverName,
+            launch.command,
+            [...launch.commandArgs, "mcp"]
+          );
+          writeOut(
+            options.json
+              ? JSON.stringify(result, null, 2)
+              : formatUserScopeInstall(result)
+          );
           return;
         }
 
@@ -9224,6 +9260,49 @@ function formatInstallRollback(result: RolledBackClientConfig): string {
     `Target: ${result.targetPath}`,
     `Restored from: ${result.restoredFrom}`,
     `Current backup: ${result.backupPath ?? "none"}`
+  ].join("\n");
+}
+
+interface UserScopeInstall {
+  ok: true;
+  client: SupportedClient;
+  scope: "user";
+  serverName: string;
+  command: string;
+  args: string[];
+  addCommand: string[];
+}
+
+// Build the one-time client command that registers a single user-scoped
+// Switchboard server. For Claude Code this is `claude mcp add --scope user`;
+// for Codex it is a global ~/.codex/config.toml server entry.
+function renderUserScopeInstall(
+  client: SupportedClient,
+  serverName: string,
+  command: string,
+  args: string[]
+): UserScopeInstall {
+  const addCommand =
+    client === "claude"
+      ? ["claude", "mcp", "add", "--scope", "user", serverName, "--", command, ...args]
+      : ["codex", "mcp", "add", serverName, "--", command, ...args];
+  return { ok: true, client, scope: "user", serverName, command, args, addCommand };
+}
+
+function formatUserScopeInstall(result: UserScopeInstall): string {
+  const line = result.addCommand.map(shellQuoteCommandArg).join(" ");
+  const clientLabel = result.client === "claude" ? "Claude Code" : "Codex";
+  return [
+    `Install one Switchboard server for every repo (${clientLabel}, user scope).`,
+    "",
+    "Run this once:",
+    `  ${line}`,
+    "",
+    "It registers a single trusted server that starts in whatever repo the",
+    "agent is working in, reads that repo's config, and applies the live pass",
+    "from switchboard grant. No per-repo install, no per-project trust prompt.",
+    "",
+    "Then in any repo: switchboard grant --for 4h."
   ].join("\n");
 }
 
