@@ -11,6 +11,20 @@ updates:
       npm:
         patterns:
           - "*"
+    # Defer these majors so the weekly group stays green and mergeable. They
+    # are breaking toolchain upgrades (TypeScript 6, ESLint 10) that need a
+    # dedicated migration branch, not a bundled auto-merge. @types/node is
+    # pinned to the major we run in CI (Node 22). Lift an entry when doing
+    # that upgrade on purpose.
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@eslint/js"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions used by CI, so pinned action versions stay current.
   - package-ecosystem: github-actions
