@@ -9229,6 +9229,10 @@ function formatAuditLogs(
   return lines.join("\n");
 }
 
+function userScopeTip(client: SupportedClient): string {
+  return `Tip: switchboard install ${client} --scope user sets up one server for every repo (no per-repo install).`;
+}
+
 function formatInstallSnippet(rendered: {
   client: SupportedClient;
   serverName: string;
@@ -9240,7 +9244,9 @@ function formatInstallSnippet(rendered: {
     `Server name: ${rendered.serverName}`,
     `Target: ${rendered.target}`,
     "",
-    rendered.content
+    rendered.content,
+    "",
+    userScopeTip(rendered.client)
   ].join("\n");
 }
 
@@ -9250,7 +9256,9 @@ function formatInstallWrite(result: WrittenClientConfig): string {
     `Server name: ${result.serverName}`,
     `Target: ${result.targetPath}`,
     `Action: ${result.action}`,
-    `Backup: ${result.backupPath ?? "none"}`
+    `Backup: ${result.backupPath ?? "none"}`,
+    "",
+    userScopeTip(result.client)
   ].join("\n");
 }
 

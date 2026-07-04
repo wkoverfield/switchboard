@@ -44,6 +44,14 @@ switchboard revoke                          # end it early
 
 `switchboard doctor` tells you the next thing to fix at any point.
 
+## One install for every repo
+
+`switchboard install claude --scope user` (or `codex`) sets up a single
+Switchboard server that works in every repo. Each agent session runs it in
+whatever repo you are in, so it picks up that repo's config and the live pass
+from `switchboard grant` automatically. Install once, `grant` per repo, and one
+Switchboard daemon serves them all at the same time.
+
 ## What Switchboard does not do
 
 - **It is not a sandbox.** Switchboard governs the paths routed through it

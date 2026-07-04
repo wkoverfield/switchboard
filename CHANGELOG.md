@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.5
+
+- Multiplexed the daemon: one daemon serves many repos concurrently, routing each request by its own cwd. Removes the single-repo "daemon is running for X" collision.
+- Auto-bind the live pass by repo and branch when a request has no `--mandate`, so `switchboard grant` in a repo scopes any agent there automatically.
+- Added `switchboard install <client> --scope user`: one trusted Switchboard server for every repo, with no per-repo install or per-project trust prompt.
+- Surfaced the user-scope option in `install` output and the README.
+- Added `server.json` and ownership markers for the official MCP registry.
+
 ## Unreleased
 
 - Scaffolded the TypeScript pnpm workspace.
