@@ -7,9 +7,9 @@ A firewall and password manager for your AI coding agents.
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 
 Switchboard controls what Claude Code and Codex can reach in a repo. It finds
-the MCP servers and tokens your agents can already touch, moves secrets out of
-plaintext config into your OS keychain, and puts each agent on a scoped pass
-that expires on its own.
+the MCP servers and tokens your agents can already touch, gets secrets out of
+plaintext config and behind named keychain refs, and puts each agent on a
+scoped pass that expires on its own.
 
 ```text
 $ switchboard grant --for 4h
@@ -34,7 +34,7 @@ $ switchboard grant --for 4h
 ╰───────────────────────────────────────────────────
 ```
 
-Everything runs locally. No account, no server, no telemetry.
+Everything runs locally. No account, no hosted service, no telemetry.
 
 ## What it does
 
@@ -76,6 +76,8 @@ $ switchboard scan
 This looks like acme-app.
 
 Detected:
+- Codex Switchboard route missing
+- Claude Switchboard route missing
 - Claude direct MCP server "github" detected
 
 Authority bypasses:
@@ -91,12 +93,14 @@ Move it behind Switchboard:
 ```bash
 switchboard import --dry-run          # see the plan first
 switchboard import --write --cleanup-client
+switchboard secrets set <ref>         # store the token; import prints the exact command
 switchboard install claude --write    # route the agent through Switchboard
 ```
 
-Import rewrites client config to a single Switchboard route, stores the token
-in your OS keychain under a named ref, and leaves a backup plus the exact
-rollback command. Then scope the agent:
+Import rewrites client config to a single Switchboard route, replaces the
+plaintext token with a named keychain ref, and leaves a backup plus the exact
+rollback command. Import never reads secret values itself; the `secrets set`
+step is where the token actually enters your keychain. Then scope the agent:
 
 ```bash
 switchboard grant --for 4h
@@ -138,9 +142,10 @@ provider template instead.
 | `switchboard grant` / `revoke` | Give the repo's agent an expiring scoped pass, or end it now |
 | `switchboard status` | Is a pass live right now, and which config is active |
 | `switchboard doctor` | Check the setup and print the next thing to fix |
-| `switchboard setup <preset>` | Guided safe setup for `github-ci`, `vercel-preview`, `stripe-test` |
+| `switchboard setup <preset>` | Guided setup from a provider safety template (`switchboard presets list` shows them) |
 | `switchboard auth <preset>` | Store the provider token for a preset in the keychain |
-| `switchboard secrets` | Set, list, remove, and check named secret refs |
+| `switchboard secrets` | Set, list, remove, and doctor named secret refs |
+| `switchboard run` | Run an allowed provider command with pass-scoped credentials and audit |
 | `switchboard install <client>` | Route Claude Code or Codex through Switchboard, with backup |
 | `switchboard pass` | Create and inspect task-scoped passes with leases, gates, handoffs |
 | `switchboard approvals` | Review and decide approval-gated tool calls |
