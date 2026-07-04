@@ -5534,6 +5534,174 @@ describe("switchboard CLI program", () => {
     expect(output[output.length - 1]).toContain("PASS GRANTED");
   });
 
+  it("status answers whether a pass is live before anything else", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+
+    await program.parseAsync(["--cwd", root, "status"], { from: "user" });
+    const before = output[0] ?? "";
+    // The liveness answer leads, right under the title.
+    expect(before.split("\n")[1]).toContain("Active passes: none");
+    expect(before).toContain("switchboard grant");
+
+    await program.parseAsync(["--cwd", root, "grant", "--for", "2h"], {
+      from: "user"
+    });
+    await program.parseAsync(["--cwd", root, "status"], { from: "user" });
+    const after = output[output.length - 1] ?? "";
+    expect(after.split("\n")[1]).toContain("Active passes:");
+    expect(after).toContain("grant-main");
+    expect(after).toContain("acting as agent");
+    expect(after).toContain("expires in");
+
+    await program.parseAsync(["--cwd", root, "revoke"], { from: "user" });
+    await program.parseAsync(["--cwd", root, "status"], { from: "user" });
+    expect(output[output.length - 1]).toContain("Active passes: none");
+  });
+
+  it("status JSON lists active passes with expiry evidence", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+
+    await program.parseAsync(["--cwd", root, "grant", "--for", "1h"], {
+      from: "user"
+    });
+    await program.parseAsync(["--cwd", root, "status", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[output.length - 1] ?? "{}") as {
+      activePasses: Array<{
+        id: string;
+        agentRole: string;
+        lease: string;
+        expiresAt: string;
+        grantedViaGrant: boolean;
+      }>;
+    };
+    expect(parsed.activePasses).toHaveLength(1);
+    expect(parsed.activePasses[0]?.id).toBe("grant-main");
+    expect(parsed.activePasses[0]?.lease).toBe("1h");
+    expect(parsed.activePasses[0]?.grantedViaGrant).toBe(true);
+    expect(Date.parse(parsed.activePasses[0]?.expiresAt ?? "")).toBeGreaterThan(
+      Date.now()
+    );
+  });
+
+  it("status says unknown, not none, when the mandate store is corrupt", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    mkdirSync(join(root, "state"), { recursive: true });
+    writeFileSync(mandateStorePath, "{ not json");
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+    await program.parseAsync(["--cwd", root, "status"], { from: "user" });
+
+    const rendered = output[0] ?? "";
+    // The health command must not crash — and must not claim "none".
+    expect(rendered).toContain("Switchboard status");
+    expect(rendered).toContain("Active passes: unknown");
+    expect(rendered).not.toContain("Active passes: none");
+
+    await program.parseAsync(["--cwd", root, "status", "--json"], {
+      from: "user"
+    });
+    const parsed = JSON.parse(output[1] ?? "{}") as {
+      activePasses: unknown[];
+      activePassesError: string | null;
+    };
+    expect(parsed.activePasses).toEqual([]);
+    expect(parsed.activePassesError).toBeTruthy();
+  });
+
+  it("grant says honestly when no client enforces the pass yet", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+
+    await program.parseAsync(["--cwd", root, "grant", "--for", "2h"], {
+      from: "user"
+    });
+    const badge = output[0] ?? "";
+    expect(badge).toContain("PASS GRANTED");
+    expect(badge).toContain("nothing enforces this pass");
+    expect(badge).toContain("switchboard install");
+  });
+
+  it("grant drops the install nudge once a client is routed", async () => {
+    const root = makeTempProject();
+    // install --write needs at least one stdio upstream profile.
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  github_findu:",
+        "    provider: generic",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node",
+        "      args:",
+        "        - fixture.mjs"
+      ].join("\n")
+    );
+    const mandateStorePath = join(root, "state", "mandates.json");
+    // A fake switchboard binary on PATH so install --write validates launch.
+    const binDir = join(root, "bin");
+    mkdirSync(binDir);
+    writeFileSync(join(binDir, "switchboard"), "#!/bin/sh\nexit 0\n");
+    chmodSync(join(binDir, "switchboard"), 0o755);
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${binDir}${process.platform === "win32" ? ";" : ":"}${originalPath ?? ""}`;
+
+    try {
+      await createProgram().parseAsync(
+        ["--cwd", root, "install", "claude", "--write"],
+        { from: "user" }
+      );
+
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message),
+        mandateStorePath
+      });
+      await program.parseAsync(
+        ["--cwd", root, "grant", "--for", "2h", "--json"],
+        { from: "user" }
+      );
+      const parsed = JSON.parse(output[0] ?? "{}") as {
+        enforcement: { routedClients: string[]; anyClientRouted: boolean };
+      };
+      expect(parsed.enforcement.anyClientRouted).toBe(true);
+      expect(parsed.enforcement.routedClients).toContain("claude");
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+
   it("revoke targets the grant pass, not a hand-made mandate, and honors an explicit id", async () => {
     const root = makeTempProject();
     writeMandateConfig(root);

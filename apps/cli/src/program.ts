@@ -976,11 +976,48 @@ export function createProgram(io: ProgramIo = {}): Command {
     .command("status")
     .description("Show which config and agent profiles are active in this repo.")
     .option("--json", "print machine-readable JSON")
-    .action((options: { json?: boolean }) => {
+    .action(async (options: { json?: boolean }) => {
       const globalOptions = program.opts<{ cwd?: string }>();
       const configOptions = optionsFromCwd(globalOptions.cwd);
       const loaded = loadSwitchboardConfig(configOptions);
       const repoPaths = resolveRepoConfigPaths(configOptions);
+
+      // "Is a pass live right now?" is the first question status should
+      // answer, so gather the repo's active passes up front. Use the
+      // config-file location (not parse success) to anchor the repo path,
+      // so a broken repo config can't make status miss a live pass.
+      const repoPath = installTargetCwd(globalOptions.cwd);
+      const mandateStorePath = io.mandateStorePath ?? resolveMandateStorePath();
+      let activePasses: Array<{
+        id: string;
+        branch: string;
+        agentRole: string;
+        profiles: string[];
+        allowedTools: string[];
+        lease: string;
+        expiresAt: string;
+        grantedViaGrant: boolean;
+      }> = [];
+      let activePassesError: string | null = null;
+      try {
+        activePasses = (await listMandates({ path: mandateStorePath, repoPath }))
+          .filter((mandate) => mandate.runtimeStatus === "active")
+          .map((mandate) => ({
+            id: mandate.id,
+            branch: mandate.branch,
+            agentRole: mandate.agentRole,
+            profiles: mandate.profiles,
+            allowedTools: mandate.allowedTools,
+            lease: mandate.lease,
+            expiresAt: mandate.expiresAt,
+            grantedViaGrant: mandate.authoritySource?.ref === "grant"
+          }));
+      } catch (error) {
+        // A corrupt mandate store must not crash the health command;
+        // degrade to "unknown" and say so instead of guessing.
+        activePassesError = messageFromError(error);
+      }
+
       const status = {
         globalConfigPath: resolveGlobalConfigPath(),
         repoConfigPath: repoPaths.repoConfigPath ?? null,
@@ -989,6 +1026,8 @@ export function createProgram(io: ProgramIo = {}): Command {
         profileCount: Object.keys(loaded.config.profiles).length,
         workspaceCount: Object.keys(loaded.config.workspaces).length,
         namespaces: namespacesForProfiles(loaded.config.profiles),
+        activePasses,
+        activePassesError,
         diagnostics: loaded.diagnostics
       };
 
@@ -2841,6 +2880,25 @@ export function createProgram(io: ProgramIo = {}): Command {
             createdBy: agentRole,
             authoritySource
           });
+
+          // A pass only binds agents that are actually routed through
+          // Switchboard; say so honestly when no client is wired up yet.
+          // null means detection failed — unknown, not "none".
+          let routedClients: string[] | null = null;
+          try {
+            const launch = resolveInstallLaunch({ commandArgs: [] });
+            const clientConfigs = await inspectProjectClientConfigs({
+              cwd: repoPath,
+              command: launch.command,
+              commandArgs: launch.commandArgs
+            });
+            routedClients = clientConfigs
+              .filter((client) => client.status === "installed")
+              .map((client) => client.client);
+          } catch {
+            // Detection is a courtesy; never let it break a successful grant.
+          }
+
           if (options.json) {
             const mcpLaunch = createMandateMcpLaunchPayload(mandate);
             writeOut(
@@ -2848,18 +2906,36 @@ export function createProgram(io: ProgramIo = {}): Command {
                 {
                   path,
                   mandate,
-                  workspaceLease: createWorkspaceLeasePayload(mandate, mcpLaunch)
+                  workspaceLease: createWorkspaceLeasePayload(mandate, mcpLaunch),
+                  // anyClientRouted only claims a client config routes
+                  // through Switchboard — not that every path is governed.
+                  // null = detection failed, routing status unknown.
+                  enforcement: {
+                    routedClients,
+                    anyClientRouted:
+                      routedClients === null ? null : routedClients.length > 0
+                  }
                 },
                 null,
                 2
               )
             );
           } else {
-            writeOut(
-              formatGrantBadge(mandate, {
-                secretRefs: grantSecretRefs(loaded.config, profiles)
-              })
-            );
+            const badge = formatGrantBadge(mandate, {
+              secretRefs: grantSecretRefs(loaded.config, profiles)
+            });
+            // Only assert "nothing enforces this" on a confirmed zero;
+            // a failed detection stays silent rather than stating a guess.
+            const nudge =
+              routedClients !== null && routedClients.length === 0
+                ? [
+                    "",
+                    "Heads up: no agent client is routed through Switchboard here yet,",
+                    "so nothing enforces this pass. Wire one up with:",
+                    "  switchboard install claude   (or: switchboard install codex)"
+                  ].join("\n")
+                : "";
+            writeOut(badge + nudge);
           }
         } catch (error) {
           const commandError = mandateCommandError(error, "grant_failed");
@@ -4374,6 +4450,32 @@ export function createProgram(io: ProgramIo = {}): Command {
   return program;
 }
 
+function formatExpiresIn(expiresAt: string): string {
+  const remainingMs = Date.parse(expiresAt) - Date.now();
+  if (!Number.isFinite(remainingMs)) {
+    return `expires ${expiresAt}`;
+  }
+  if (remainingMs <= 0) {
+    return "expiring now";
+  }
+  const minutes = Math.max(1, Math.ceil(remainingMs / 60_000));
+  if (minutes < 60) {
+    return `expires in ${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    const rest = minutes % 60;
+    return rest > 0
+      ? `expires in ${hours}h ${rest}m`
+      : `expires in ${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  const restHours = hours % 24;
+  return restHours > 0
+    ? `expires in ${days}d ${restHours}h`
+    : `expires in ${days}d`;
+}
+
 function formatStatus(status: {
   globalConfigPath: string;
   repoConfigPath: string | null;
@@ -4381,16 +4483,44 @@ function formatStatus(status: {
   profileCount: number;
   workspaceCount: number;
   namespaces: Array<{ profile: string; namespace: string; generated: boolean }>;
+  activePasses: Array<{
+    id: string;
+    branch: string;
+    agentRole: string;
+    lease: string;
+    expiresAt: string;
+  }>;
+  activePassesError: string | null;
   diagnostics: Array<{ level: string; message: string }>;
 }): string {
-  const lines = [
-    "Switchboard status",
+  const lines = ["Switchboard status"];
+
+  // Answer "is a pass live right now?" before anything else.
+  if (status.activePassesError !== null) {
+    lines.push(
+      `Active passes: unknown (mandate store unreadable: ${status.activePassesError})`
+    );
+  } else if (status.activePasses.length === 0) {
+    lines.push(
+      "Active passes: none (give one out with switchboard grant)"
+    );
+  } else {
+    lines.push("Active passes:");
+    for (const pass of status.activePasses) {
+      lines.push(
+        `  ${pass.id} · ${pass.branch} · acting as ${pass.agentRole} · ${formatExpiresIn(pass.expiresAt)} (${pass.expiresAt})`
+      );
+    }
+  }
+
+  lines.push(
+    "",
     `Global config: ${status.globalConfigPath}`,
     `Repo config: ${status.repoConfigPath ?? "not found"}`,
     `Repo local config: ${status.repoLocalConfigPath ?? "not found"}`,
     `Profiles: ${status.profileCount}`,
     `Workspaces: ${status.workspaceCount}`
-  ];
+  );
 
   if (status.namespaces.length > 0) {
     lines.push("", "Namespaces:");
