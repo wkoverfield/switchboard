@@ -37,18 +37,18 @@ Narration:
    reading or printing secret values.
 2. `setup/add` turns provider access into a repo-scoped Switchboard profile
    with local `secretRef` storage.
-3. `mandate create --from github-ci --json` returns a bounded workspace lease
+3. `pass create --from github-ci --json` returns a bounded workspace lease
    and `mcpLaunch` payload for an agent or harness.
 4. Runtime readiness catches expired authority and points to
-   `switchboard mandate renew`.
-5. Parent/child mandates show agents scoping narrower agents while Switchboard
+   `switchboard pass renew`.
+5. Parent/child passes show agents scoping narrower agents while Switchboard
    remains the authority/control plane, not the orchestrator.
 6. The public npm package path works without a source checkout.
 
 Close with:
 
 ```bash
-switchboard mandate report fix-ci --json
+switchboard pass report fix-ci --json
 ```
 
 The report is the handoff: what authority existed, which tools were available,

@@ -46,6 +46,38 @@ describe("switchboard CLI program", () => {
     expect(help.toLowerCase()).not.toContain("mcp profile router");
   });
 
+  it("keeps the renamed pass command reachable under both spellings", async () => {
+    const help = createProgram({ writeOut: () => {} }).helpInformation();
+    // The renamed command must advertise both its new name and the old alias.
+    expect(help).toContain("pass|mandate");
+    // Top-level help must not regress into bare internal jargon.
+    expect(help.toLowerCase()).not.toContain("mandate layer");
+    expect(help.toLowerCase()).not.toContain("mcp profile router");
+
+    // Invoking a subcommand via the old `mandate` spelling still works.
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message),
+      mandateStorePath: join(root, "state", "mandates.json")
+    });
+    await program.parseAsync(["--cwd", root, "mandate", "status", "--json"], {
+      from: "user"
+    });
+
+    expect(errors).toEqual([]);
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      schemaVersion: string;
+      mandates: unknown[];
+    };
+    expect(parsed.schemaVersion).toBe("switchboard.mandate-status.v1");
+    expect(Array.isArray(parsed.mandates)).toBe(true);
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it("prints status JSON for a repo config resolved with --cwd", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
@@ -966,7 +998,7 @@ describe("switchboard CLI program", () => {
       "Switchboard provider safety template: Vercel Preview"
     );
     expect(output.join("\n")).toContain("Config YAML:");
-    expect(output.join("\n")).toContain("Rendered mandate policy:");
+    expect(output.join("\n")).toContain("Rendered pass policy:");
     expect(output.join("\n")).toContain("vercel_preview_deploy_prod");
     expect(output.join("\n")).toContain("Credential guidance:");
     expect(output.join("\n")).toContain("read deployments");
@@ -1111,7 +1143,7 @@ describe("switchboard CLI program", () => {
       `one local token alias for GITHUB_PERSONAL_ACCESS_TOKEN: ${secretRef}`
     );
     expect(text).toContain(
-      "mandate policy: 1 allow pattern(s), 10 approval gate(s), 5 deny pattern(s)"
+      "pass policy: 1 allow pattern(s), 10 approval gate(s), 5 deny pattern(s)"
     );
     expect(text).toContain("Credential guidance:");
     expect(text).toContain("read checks/statuses");
@@ -2014,9 +2046,9 @@ describe("switchboard CLI program", () => {
     expect(parsed.nextSteps).toContain(
       "switchboard presets check github-ci --profile github_ci"
     );
-    expect(parsed.nextSteps).toContain("switchboard mandate create --from github-ci");
+    expect(parsed.nextSteps).toContain("switchboard pass create --from github-ci");
     expect(parsed.nextSteps.indexOf("switchboard test github_ci")).toBeLessThan(
-      parsed.nextSteps.indexOf("switchboard mandate create --from github-ci")
+      parsed.nextSteps.indexOf("switchboard pass create --from github-ci")
     );
   });
 
@@ -2571,7 +2603,7 @@ describe("switchboard CLI program", () => {
     expect(text).toContain(
       `switchboard presets check github-ci --profile ${githubRepoProfile(root)}`
     );
-    expect(text).toContain("switchboard mandate create fix-ci --from github-ci");
+    expect(text).toContain("switchboard pass create fix-ci --from github-ci");
     expect(text).not.toContain("ghp_secret");
   });
 
@@ -2683,7 +2715,7 @@ describe("switchboard CLI program", () => {
       `switchboard presets check stripe-test --profile ${stripeRepoProfile(root)}`
     );
     expect(parsed.nextSteps.some((step) =>
-      step.includes("switchboard mandate create inspect-test-payments") &&
+      step.includes("switchboard pass create inspect-test-payments") &&
       step.includes(stripeRepoProfile(root))
     )).toBe(true);
     expect(await store.get(stripeRepoSecretRef(root))).toBe("sk_test_secret");
@@ -3661,7 +3693,7 @@ describe("switchboard CLI program", () => {
     });
 
     expect(errors).toEqual([
-      `error: mandate "missing" was not found for ${root}`
+      `error: pass "missing" was not found for ${root}`
     ]);
     expect(served).toEqual([]);
     expect(process.exitCode).toBe(1);
@@ -4401,7 +4433,7 @@ describe("switchboard CLI program", () => {
     });
 
     expect(output[1]).toContain("Switchboard tools");
-    expect(output[1]).toContain("Mandate: fix-ci (active)");
+    expect(output[1]).toContain("Pass: fix-ci (active)");
     expect(output[1]).toContain("Next commands:");
     expect(output[1]).toContain(
       `switchboard --cwd '${root}' mcp --mandate fix-ci`
@@ -4413,7 +4445,7 @@ describe("switchboard CLI program", () => {
       `switchboard --cwd '${root}' logs --mandate fix-ci --json`
     );
     expect(output[1]).toContain(
-      `switchboard --cwd '${root}' mandate handoff fix-ci --state completed --summary <summary>`
+      `switchboard --cwd '${root}' pass handoff fix-ci --state completed --summary <summary>`
     );
   });
 
@@ -4431,13 +4463,13 @@ describe("switchboard CLI program", () => {
       { from: "user" }
     );
 
-    expect(output[0]).toContain("Switchboard mandate demo");
+    expect(output[0]).toContain("Switchboard pass demo");
     expect(output[0]).toContain(`Repo: ${root}`);
     expect(output[0]).toContain("Profile: local_echo");
     expect(output[0]).toContain("Namespace: echo_tools");
-    expect(output[0]).toContain("Mandate id: demo-ci");
+    expect(output[0]).toContain("Pass id: demo-ci");
     expect(output[0]).toContain(
-      `switchboard --cwd '${root}' mandate create 'demo-ci' --agent 'implementer' --profiles 'local_echo' --branch 'demo-branch' --lease '30m' --allow-tool 'echo_tools_*' --require-approval-tool 'echo_tools_echo'`
+      `switchboard --cwd '${root}' pass create 'demo-ci' --agent 'implementer' --profiles 'local_echo' --branch 'demo-branch' --lease '30m' --allow-tool 'echo_tools_*' --require-approval-tool 'echo_tools_echo'`
     );
     expect(output[0]).toContain(
       `switchboard --cwd '${root}' tools --mandate demo-ci`
@@ -4623,8 +4655,8 @@ describe("switchboard CLI program", () => {
       ok: false,
       schemaVersion: "switchboard.error.v1",
       code: "mandate_not_found",
-      message: `mandate "missing" was not found for ${root}`,
-      nextActions: ["Run switchboard mandate status to list mandates for this repo."]
+      message: `pass "missing" was not found for ${root}`,
+      nextActions: ["Run switchboard pass status to list passes for this repo."]
     });
     expect(process.exitCode).toBe(1);
   });
@@ -4650,8 +4682,8 @@ describe("switchboard CLI program", () => {
       code: "tool_surface_failed",
       message: "upstream unavailable",
       nextActions: [
-        "switchboard mandate status",
-        "switchboard mandate create --from <preset>"
+        "switchboard pass status",
+        "switchboard pass create --from <preset>"
       ]
     });
     expect(process.exitCode).toBe(1);
@@ -6086,7 +6118,7 @@ describe("switchboard CLI program", () => {
     await program.parseAsync(["--cwd", root, "mandate", "status"], {
       from: "user"
     });
-    expect(output[2]).toContain("Mandate: fix-ci");
+    expect(output[2]).toContain("Pass: fix-ci");
     expect(output[2]).toContain("Policy: 1 allowed, 1 denied, 1 approval-required");
     expect(output[2]).toContain("MCP: switchboard mcp --mandate fix-ci");
     expect(output[2]).toContain("Run: switchboard run --mandate fix-ci -- <command>");
@@ -6513,7 +6545,7 @@ describe("switchboard CLI program", () => {
       schemaVersion: "switchboard.error.v1",
       code: "missing_mandate_options",
       message:
-        "missing required mandate option(s): --agent, --profiles, --lease"
+        "missing required pass option(s): --agent, --profiles, --lease"
     });
     expect(process.exitCode).toBe(1);
   });
@@ -6549,7 +6581,7 @@ describe("switchboard CLI program", () => {
       { from: "user" }
     );
 
-    expect(output[0]).toContain("Created mandate fix-ci");
+    expect(output[0]).toContain("Created pass fix-ci");
     expect(output[0]).toContain("Next commands:");
     expect(output[0]).toContain(
       `switchboard --cwd '${root}' tools --mandate fix-ci`
@@ -6564,7 +6596,7 @@ describe("switchboard CLI program", () => {
       `switchboard --cwd '${root}' logs --mandate fix-ci --json`
     );
     expect(output[0]).toContain(
-      `switchboard --cwd '${root}' mandate handoff fix-ci --state completed --summary <summary>`
+      `switchboard --cwd '${root}' pass handoff fix-ci --state completed --summary <summary>`
     );
   });
 
@@ -6821,7 +6853,7 @@ describe("switchboard CLI program", () => {
       schemaVersion: "switchboard.error.v1",
       code: "child_mandate_create_failed",
       message:
-        'child approval gate "github_findu_checks_rerun" is already inherited from parent mandate "fix-ci"; omit the duplicate gate or choose a narrower tool pattern',
+        'child approval gate "github_findu_checks_rerun" is already inherited from parent pass "fix-ci"; omit the duplicate gate or choose a narrower tool pattern',
       nextActions: []
     });
     expect(process.exitCode).toBe(1);
@@ -6876,7 +6908,7 @@ describe("switchboard CLI program", () => {
     );
 
     expect(errors).toEqual([
-      "error: child mandate profiles exceed parent scope: vercel_preview"
+      "error: child pass profiles exceed parent scope: vercel_preview"
     ]);
     expect(process.exitCode).toBe(1);
   });
@@ -6934,7 +6966,7 @@ describe("switchboard CLI program", () => {
     );
 
     expect(errors).toEqual([
-      "error: child mandate allowed tools exceed parent tool scope"
+      "error: child pass allowed tools exceed parent tool scope"
     ]);
     expect(process.exitCode).toBe(1);
   });
@@ -7088,7 +7120,7 @@ describe("switchboard CLI program", () => {
       { from: "user" }
     );
     expect(errors).toEqual([
-      'error: cannot hand off mandate "fix-ci" while readiness blockers remain: child mandate "rerun-checks" remains open; approval request "approval-1" is pending. Use --ignore-readiness to close anyway.'
+      'error: cannot hand off pass "fix-ci" while readiness blockers remain: child pass "rerun-checks" remains open; approval request "approval-1" is pending. Use --ignore-readiness to close anyway.'
     ]);
     process.exitCode = undefined;
 
@@ -7114,14 +7146,14 @@ describe("switchboard CLI program", () => {
       { from: "user" }
     );
     expect(errors).toEqual([
-      'error: cannot hand off mandate "fix-ci" while readiness blockers remain: child mandate "rerun-checks" remains open; approval request "approval-1" is pending. Use --ignore-readiness to close anyway.'
+      'error: cannot hand off pass "fix-ci" while readiness blockers remain: child pass "rerun-checks" remains open; approval request "approval-1" is pending. Use --ignore-readiness to close anyway.'
     ]);
     expect(JSON.parse(output[2] ?? "{}")).toEqual({
       ok: false,
       schemaVersion: "switchboard.error.v1",
       code: "mandate_readiness_blocked",
       message:
-        'cannot hand off mandate "rerun-checks" while readiness blockers remain: approval request "approval-1" is pending. Use --ignore-readiness to close anyway.',
+        'cannot hand off pass "rerun-checks" while readiness blockers remain: approval request "approval-1" is pending. Use --ignore-readiness to close anyway.',
       nextActions: [
         "switchboard approve approval-1 or switchboard deny approval-1"
       ]
@@ -7611,11 +7643,11 @@ describe("switchboard CLI program", () => {
           }
         ],
         blockers: [
-          'child mandate "rerun-checks" remains open',
+          'child pass "rerun-checks" remains open',
           'approval request "approval-1" is pending'
         ],
         nextActions: [
-          "switchboard mandate handoff rerun-checks --state completed --summary <summary>",
+          "switchboard pass handoff rerun-checks --state completed --summary <summary>",
           "switchboard approve approval-1 or switchboard deny approval-1"
         ]
       }
@@ -7635,8 +7667,8 @@ describe("switchboard CLI program", () => {
         "switchboard approvals --mandate rerun-checks --json",
         "switchboard approve approval-1",
         "switchboard deny approval-1",
-        "switchboard mandate report rerun-checks --json",
-        "switchboard mandate handoff rerun-checks --state completed --summary <summary>"
+        "switchboard pass report rerun-checks --json",
+        "switchboard pass handoff rerun-checks --state completed --summary <summary>"
       ],
       items: [
         {
@@ -7657,7 +7689,7 @@ describe("switchboard CLI program", () => {
             "switchboard deny approval-1"
           ],
           nextActions: [
-            "decide whether github_findu_checks_rerun is safe for mandate rerun-checks",
+            "decide whether github_findu_checks_rerun is safe for pass rerun-checks",
             "use --reason when approving or denying to preserve decision context",
             "retry the original github_findu_checks_rerun tool call after approval"
           ]
@@ -7671,12 +7703,12 @@ describe("switchboard CLI program", () => {
       ]
     });
     expect(JSON.parse(output[3] ?? "{}").copyText).toContain(
-      "Switchboard escalation for mandate fix-ci"
+      "Switchboard escalation for pass fix-ci"
     );
     expect(JSON.parse(output[3] ?? "{}").copyText).toContain(
       "rerunning checks changes remote GitHub state"
     );
-    expect(output[4]).toContain("Switchboard mandate escalation");
+    expect(output[4]).toContain("Switchboard pass escalation");
     expect(output[4]).toContain("Status: needs_attention");
     expect(output[4]).toContain("approval_request rerun-checks");
     expect(output[4]).toContain("risk: high");
@@ -8032,7 +8064,7 @@ describe("switchboard CLI program", () => {
           summary: "GitHub checks API is returning 503",
           nextSteps: ["retry when checks API recovers"],
           artifacts: ["https://github.com/wkoverfield/switchboard/actions"],
-          commands: ["switchboard mandate report rerun-checks --json"]
+          commands: ["switchboard pass report rerun-checks --json"]
         }
       ]
     });
@@ -8183,7 +8215,7 @@ describe("switchboard CLI program", () => {
       schemaVersion: "switchboard.error.v1",
       code: "missing_mandate_options",
       message:
-        "missing required mandate option(s): --agent, --profiles, --lease"
+        "missing required pass option(s): --agent, --profiles, --lease"
     });
     expect(JSON.parse(output[1] ?? "{}")).toMatchObject({
       ok: false,
@@ -8289,27 +8321,27 @@ describe("switchboard CLI program", () => {
         ok: false,
         schemaVersion: "switchboard.error.v1",
         code: "mandate_not_found",
-        message: 'mandate "missing" was not found',
+        message: 'pass "missing" was not found',
         nextActions: [
-          "Run switchboard mandate status to list mandates for this repo."
+          "Run switchboard pass status to list passes for this repo."
         ]
       },
       {
         ok: false,
         schemaVersion: "switchboard.error.v1",
         code: "mandate_not_found",
-        message: 'mandate "missing" was not found',
+        message: 'pass "missing" was not found',
         nextActions: [
-          "Run switchboard mandate status to list mandates for this repo."
+          "Run switchboard pass status to list passes for this repo."
         ]
       },
       {
         ok: false,
         schemaVersion: "switchboard.error.v1",
         code: "mandate_not_found",
-        message: 'mandate "missing" was not found',
+        message: 'pass "missing" was not found',
         nextActions: [
-          "Run switchboard mandate status to list mandates for this repo."
+          "Run switchboard pass status to list passes for this repo."
         ]
       }
     ]);
@@ -8328,7 +8360,7 @@ describe("switchboard CLI program", () => {
       from: "user"
     });
 
-    expect(errors).toEqual(['error: mandate "missing" was not found']);
+    expect(errors).toEqual(['error: pass "missing" was not found']);
     expect(process.exitCode).toBe(1);
   });
 
@@ -8354,8 +8386,8 @@ describe("switchboard CLI program", () => {
       ok: false,
       schemaVersion: "switchboard.error.v1",
       code: "mandate_not_found",
-      message: 'mandate "missing" was not found',
-      nextActions: ["Run switchboard mandate status to list mandates for this repo."]
+      message: 'pass "missing" was not found',
+      nextActions: ["Run switchboard pass status to list passes for this repo."]
     });
     expect(process.exitCode).toBe(1);
   });
@@ -8423,31 +8455,31 @@ describe("switchboard CLI program", () => {
     };
     expect(parsed.readiness).toMatchObject({
       blockers: [
-        'mandate "fix-ci" is expired',
-        'mandate "fix-ci" is scoped to branch "fix/ci", but current git branch is "main"',
+        'pass "fix-ci" is expired',
+        'pass "fix-ci" is scoped to branch "fix/ci", but current git branch is "main"',
         'secretRef "vercel/preview/token" is missing'
       ],
       nextActions: [
-        "switchboard mandate renew fix-ci --lease 30m",
+        "switchboard pass renew fix-ci --lease 30m",
         "git switch fix/ci",
         "switchboard secrets set vercel/preview/token --value-stdin"
       ],
       mandates: {
         "fix-ci": {
           blockers: [
-            'mandate "fix-ci" is expired',
-            'mandate "fix-ci" is scoped to branch "fix/ci", but current git branch is "main"',
+            'pass "fix-ci" is expired',
+            'pass "fix-ci" is scoped to branch "fix/ci", but current git branch is "main"',
             'secretRef "vercel/preview/token" is missing'
           ]
         }
       }
     });
-    expect(output[1]).toContain("Mandate: fix-ci");
+    expect(output[1]).toContain("Pass: fix-ci");
     expect(output[1]).toContain("Policy: all tools allowed, 0 denied, 0 approval-required");
-    expect(output[1]).toContain("Report: switchboard mandate report fix-ci");
+    expect(output[1]).toContain("Report: switchboard pass report fix-ci");
     expect(output[1]).not.toContain("profiles:vercel_preview");
     expect(output[1]).toContain("Runtime blockers:");
-    expect(output[1]).toContain("switchboard mandate renew fix-ci --lease 30m");
+    expect(output[1]).toContain("switchboard pass renew fix-ci --lease 30m");
     expect(output[1]).not.toContain("ghp_secret");
     expect(output[2]).toContain("Profiles: vercel_preview");
     expect(output[2]).toContain("Allowed: all");
@@ -8565,7 +8597,7 @@ describe("switchboard CLI program", () => {
       }
     );
 
-    expect(errors).toEqual(["error: mandate profiles were not found: missing"]);
+    expect(errors).toEqual(["error: pass profiles were not found: missing"]);
     expect(process.exitCode).toBe(1);
   });
 
@@ -8645,7 +8677,7 @@ describe("switchboard CLI program", () => {
     );
 
     expect(errors).toEqual([
-      `error: mandate branch "fix/ci" does not match current git branch "main" in ${realpathSync(root)}`
+      `error: pass branch "fix/ci" does not match current git branch "main" in ${realpathSync(root)}`
     ]);
     expect(process.exitCode).toBe(1);
   });
@@ -9233,7 +9265,7 @@ describe("switchboard CLI program", () => {
       ok: false,
       schemaVersion: "switchboard.error.v1",
       code: "mandate_not_found",
-      message: 'mandate "fix-ci" was not found',
+      message: 'pass "fix-ci" was not found',
       nextActions: []
     });
     expect(process.exitCode).toBe(1);
@@ -9252,7 +9284,7 @@ describe("switchboard CLI program", () => {
       { from: "user" }
     );
 
-    expect(errors).toEqual(['error: mandate "fix-ci" was not found']);
+    expect(errors).toEqual(['error: pass "fix-ci" was not found']);
     expect(process.exitCode).toBe(1);
   });
 

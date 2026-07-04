@@ -75,7 +75,7 @@ function renderPresetMandateCommand(
 ): string {
   return [
     "switchboard",
-    "mandate",
+    "pass",
     "create",
     rendered.template.recommendedMandate.task,
     "--from",
