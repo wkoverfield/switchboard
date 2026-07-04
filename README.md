@@ -1,5 +1,7 @@
 # Switchboard
 
+<!-- mcp-name: io.github.wkoverfield/switchboard -->
+
 A firewall and password manager for your AI coding agents.
 
 [![CI](https://github.com/wkoverfield/switchboard/actions/workflows/ci.yml/badge.svg)](https://github.com/wkoverfield/switchboard/actions/workflows/ci.yml)

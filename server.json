@@ -1,0 +1,27 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.wkoverfield/switchboard",
+  "description": "A firewall and password manager for AI coding agents: scope what they can reach, keep secrets in the OS keychain, and put each agent on an expiring pass.",
+  "version": "0.1.4",
+  "repository": {
+    "url": "https://github.com/wkoverfield/switchboard",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@switchboard-mcp/cli",
+      "version": "0.1.4",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}

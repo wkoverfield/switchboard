@@ -1,5 +1,7 @@
 # Switchboard
 
+<!-- mcp-name: io.github.wkoverfield/switchboard -->
+
 A firewall and password manager for your AI coding agents.
 
 Switchboard controls what Claude Code and Codex can reach in a repo. It finds
