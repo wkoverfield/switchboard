@@ -2807,6 +2807,25 @@ export function createProgram(io: ProgramIo = {}): Command {
         const agentRole = options.as.trim() || "agent";
         const path = io.mandateStorePath ?? resolveMandateStorePath();
         const authoritySource: MandateAuthoritySource = { type: "manual", ref: "grant" };
+        const grantId = normalizeMandateId(`grant/${branch}`);
+
+        // Friendly pre-check so we don't depend on a core error-message string.
+        const alreadyActive = (await listMandates({ path, repoPath })).some(
+          (mandate) =>
+            mandate.id === grantId && mandate.runtimeStatus === "active"
+        );
+        if (alreadyActive) {
+          writeCommandError({
+            json: options.json,
+            code: "grant_already_active",
+            message: `this repo already has an active pass on "${branch}".`,
+            nextActions: [
+              "End it early with switchboard revoke, or wait for it to expire.",
+              "See it with switchboard mandate status."
+            ]
+          });
+          return;
+        }
 
         try {
           const mandate = await createMandate({
@@ -2844,19 +2863,11 @@ export function createProgram(io: ProgramIo = {}): Command {
           }
         } catch (error) {
           const commandError = mandateCommandError(error, "grant_failed");
-          const alreadyGranted = /already exists/.test(commandError.message);
           writeCommandError({
             json: options.json,
-            code: alreadyGranted ? "grant_already_active" : commandError.code,
-            message: alreadyGranted
-              ? `this repo already has an active pass on "${branch}".`
-              : commandError.message,
-            nextActions: alreadyGranted
-              ? [
-                  "End it early with switchboard revoke, or wait for it to expire.",
-                  "See it with switchboard mandate status."
-                ]
-              : commandError.nextActions
+            code: commandError.code,
+            message: commandError.message,
+            nextActions: commandError.nextActions
           });
         }
       }
@@ -2865,15 +2876,80 @@ export function createProgram(io: ProgramIo = {}): Command {
   program
     .command("revoke")
     .description("End this repo's active pass now, before it expires.")
+    .argument("[id]", "revoke a specific pass by id (default: the pass on this branch)")
     .option("--json", "print machine-readable JSON")
-    .action(async (options: { json?: boolean }) => {
+    .action(async (id: string | undefined, options: { json?: boolean }) => {
       const globalOptions = program.opts<{ cwd?: string }>();
       const repoPath = installTargetCwd(globalOptions.cwd);
       const path = io.mandateStorePath ?? resolveMandateStorePath();
-      const active = (await listMandates({ path, repoPath })).find(
+      const activeAll = (await listMandates({ path, repoPath })).filter(
         (mandate) => mandate.runtimeStatus === "active"
       );
-      if (!active) {
+
+      let target: (typeof activeAll)[number] | undefined;
+      if (id) {
+        // Explicit id: revoke exactly that active pass, whatever created it.
+        target = activeAll.find((mandate) => mandate.id === normalizeMandateId(id));
+        if (!target) {
+          writeCommandError({
+            json: options.json,
+            code: "revoke_id_not_active",
+            message: `no active pass with id "${normalizeMandateId(id)}" in this repo.`,
+            nextActions:
+              activeAll.length > 0
+                ? [`Active passes: ${activeAll.map((m) => m.id).join(", ")}.`]
+                : ["Give one out with switchboard grant."]
+          });
+          return;
+        }
+      } else {
+        // Default: only ever auto-pick a grant-created pass on the current
+        // branch, so revoke never silently cancels a different or hand-made
+        // mandate for the same repo.
+        let branch: string | undefined;
+        try {
+          branch = resolveGitWorktreeBinding(repoPath)?.branch;
+        } catch {
+          branch = undefined;
+        }
+        const grantPasses = activeAll.filter(
+          (mandate) =>
+            mandate.authoritySource?.ref === "grant" &&
+            (branch === undefined || mandate.branch === branch)
+        );
+        if (grantPasses.length === 1) {
+          target = grantPasses[0];
+        } else if (grantPasses.length === 0) {
+          writeCommandError({
+            json: options.json,
+            code: "revoke_nothing_active",
+            message:
+              branch === undefined
+                ? "this repo has no active pass to revoke."
+                : `this repo has no active pass on "${branch}" to revoke.`,
+            nextActions:
+              activeAll.length > 0
+                ? [
+                    `Other active passes: ${activeAll.map((m) => m.id).join(", ")}.`,
+                    "Revoke one explicitly with switchboard revoke <id>."
+                  ]
+                : ["Give one out with switchboard grant."]
+          });
+          return;
+        } else {
+          writeCommandError({
+            json: options.json,
+            code: "revoke_ambiguous",
+            message: `more than one active pass matches; choose one with switchboard revoke <id>.`,
+            nextActions: [
+              `Candidates: ${grantPasses.map((m) => m.id).join(", ")}.`
+            ]
+          });
+          return;
+        }
+      }
+
+      if (!target) {
         writeCommandError({
           json: options.json,
           code: "revoke_nothing_active",
@@ -2882,10 +2958,11 @@ export function createProgram(io: ProgramIo = {}): Command {
         });
         return;
       }
+
       try {
         const mandate = await updateMandateHandoff({
           path,
-          id: active.id,
+          id: target.id,
           repoPath,
           state: "cancelled",
           summary: "revoked via switchboard revoke"
@@ -2893,7 +2970,7 @@ export function createProgram(io: ProgramIo = {}): Command {
         writeOut(
           options.json
             ? JSON.stringify({ path, mandate }, null, 2)
-            : `Revoked the pass for ${mandate.branch}. The agent's scoped access is off now.`
+            : `Revoked pass ${mandate.id} (${mandate.branch}). The agent's scoped access is off now.`
         );
       } catch (error) {
         const commandError = mandateCommandError(error, "revoke_failed");

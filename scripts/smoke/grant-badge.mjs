@@ -48,7 +48,7 @@ try {
 
   const revoked = run("revoke");
   assert(
-    revoked.status === 0 && /Revoked the pass/.test(revoked.stdout),
+    revoked.status === 0 && /Revoked pass/.test(revoked.stdout),
     "expected revoke to free the active pass"
   );
 

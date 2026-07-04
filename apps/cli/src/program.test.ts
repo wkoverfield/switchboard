@@ -5525,13 +5525,68 @@ describe("switchboard CLI program", () => {
     process.exitCode = undefined;
 
     await program.parseAsync(["--cwd", root, "revoke"], { from: "user" });
-    expect(output[output.length - 1]).toContain("Revoked the pass");
+    expect(output[output.length - 1]).toContain("Revoked pass");
 
     // Freed: a fresh grant now succeeds.
     await program.parseAsync(["--cwd", root, "grant", "--for", "2h"], {
       from: "user"
     });
     expect(output[output.length - 1]).toContain("PASS GRANTED");
+  });
+
+  it("revoke targets the grant pass, not a hand-made mandate, and honors an explicit id", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+
+    // A carefully hand-made mandate lives alongside a grant pass on this repo.
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "hand-made",
+        "--agent",
+        "worker",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "main",
+        "--lease",
+        "2h"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(["--cwd", root, "grant", "--for", "2h"], {
+      from: "user"
+    });
+
+    // Default revoke must cancel the grant pass, never the hand-made mandate.
+    await program.parseAsync(["--cwd", root, "revoke"], { from: "user" });
+    expect(output[output.length - 1]).toContain("Revoked pass grant-main");
+
+    await program.parseAsync(["--cwd", root, "mandate", "status", "--json"], {
+      from: "user"
+    });
+    const status = JSON.parse(output[output.length - 1] ?? "{}") as {
+      mandates: Array<{ id: string; runtimeStatus: string }>;
+    };
+    const handMade = status.mandates.find((m) => m.id === "hand-made");
+    const grantPass = status.mandates.find((m) => m.id === "grant-main");
+    expect(handMade?.runtimeStatus).toBe("active");
+    expect(grantPass?.runtimeStatus).toBe("closed");
+
+    // The hand-made mandate can still be revoked, but only explicitly by id.
+    await program.parseAsync(["--cwd", root, "revoke", "hand-made"], {
+      from: "user"
+    });
+    expect(output[output.length - 1]).toContain("Revoked pass hand-made");
   });
 
   it("revoke reports when there is no active pass", async () => {
