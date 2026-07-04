@@ -349,15 +349,21 @@ export async function handleDaemonRequest(
     // resolves config/profiles/mandate/audit against its own repo instead of a
     // single daemon-bound directory. The socket is a local 0700 unix socket, so
     // the cwd comes from the same user's own proxy.
-    if (request.cwd !== undefined && typeof request.cwd !== "string") {
+    // A present-but-empty cwd is rejected rather than silently falling back to
+    // the daemon's startup repo, so a bad client can't be served the wrong
+    // repo. Omitting cwd entirely keeps the legacy single-repo fallback.
+    if (
+      request.cwd !== undefined &&
+      (typeof request.cwd !== "string" || request.cwd.length === 0)
+    ) {
       return {
         id,
         ok: false,
-        error: "Daemon request cwd must be a string."
+        error: "Daemon request cwd must be a non-empty string."
       };
     }
     const requestContext: DaemonSocketContext =
-      typeof request.cwd === "string" && request.cwd.length > 0
+      typeof request.cwd === "string"
         ? { ...context, cwd: resolve(request.cwd) }
         : context;
     if (request.type === "list_tools") {
