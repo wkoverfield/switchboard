@@ -5422,6 +5422,190 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("grants a scoped, expiring pass and renders a badge", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+
+    await program.parseAsync(["--cwd", root, "grant", "--for", "2h"], {
+      from: "user"
+    });
+
+    const badge = output[0] ?? "";
+    expect(badge).toContain("PASS GRANTED");
+    expect(badge).toContain("acting as agent");
+    expect(badge).toContain("→ github_findu_*");
+    expect(badge).toContain("→ vercel_preview_*");
+    expect(badge).toContain("everything else denied");
+    expect(badge).toContain("expires in 2h");
+    expect(badge).toContain("switchboard revoke");
+  });
+
+  it("returns a scoped grant contract as JSON", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+
+    await program.parseAsync(
+      ["--cwd", root, "grant", "--for", "1h", "--profiles", "github_findu", "--json"],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      mandate: {
+        agentRole: string;
+        profiles: string[];
+        allowedTools: string[];
+        lease: string;
+      };
+      workspaceLease: { schemaVersion: string };
+    };
+    expect(parsed.mandate.profiles).toEqual(["github_findu"]);
+    expect(parsed.mandate.allowedTools).toEqual(["github_findu_*"]);
+    expect(parsed.mandate.lease).toBe("1h");
+    expect(parsed.workspaceLease.schemaVersion).toBe(
+      "switchboard.workspace-lease.v1"
+    );
+  });
+
+  it("guides to setup when there is nothing to grant", async () => {
+    const root = makeTempProject();
+    writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");
+    writeFileSync(join(root, ".switchboard.yaml"), "version: 1\n");
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(["--cwd", root, "grant", "--json"], {
+      from: "user"
+    });
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      code: string;
+      nextActions: string[];
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.code).toBe("grant_no_profiles");
+    expect(parsed.nextActions.join("\n")).toContain("switchboard scan");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+  });
+
+  it("refuses a second active pass, and revoke frees it", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      writeErr: (message) => errors.push(message),
+      mandateStorePath
+    });
+
+    await program.parseAsync(["--cwd", root, "grant", "--for", "2h"], {
+      from: "user"
+    });
+    await program.parseAsync(["--cwd", root, "grant", "--for", "2h"], {
+      from: "user"
+    });
+    expect(errors.join("\n")).toContain("already has an active pass");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+
+    await program.parseAsync(["--cwd", root, "revoke"], { from: "user" });
+    expect(output[output.length - 1]).toContain("Revoked pass");
+
+    // Freed: a fresh grant now succeeds.
+    await program.parseAsync(["--cwd", root, "grant", "--for", "2h"], {
+      from: "user"
+    });
+    expect(output[output.length - 1]).toContain("PASS GRANTED");
+  });
+
+  it("revoke targets the grant pass, not a hand-made mandate, and honors an explicit id", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      mandateStorePath
+    });
+
+    // A carefully hand-made mandate lives alongside a grant pass on this repo.
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "mandate",
+        "create",
+        "hand-made",
+        "--agent",
+        "worker",
+        "--profiles",
+        "github_findu",
+        "--branch",
+        "main",
+        "--lease",
+        "2h"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(["--cwd", root, "grant", "--for", "2h"], {
+      from: "user"
+    });
+
+    // Default revoke must cancel the grant pass, never the hand-made mandate.
+    await program.parseAsync(["--cwd", root, "revoke"], { from: "user" });
+    expect(output[output.length - 1]).toContain("Revoked pass grant-main");
+
+    await program.parseAsync(["--cwd", root, "mandate", "status", "--json"], {
+      from: "user"
+    });
+    const status = JSON.parse(output[output.length - 1] ?? "{}") as {
+      mandates: Array<{ id: string; runtimeStatus: string }>;
+    };
+    const handMade = status.mandates.find((m) => m.id === "hand-made");
+    const grantPass = status.mandates.find((m) => m.id === "grant-main");
+    expect(handMade?.runtimeStatus).toBe("active");
+    expect(grantPass?.runtimeStatus).toBe("closed");
+
+    // The hand-made mandate can still be revoked, but only explicitly by id.
+    await program.parseAsync(["--cwd", root, "revoke", "hand-made"], {
+      from: "user"
+    });
+    expect(output[output.length - 1]).toContain("Revoked pass hand-made");
+  });
+
+  it("revoke reports when there is no active pass", async () => {
+    const root = makeTempProject();
+    writeMandateConfig(root);
+    const mandateStorePath = join(root, "state", "mandates.json");
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: () => {},
+      writeErr: (message) => errors.push(message),
+      mandateStorePath
+    });
+
+    await program.parseAsync(["--cwd", root, "revoke"], { from: "user" });
+    expect(errors.join("\n")).toContain("no active pass");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+  });
+
   it("creates and shows repo-scoped mandate JSON", async () => {
     const root = makeTempProject();
     writeMandateConfig(root);
