@@ -11,6 +11,7 @@ import {
   getDaemonStatus,
   evaluateMandateToolPolicy,
   listApprovalRequests,
+  listMandates,
   loadSwitchboardConfig,
   markApprovalRequestStale,
   markPendingApprovalRequestsStale,
@@ -1047,6 +1048,39 @@ function daemonRecoveryNextActions(message: string): string[] {
   return [];
 }
 
+// Auto-bind the live pass for a repo when an agent connects without an explicit
+// --mandate. This is what makes a user-level install work: the agent connects
+// with no mandate, and "switchboard grant" in the repo scopes it automatically.
+// Only binds when exactly one active pass matches the current branch: zero means
+// "no pass, serve configured profiles as before", and ambiguity must not
+// silently pick one (the agent should pass --mandate to disambiguate).
+async function resolveAutoGrantPass(
+  repoPath: string
+): Promise<MandateWithStatus | undefined> {
+  let branch: string | undefined;
+  try {
+    branch = resolveGitWorktreeBinding(repoPath)?.branch;
+  } catch {
+    branch = undefined;
+  }
+
+  let active: MandateWithStatus[];
+  try {
+    active = (await listMandates({ repoPath })).filter(
+      (mandate) => mandate.runtimeStatus === "active"
+    );
+  } catch {
+    // A missing or unreadable store must not break serving; behave as no pass.
+    return undefined;
+  }
+
+  const matches =
+    branch === undefined
+      ? active
+      : active.filter((mandate) => mandate.branch === branch);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 async function routerForConfiguredProfiles(
   context: DaemonSocketContext,
   mandateId?: string
@@ -1087,6 +1121,13 @@ async function routerForConfiguredProfiles(
         nextActions: daemonRecoveryNextActions(message)
       };
     }
+  } else {
+    // No explicit --mandate: auto-bind the live grant pass for this repo and
+    // branch. This is what makes a user-level install work: the agent connects
+    // without a mandate, and "switchboard grant" in the repo scopes it
+    // automatically. Falls through to all configured profiles when no pass is
+    // live, preserving the prior no-mandate behavior.
+    mandate = await resolveAutoGrantPass(configCwdBase(loaded, context.cwd));
   }
 
   let profiles: StdioUpstreamProfile[];
