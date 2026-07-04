@@ -1051,7 +1051,9 @@ export function createProgram(io: ProgramIo = {}): Command {
       } catch (error) {
         // A corrupt mandate store must not crash the health command;
         // degrade to "unknown" and say so instead of guessing.
-        activePassesError = messageFromError(error);
+        activePassesError = mandateMessageInPassVocabulary(
+          messageFromError(error)
+        );
       }
 
       const status = {
@@ -4030,7 +4032,7 @@ export function createProgram(io: ProgramIo = {}): Command {
               writeCommandError({
                 json: options.json,
                 code: "mandate_status_failed",
-                message: messageFromError(error)
+                message: mandateMessageInPassVocabulary(messageFromError(error))
               });
               return;
             }
