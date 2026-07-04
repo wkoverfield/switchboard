@@ -799,8 +799,8 @@ export function createProgram(io: ProgramIo = {}): Command {
 
   program
     .command("run")
-    .description("Run an allowed provider command with mandate-scoped credentials and audit.")
-    .requiredOption("--mandate <id>", "active mandate id")
+    .description("Run an allowed provider command with pass-scoped credentials and audit.")
+    .requiredOption("--mandate <id>", "active pass id")
     .option("--json", "print machine-readable JSON")
     .allowUnknownOption(false)
     .argument("<command>", "provider command to run")
@@ -938,7 +938,7 @@ export function createProgram(io: ProgramIo = {}): Command {
           writeCommandError({
             json: options.json,
             code: runErrorCode(message),
-            message,
+            message: mandateMessageInPassVocabulary(message),
             nextActions: runErrorNextActions(message, options.mandate)
           });
           process.exitCode = 1;
@@ -1404,7 +1404,7 @@ export function createProgram(io: ProgramIo = {}): Command {
             nextSteps: [
               `switchboard doctor`,
               `switchboard presets check ${template.id} --profile ${configuredProfileName}`,
-              `switchboard mandate create --from ${template.id}`
+              `switchboard pass create --from ${template.id}`
             ].map((step) =>
               rewriteSwitchboardCommand(step, switchboardCommandPrefixForRepo(cwd))
             )
@@ -1964,7 +1964,7 @@ export function createProgram(io: ProgramIo = {}): Command {
     .command("tools")
     .description("List the configured Switchboard tool surface.")
     .option("--json", "print machine-readable JSON")
-    .option("--mandate <id>", "show tools through an active mandate")
+    .option("--mandate <id>", "show tools through an active pass")
     .action(async (options: { json?: boolean; mandate?: string }) => {
       const globalOptions = program.opts<{ cwd?: string }>();
       const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
@@ -2189,12 +2189,13 @@ export function createProgram(io: ProgramIo = {}): Command {
     .description("Print local Switchboard demo command sequences.");
 
   demo
-    .command("mandate [profile]")
-    .description("Print a local task-scoped mandate demo for one stdio profile.")
+    .command("pass [profile]")
+    .alias("mandate")
+    .description("Print a local task-scoped pass demo for one stdio profile.")
     .option("--task <task>", "demo task name")
-    .option("--agent <role>", "agent role for the demo mandate", "implementer")
-    .option("--branch <branch>", "branch to bind the demo mandate")
-    .option("--lease <duration>", "demo mandate lease duration", "30m")
+    .option("--agent <role>", "agent role for the demo pass", "implementer")
+    .option("--branch <branch>", "branch to bind the demo pass")
+    .option("--lease <duration>", "demo pass lease duration", "30m")
     .option(
       "--approval-tool <tool>",
       "namespaced tool to mark approval-required"
@@ -2533,7 +2534,7 @@ export function createProgram(io: ProgramIo = {}): Command {
     .command("mcp")
     .description("Serve MCP over stdio through the local Switchboard daemon.")
     .option("--runtime-dir <path>", "override daemon runtime directory")
-    .option("--mandate <id>", "bind routed tool calls to an active mandate")
+    .option("--mandate <id>", "bind routed tool calls to an active pass")
     .option(
       "--approval-wait <duration>",
       "wait for approval decisions during gated tool calls, like 30s, 2m, or 0"
@@ -2620,7 +2621,7 @@ export function createProgram(io: ProgramIo = {}): Command {
   program
     .command("serve")
     .description("Serve configured stdio MCP upstreams through one Switchboard MCP endpoint.")
-    .option("--mandate <id>", "bind routed tool calls to an active mandate")
+    .option("--mandate <id>", "bind routed tool calls to an active pass")
     .action(async (options: { mandate?: string }) => {
       const globalOptions = program.opts<{ cwd?: string }>();
       const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
@@ -2896,7 +2897,7 @@ export function createProgram(io: ProgramIo = {}): Command {
             message: `this repo already has an active pass on "${branch}".`,
             nextActions: [
               "End it early with switchboard revoke, or wait for it to expire.",
-              "See it with switchboard mandate status."
+              "See it with switchboard pass status."
             ]
           });
           return;
@@ -3099,34 +3100,35 @@ export function createProgram(io: ProgramIo = {}): Command {
     });
 
   program
-    .command("mandate")
-    .description("Create and inspect task-scoped coding-agent mandates.")
+    .command("pass")
+    .alias("mandate")
+    .description("Create and inspect the scoped passes agents work under.")
     .addCommand(
       new Command("create")
-        .description("Create a local task-scoped mandate.")
+        .description("Create a local task-scoped pass.")
         .argument("[task]", "task name or summary")
         .option(
           "--from <preset>",
-          "use a provider safety template to fill mandate defaults and policy"
+          "use a provider safety template to fill pass defaults and policy"
         )
         .option(
           "--from-authority <file>",
-          "use a checked authority map draft file as the mandate policy"
+          "use a checked authority map draft file as the pass policy"
         )
         .option(
           "--accept-review",
-          "acknowledge authority map warnings/review tools before creating the mandate"
+          "acknowledge authority map warnings/review tools before creating the pass"
         )
-        .option("--agent <role>", "agent role for this mandate")
+        .option("--agent <role>", "agent role for this pass")
         .option(
           "--actor <name>",
-          "human, harness, or client identity creating the mandate"
+          "human, harness, or client identity creating the pass"
         )
         .option(
           "--profiles <profiles>",
           "comma-separated Switchboard profiles to bind"
         )
-        .option("--branch <branch>", "branch the mandate is scoped to")
+        .option("--branch <branch>", "branch the pass is scoped to")
         .option("--lease <duration>", "lease duration, like 30m, 2h, or 1d")
         .option(
           "--allow-tool <pattern>",
@@ -3261,7 +3263,7 @@ export function createProgram(io: ProgramIo = {}): Command {
               writeCommandError({
                 json: options.json,
                 code: "authority_map_profile_mismatch",
-                message: `authority map "${authorityMap.profileName}" can only create a mandate for that one profile`,
+                message: `authority map "${authorityMap.profileName}" can only create a pass for that one profile`,
                 nextActions: [
                   `Use --profiles ${authorityMap.profileName} or omit --profiles.`,
                   "Create separate authority maps for additional profiles."
@@ -3282,7 +3284,7 @@ export function createProgram(io: ProgramIo = {}): Command {
               writeCommandError({
                 json: options.json,
                 code: "missing_mandate_options",
-                message: `missing required mandate option(s): ${missingRequired.join(", ")}`,
+                message: `missing required pass option(s): ${missingRequired.join(", ")}`,
                 nextActions: [
                   "Pass the required options explicitly or use --from <preset>."
                 ]
@@ -3299,7 +3301,7 @@ export function createProgram(io: ProgramIo = {}): Command {
               writeCommandError({
                 json: options.json,
                 code: "mandate_profiles_not_found",
-                message: `mandate profiles were not found: ${missingProfiles.join(", ")}`,
+                message: `pass profiles were not found: ${missingProfiles.join(", ")}`,
                 nextActions: ["Run switchboard status to list configured profiles."]
               });
               return;
@@ -3325,7 +3327,7 @@ export function createProgram(io: ProgramIo = {}): Command {
               writeCommandError({
                 json: options.json,
                 code: "missing_mandate_options",
-                message: "missing required mandate option(s): --branch",
+                message: "missing required pass option(s): --branch",
                 nextActions: [
                   "Pass --branch explicitly or run from a git worktree."
                 ]
@@ -3336,7 +3338,7 @@ export function createProgram(io: ProgramIo = {}): Command {
               writeCommandError({
                 json: options.json,
                 code: "mandate_branch_mismatch",
-                message: `mandate branch "${branch}" does not match current git branch "${gitBinding.branch}" in ${gitBinding.worktreePath}`,
+                message: `pass branch "${branch}" does not match current git branch "${gitBinding.branch}" in ${gitBinding.worktreePath}`,
                 nextActions: [
                   `Switch to branch "${branch}" or pass --branch "${gitBinding.branch}".`
                 ]
@@ -3483,20 +3485,20 @@ export function createProgram(io: ProgramIo = {}): Command {
     )
     .addCommand(
       new Command("child")
-        .description("Create a child mandate narrowed from an active parent.")
+        .description("Create a child pass narrowed from an active parent.")
         .argument("<task>", "child task name or summary")
-        .requiredOption("--parent <id>", "active parent mandate id")
-        .requiredOption("--agent <role>", "agent role for this child mandate")
+        .requiredOption("--parent <id>", "active parent pass id")
+        .requiredOption("--agent <role>", "agent role for this child pass")
         .requiredOption(
           "--profiles <profiles>",
           "comma-separated Switchboard profiles to bind"
         )
-        .requiredOption("--branch <branch>", "branch the child mandate is scoped to")
+        .requiredOption("--branch <branch>", "branch the child pass is scoped to")
         .requiredOption("--lease <duration>", "lease duration, like 30m, 2h, or 1d")
-        .option("--delegated-by <actor>", "actor creating the child mandate")
+        .option("--delegated-by <actor>", "actor creating the child pass")
         .option(
           "--actor <name>",
-          "human, harness, or client identity creating the child mandate (defaults to --delegated-by)"
+          "human, harness, or client identity creating the child pass (defaults to --delegated-by)"
         )
         .option(
           "--allow-tool <pattern>",
@@ -3576,7 +3578,7 @@ export function createProgram(io: ProgramIo = {}): Command {
               writeCommandError({
                 json: options.json,
                 code: "child_mandate_profiles_not_found",
-                message: `child mandate profiles were not found: ${missingProfiles.join(", ")}`,
+                message: `child pass profiles were not found: ${missingProfiles.join(", ")}`,
                 nextActions: ["Run switchboard status to list configured profiles."]
               });
               return;
@@ -3599,7 +3601,7 @@ export function createProgram(io: ProgramIo = {}): Command {
               writeCommandError({
                 json: options.json,
                 code: "child_mandate_branch_mismatch",
-                message: `child mandate branch "${branch}" does not match current git branch "${gitBinding.branch}" in ${gitBinding.worktreePath}`,
+                message: `child pass branch "${branch}" does not match current git branch "${gitBinding.branch}" in ${gitBinding.worktreePath}`,
                 nextActions: [
                   `Switch to branch "${branch}" or pass --branch "${gitBinding.branch}".`
                 ]
@@ -3712,8 +3714,8 @@ export function createProgram(io: ProgramIo = {}): Command {
     )
     .addCommand(
       new Command("handoff")
-        .description("Close a mandate with a local handoff report.")
-        .argument("<id>", "mandate id to hand off")
+        .description("Close a pass with a local handoff report.")
+        .argument("<id>", "pass id to hand off")
         .requiredOption(
           "--state <state>",
           "handoff state: completed, blocked, or cancelled"
@@ -3783,7 +3785,7 @@ export function createProgram(io: ProgramIo = {}): Command {
                   writeCommandError({
                     json: options.json,
                     code: "mandate_readiness_blocked",
-                    message: `cannot hand off mandate "${normalizeMandateId(id)}" while readiness blockers remain: ${report.readiness.blockers.join("; ")}. Use --ignore-readiness to close anyway.`,
+                    message: `cannot hand off pass "${normalizeMandateId(id)}" while readiness blockers remain: ${report.readiness.blockers.join("; ")}. Use --ignore-readiness to close anyway.`,
                     nextActions: report.readiness.nextActions
                   });
                   return;
@@ -3822,10 +3824,10 @@ export function createProgram(io: ProgramIo = {}): Command {
     )
     .addCommand(
       new Command("escalate")
-        .description("Build a local escalation plan for a mandate tree.")
-        .argument("<id>", "root or child mandate id to escalate")
+        .description("Build a local escalation plan for a pass tree.")
+        .argument("<id>", "root or child pass id to escalate")
         .option("--json", "print machine-readable JSON")
-        .option("--all", "search mandates for all repos")
+        .option("--all", "search passes for all repos")
         .option("--log-limit <count>", "maximum related audit entries", "20")
         .action(
           async (
@@ -3884,8 +3886,8 @@ export function createProgram(io: ProgramIo = {}): Command {
     )
     .addCommand(
       new Command("renew")
-        .description("Renew an open mandate lease from now.")
-        .argument("<id>", "mandate id to renew")
+        .description("Renew an open pass lease from now.")
+        .argument("<id>", "pass id to renew")
         .requiredOption("--lease <duration>", "new lease duration, like 30m, 2h, or 1d")
         .option(
           "--actor <name>",
@@ -3916,7 +3918,7 @@ export function createProgram(io: ProgramIo = {}): Command {
                 options.json
                   ? JSON.stringify(result, null, 2)
                   : [
-                      `Renewed mandate ${mandate.id}`,
+                      `Renewed pass ${mandate.id}`,
                       `Runtime: ${mandate.runtimeStatus}`,
                       `Lease: ${mandate.lease}`,
                       `Expires: ${mandate.expiresAt}`,
@@ -3941,10 +3943,10 @@ export function createProgram(io: ProgramIo = {}): Command {
     )
     .addCommand(
       new Command("report")
-        .description("Show a mandate tree handoff report.")
-        .argument("<id>", "root or child mandate id to report")
+        .description("Show a pass tree handoff report.")
+        .argument("<id>", "root or child pass id to report")
         .option("--json", "print machine-readable JSON")
-        .option("--all", "search mandates for all repos")
+        .option("--all", "search passes for all repos")
         .option("--log-limit <count>", "maximum related audit entries", "20")
         .action(
           async (
@@ -4002,10 +4004,10 @@ export function createProgram(io: ProgramIo = {}): Command {
     )
     .addCommand(
       new Command("status")
-        .description("Show local task-scoped mandates.")
-        .argument("[id]", "mandate id to inspect")
+        .description("Show local task-scoped passes.")
+        .argument("[id]", "pass id to inspect")
         .option("--json", "print machine-readable JSON")
-        .option("--all", "show mandates for all repos")
+        .option("--all", "show passes for all repos")
         .option("--verbose", "show detailed policy and delegation fields")
         .action(
           async (
@@ -4049,9 +4051,9 @@ export function createProgram(io: ProgramIo = {}): Command {
               writeCommandError({
                 json: options.json,
                 code: "mandate_not_found",
-                message: `mandate "${id}" was not found`,
+                message: `pass "${id}" was not found`,
                 nextActions: [
-                  "Run switchboard mandate status to list mandates for this repo."
+                  "Run switchboard pass status to list passes for this repo."
                 ]
               });
               return;
@@ -4070,13 +4072,13 @@ export function createProgram(io: ProgramIo = {}): Command {
 
   program
     .command("approvals")
-    .description("Show local mandate approval requests.")
+    .description("Show approval requests for this repo's passes.")
     .option("--json", "print machine-readable JSON")
     .option("--all", "show approval requests for all repos")
-    .option("--mandate <id>", "filter approval requests by mandate id")
+    .option("--mandate <id>", "filter approval requests by pass id")
     .option(
       "--include-children",
-      "with --mandate, include approval requests for child mandates"
+      "with --mandate, include approval requests for child passes"
     )
     .option(
       "--status <status>",
@@ -4256,7 +4258,7 @@ export function createProgram(io: ProgramIo = {}): Command {
 
   program
     .command("approve <id>")
-    .description("Approve a local mandate approval request.")
+    .description("Approve a pending approval request from a pass.")
     .option("--reason <reason>", "optional decision reason")
     .option("--json", "print machine-readable JSON")
     .action(
@@ -4273,7 +4275,7 @@ export function createProgram(io: ProgramIo = {}): Command {
 
   program
     .command("deny <id>")
-    .description("Deny a local mandate approval request.")
+    .description("Deny a pending approval request from a pass.")
     .option("--reason <reason>", "optional decision reason")
     .option("--json", "print machine-readable JSON")
     .action(
@@ -4293,7 +4295,7 @@ export function createProgram(io: ProgramIo = {}): Command {
     .description("Show local Switchboard audit log entries.")
     .option("--json", "print machine-readable JSON")
     .option("--limit <count>", "maximum entries to print", "20")
-    .option("--mandate <id>", "filter entries by mandate id")
+    .option("--mandate <id>", "filter entries by pass id")
     .action(async (options: { json?: boolean; limit: string; mandate?: string }) => {
       const limit = parsePositiveInteger(options.limit);
       if (limit === undefined) {
@@ -4537,7 +4539,7 @@ function formatStatus(status: {
   // Answer "is a pass live right now?" before anything else.
   if (status.activePassesError !== null) {
     lines.push(
-      `Active passes: unknown (mandate store unreadable: ${status.activePassesError})`
+      `Active passes: unknown (pass store unreadable: ${status.activePassesError})`
     );
   } else if (status.activePasses.length === 0) {
     lines.push(
@@ -5938,7 +5940,10 @@ function doctorNextActionCandidates(options: {
   }
   for (const step of options.nextSteps) {
     candidates.push({
-      kind: step.includes("mandate create") ? "mandate-create" : "info",
+      kind:
+        step.includes("pass create") || step.includes("mandate create")
+          ? "mandate-create"
+          : "info",
       command: step,
       reason: "Doctor suggested this follow-up."
     });
@@ -6551,7 +6556,7 @@ function formatProviderSetup(result: {
     ...(result.label === "Supabase Dev"
       ? [
           "",
-          "Safety note: use a development project token only; for live dogfood, add upstream project scoping before creating mandates."
+          "Safety note: use a development project token only; for live dogfood, add upstream project scoping before creating passes."
         ]
       : []),
     "",
@@ -6594,8 +6599,8 @@ function formatProviderAddSummary(plan: ProviderAddPlan): string[] {
     `one ${plan.rendered.template.provider} MCP profile: ${plan.rendered.profileName}`,
     `one local token alias for ${plan.rendered.template.secretEnvName}: ${plan.rendered.secretRef}`,
     `agent clients route through Switchboard after install`,
-    `mandate policy: ${policy.allowedTools?.length ?? 0} allow pattern(s), ${policy.approvalGates?.length ?? 0} approval gate(s), ${policy.deniedTools?.length ?? 0} deny pattern(s)`,
-    `mandate command binds authority to the current repo, branch, and ${plan.rendered.template.recommendedMandate.lease} lease`
+    `pass policy: ${policy.allowedTools?.length ?? 0} allow pattern(s), ${policy.approvalGates?.length ?? 0} approval gate(s), ${policy.deniedTools?.length ?? 0} deny pattern(s)`,
+    `pass command binds authority to the current repo, branch, and ${plan.rendered.template.recommendedMandate.lease} lease`
   ];
 
   if (plan.id === "supabase-dev") {
@@ -6660,7 +6665,7 @@ function formatProviderPresetShow(
     "Secret setup:",
     ...rendered.secretCommands.map((command) => `  ${command}`),
     "",
-    "Recommended mandate:",
+    "Recommended pass:",
     `  ${rendered.mandateCommand}`,
     "",
     ...formatRenderedProviderMandatePolicy(rendered),
@@ -6688,7 +6693,7 @@ function formatRenderedProviderMandatePolicy(
 ): string[] {
   const policy = renderedProviderMandatePolicy(rendered);
   return [
-    "Rendered mandate policy:",
+    "Rendered pass policy:",
     `  Allowed tools: ${policy.allowedTools?.join(", ") ?? "all"}`,
     `  Denied tools: ${policy.deniedTools?.join(", ") ?? "none"}`,
     "  Approval gates:",
@@ -6763,7 +6768,7 @@ function formatProviderPresetCheck(result: {
     `Preset: ${result.presetId} (${result.provider})`,
     `Profile: ${result.profileName}`,
     `Namespace: ${result.namespace}`,
-    `Requires mandate policy: ${result.requiresMandatePolicy ? "yes" : "no"}`,
+    `Requires pass policy: ${result.requiresMandatePolicy ? "yes" : "no"}`,
     `Tools: ${result.counts.tools}`,
     `Allowed: ${result.counts.allowed}`,
     `Allowed sensitive: ${result.counts.allowedSensitive}`,
@@ -7144,7 +7149,7 @@ function loadAuthorityMapForMandate(options: {
         ok: false,
         error: {
           code: "authority_map_invalid",
-          message: `authority map "${sourcePath}" is not valid for mandate creation`,
+          message: `authority map "${sourcePath}" is not valid for pass creation`,
           nextActions: [
             `Run switchboard authority check ${shellQuote(sourcePath)} --json and fix every error.`
           ]
@@ -7257,7 +7262,7 @@ function formatMandateCreatedFromAuthority(
     `  Profile: ${authorityMap.profileName}`,
     `  Tools: allowed ${authorityMap.check.counts.allowed}, approval-required ${authorityMap.check.counts.approvalRequired}, denied ${authorityMap.check.counts.denied}, review ${authorityMap.check.counts.review}`,
     `  Human review acknowledged: ${authorityMap.acceptedReview ? "yes" : "not required"}`,
-    "  Review tools stay denied by the suggested mandate policy."
+    "  Review tools stay denied by the suggested pass policy."
   ].join("\n");
 }
 
@@ -7270,7 +7275,7 @@ function formatToolSurface(result: {
 }, repoPath?: string): string {
   const lines = [
     "Switchboard tools",
-    `Mandate: ${
+    `Pass: ${
       result.mandate
         ? `${result.mandate.id} (${result.mandate.runtimeStatus})`
         : "none"
@@ -7298,7 +7303,7 @@ function formatToolSurface(result: {
       `  ${commandPrefix} mcp --mandate ${result.mandate.id}`,
       `  ${commandPrefix} approvals --mandate ${result.mandate.id} --json`,
       `  ${commandPrefix} logs --mandate ${result.mandate.id} --json`,
-      `  ${commandPrefix} mandate handoff ${result.mandate.id} --state completed --summary <summary>`
+      `  ${commandPrefix} pass handoff ${result.mandate.id} --state completed --summary <summary>`
     );
   }
 
@@ -7326,7 +7331,7 @@ function formatDemoMandate(options: {
     shellQuote(label)
   ]);
   const createArgs = [
-    "mandate",
+    "pass",
     "create",
     shellQuote(options.task),
     "--agent",
@@ -7349,12 +7354,12 @@ function formatDemoMandate(options: {
   ];
 
   return [
-    "Switchboard mandate demo",
+    "Switchboard pass demo",
     `Repo: ${options.cwd}`,
     `Profile: ${options.profileName}`,
     `Namespace: ${options.namespace}`,
     `Task: ${options.task}`,
-    `Mandate id: ${options.mandateId}`,
+    `Pass id: ${options.mandateId}`,
     "",
     "Installed CLI commands:",
     `  ${commandPrefix} ${createArgs.join(" ")}`,
@@ -7363,8 +7368,8 @@ function formatDemoMandate(options: {
     `  ${commandPrefix} mcp --mandate ${options.mandateId}`,
     `  ${commandPrefix} approvals --mandate ${options.mandateId}`,
     `  ${commandPrefix} logs --mandate ${options.mandateId}`,
-    `  ${commandPrefix} mandate handoff ${options.mandateId} --state completed --summary ${shellQuote("Demo finished")} --by human-demo`,
-    `  ${commandPrefix} mandate report ${options.mandateId} --json`,
+    `  ${commandPrefix} pass handoff ${options.mandateId} --state completed --summary ${shellQuote("Demo finished")} --by human-demo`,
+    `  ${commandPrefix} pass report ${options.mandateId} --json`,
     "",
     "Source checkout prefix:",
     `  ${sourcePrefix}`,
@@ -7505,7 +7510,7 @@ function formatGrantBadge(
 function formatMandateCreated(path: string, mandate: MandateWithStatus): string {
   const commandPrefix = `switchboard --cwd ${shellQuote(mandate.repoPath)}`;
   return [
-    `Created mandate ${mandate.id}`,
+    `Created pass ${mandate.id}`,
     `Task: ${mandate.task}`,
     ...(mandate.parentMandateId
       ? [
@@ -7535,7 +7540,7 @@ function formatMandateCreated(path: string, mandate: MandateWithStatus): string 
     `  ${commandPrefix} mcp --mandate ${mandate.id}`,
     `  ${commandPrefix} approvals --mandate ${mandate.id} --json`,
     `  ${commandPrefix} logs --mandate ${mandate.id} --json`,
-    `  ${commandPrefix} mandate handoff ${mandate.id} --state completed --summary <summary>`
+    `  ${commandPrefix} pass handoff ${mandate.id} --state completed --summary <summary>`
   ].join("\n");
 }
 
@@ -8035,10 +8040,10 @@ function mandateReportReadiness(options: {
     .filter((item): item is NonNullable<typeof item> => item !== null);
   const blockers = [
     ...(options.selected.handoffState !== "open"
-      ? [`selected mandate is already ${options.selected.handoffState}`]
+      ? [`selected pass is already ${options.selected.handoffState}`]
       : []),
     ...openChildMandates.map(
-      (mandate) => `child mandate "${mandate.id}" remains open`
+      (mandate) => `child pass "${mandate.id}" remains open`
     ),
     ...pendingApprovalRequests.map(
       (request) => `approval request "${request.id}" is pending`
@@ -8050,7 +8055,7 @@ function mandateReportReadiness(options: {
   const nextActions = [
     ...openChildMandates.map(
       (mandate) =>
-        `switchboard mandate handoff ${mandate.id} --state completed --summary <summary>`
+        `switchboard pass handoff ${mandate.id} --state completed --summary <summary>`
     ),
     ...pendingApprovalRequests.map(
       (request) =>
@@ -8168,11 +8173,11 @@ function createMandateEscalationPayload(
       priority: "handoff",
       mandateId: mandate.id,
       mandateUid: mandate.mandateUid,
-      title: `Child mandate ${mandate.id} remains open`,
-      detail: `Worker role ${mandate.agentRole} on branch ${mandate.branch} must hand off before the selected mandate can close.`,
+      title: `Child pass ${mandate.id} remains open`,
+      detail: `Worker role ${mandate.agentRole} on branch ${mandate.branch} must hand off before the selected pass can close.`,
       commands: [
-        `switchboard mandate report ${mandate.id} --json`,
-        `switchboard mandate handoff ${mandate.id} --state completed --summary <summary>`
+        `switchboard pass report ${mandate.id} --json`,
+        `switchboard pass handoff ${mandate.id} --state completed --summary <summary>`
       ]
     }));
   const missingSecretItems: MandateEscalationItem[] =
@@ -8182,7 +8187,7 @@ function createMandateEscalationPayload(
       mandateId: report.selectedMandateId,
       mandateUid: report.selectedMandateUid,
       title: `Secret ref ${missing.ref} is ${missing.status}`,
-      detail: `Profiles ${missing.profiles.join(", ")} need ${missing.envNames.join(", ")} before this mandate can run.`,
+      detail: `Profiles ${missing.profiles.join(", ")} need ${missing.envNames.join(", ")} before this pass can run.`,
       commands: [`switchboard secrets set ${missing.ref} --value-stdin`]
     }));
   const handoffItems: MandateEscalationItem[] = report.results.handoffs
@@ -8202,11 +8207,11 @@ function createMandateEscalationPayload(
       summary: handoff.summary,
       nextSteps: handoff.nextSteps,
       artifacts: handoff.artifacts,
-      title: `Mandate ${handoff.id} is ${handoff.state}`,
+      title: `Pass ${handoff.id} is ${handoff.state}`,
       detail:
         handoff.summary ??
-        `Mandate ${handoff.id} handed off with state ${handoff.state}.`,
-      commands: [`switchboard mandate report ${handoff.id} --json`]
+        `Pass ${handoff.id} handed off with state ${handoff.state}.`,
+      commands: [`switchboard pass report ${handoff.id} --json`]
     }));
   const items = [
     ...approvalItems,
@@ -8276,7 +8281,7 @@ function approvalEscalationNextActions(
   request: MandateReportReadiness["pendingApprovalRequests"][number]
 ): string[] {
   return [
-    `decide whether ${request.toolName} is safe for mandate ${request.mandateId}`,
+    `decide whether ${request.toolName} is safe for pass ${request.mandateId}`,
     `use --reason when approving or denying to preserve decision context`,
     `retry the original ${request.toolName} tool call after approval`
   ];
@@ -8287,11 +8292,11 @@ function formatMandateEscalationCopyText(
   items: MandateEscalationItem[]
 ): string {
   if (items.length === 0) {
-    return `Switchboard mandate ${report.selectedMandateId} has no local escalation items.`;
+    return `Switchboard pass ${report.selectedMandateId} has no local escalation items.`;
   }
 
   return [
-    `Switchboard escalation for mandate ${report.selectedMandateId}: ${items.length} item(s) need attention.`,
+    `Switchboard escalation for pass ${report.selectedMandateId}: ${items.length} item(s) need attention.`,
     ...items.map((item) => `- ${item.title}: ${item.detail}`),
     "Suggested local commands:",
     ...uniqueStrings(items.flatMap((item) => item.commands)).map(
@@ -8594,13 +8599,13 @@ function formatMandateStatus(result: {
   readiness?: MandateStatusReadiness;
 }, options: { verbose?: boolean } = {}): string {
   const lines = [
-    "Switchboard mandates",
+    "Switchboard passes",
     `Store: ${result.path}`,
     `Repo: ${result.repoPath ?? "all"}`
   ];
 
   if (result.mandates.length === 0) {
-    lines.push("", "No mandates found.");
+    lines.push("", "No passes found.");
     return lines.join("\n");
   }
 
@@ -8648,7 +8653,7 @@ function formatMandateStatusSummaryLines(
   const denySummary = `${mandate.deniedTools.length} denied`;
   const approvalSummary = `${approvalCount} approval-required`;
   return [
-    `Mandate: ${mandate.id}`,
+    `Pass: ${mandate.id}`,
     `  Lease: ${mandate.runtimeStatus}; expires ${mandate.expiresAt}`,
     `  Repo: ${mandate.repoPath}`,
     `  Branch: ${mandate.branch}`,
@@ -8659,13 +8664,13 @@ function formatMandateStatusSummaryLines(
     `  MCP: switchboard mcp --mandate ${mandate.id}`,
     `  Run: switchboard run --mandate ${mandate.id} -- <command>`,
     `  Approvals: switchboard approvals --mandate ${mandate.id}`,
-    `  Report: switchboard mandate report ${mandate.id}`
+    `  Report: switchboard pass report ${mandate.id}`
   ];
 }
 
 function formatMandateStatusVerboseLine(mandate: MandateWithStatus): string {
   return [
-    `Mandate: ${mandate.id}`,
+    `Pass: ${mandate.id}`,
     `  Runtime: ${mandate.runtimeStatus}`,
     `  Task: ${mandate.task}`,
     `  Agent: ${mandate.agentRole}`,
@@ -8697,7 +8702,7 @@ function formatMandateStatusVerboseLine(mandate: MandateWithStatus): string {
     `    switchboard mcp --mandate ${mandate.id}`,
     `    switchboard run --mandate ${mandate.id} -- <command>`,
     `    switchboard approvals --mandate ${mandate.id}`,
-    `    switchboard mandate report ${mandate.id}`
+    `    switchboard pass report ${mandate.id}`
   ].join("\n");
 }
 
@@ -8734,23 +8739,23 @@ async function createMandateStatusReadiness(options: {
     const nextActions: string[] = [];
 
     if (mandate.runtimeStatus === "expired") {
-      blockers.push(`mandate "${mandate.id}" is expired`);
-      nextActions.push(`switchboard mandate renew ${mandate.id} --lease ${mandate.lease}`);
+      blockers.push(`pass "${mandate.id}" is expired`);
+      nextActions.push(`switchboard pass renew ${mandate.id} --lease ${mandate.lease}`);
     }
     if (mandate.runtimeStatus === "closed") {
       warnings.push(
-        `mandate "${mandate.id}" is closed with handoff state "${mandate.handoffState}"`
+        `pass "${mandate.id}" is closed with handoff state "${mandate.handoffState}"`
       );
     }
     if (gitBinding && mandate.branch !== gitBinding.branch) {
       blockers.push(
-        `mandate "${mandate.id}" is scoped to branch "${mandate.branch}", but current git branch is "${gitBinding.branch}"`
+        `pass "${mandate.id}" is scoped to branch "${mandate.branch}", but current git branch is "${gitBinding.branch}"`
       );
       nextActions.push(`git switch ${mandate.branch}`);
     }
     if (gitBinding && mandate.worktreePath !== gitBinding.worktreePath) {
       blockers.push(
-        `mandate "${mandate.id}" is scoped to worktree "${mandate.worktreePath}", but current worktree is "${gitBinding.worktreePath}"`
+        `pass "${mandate.id}" is scoped to worktree "${mandate.worktreePath}", but current worktree is "${gitBinding.worktreePath}"`
       );
       nextActions.push(`cd ${mandate.worktreePath}`);
     }
@@ -8790,7 +8795,7 @@ async function createMandateStatusReadiness(options: {
 
 function formatMandateHandoff(path: string, mandate: MandateWithStatus): string {
   return [
-    `Updated mandate ${mandate.id}`,
+    `Updated pass ${mandate.id}`,
     `State: ${mandate.handoffState}`,
     `Runtime: ${mandate.runtimeStatus}`,
     ...(mandate.handoffSummary ? [`Summary: ${mandate.handoffSummary}`] : []),
@@ -8808,13 +8813,13 @@ function formatMandateHandoff(path: string, mandate: MandateWithStatus): string 
 
 function formatMandateReport(report: MandateReportPayload): string {
   const lines = [
-    "Switchboard mandate report",
+    "Switchboard pass report",
     `Store: ${report.path}`,
     `Audit log: ${report.auditLogPath}`,
     `Repo: ${report.repoPath ?? "all"}`,
     `Root: ${report.rootMandateId}`,
     `Selected: ${report.selectedMandateId}`,
-    `Mandates: ${report.counts.mandates} open:${report.counts.open} completed:${report.counts.completed} blocked:${report.counts.blocked} cancelled:${report.counts.cancelled}`,
+    `Passes: ${report.counts.mandates} open:${report.counts.open} completed:${report.counts.completed} blocked:${report.counts.blocked} cancelled:${report.counts.cancelled}`,
     `Runtime: active:${report.counts.active} expired:${report.counts.expired} closed:${report.counts.closed}`,
     `Ready to hand off selected: ${report.readiness.selectedCanHandoff ? "yes" : "no"}`,
     `Results: handoffs:${report.results.counts.handoffs} summaries:${report.results.counts.summaries} nextSteps:${report.results.counts.nextSteps} artifacts:${report.results.counts.artifacts}`,
@@ -8864,7 +8869,7 @@ function formatMandateReport(report: MandateReportPayload): string {
   }
 
   if (report.mandates.length > 0) {
-    lines.push("", "Mandate chain:");
+    lines.push("", "Pass chain:");
     for (const mandate of report.mandates) {
       const parent = mandate.parentMandateId
         ? ` parent:${mandate.parentMandateId}`
@@ -8898,7 +8903,7 @@ function formatMandateReport(report: MandateReportPayload): string {
     lines.push("", "Recent audit entries:");
     for (const entry of report.auditEntries) {
       lines.push(
-        `  ${entry.timestamp} ${entry.status} mandate:${entry.mandateId ?? "none"} ${entry.action}${entry.toolName ? ` ${entry.toolName}` : ""}`
+        `  ${entry.timestamp} ${entry.status} pass:${entry.mandateId ?? "none"} ${entry.action}${entry.toolName ? ` ${entry.toolName}` : ""}`
       );
     }
   }
@@ -8908,7 +8913,7 @@ function formatMandateReport(report: MandateReportPayload): string {
 
 function formatMandateEscalation(escalation: MandateEscalationPayload): string {
   const lines = [
-    "Switchboard mandate escalation",
+    "Switchboard pass escalation",
     `Store: ${escalation.path}`,
     `Repo: ${escalation.repoPath ?? "all"}`,
     `Root: ${escalation.rootMandateId}`,
@@ -9034,7 +9039,7 @@ function formatApprovalRequests(result: {
 
   if (result.mandateId) {
     lines.push(
-      `Scope: mandate ${result.mandateId}${
+      `Scope: pass ${result.mandateId}${
         result.includeChildren ? " + children" : ""
       }`
     );
@@ -9068,7 +9073,7 @@ function formatApprovalRequestDetailLines(
   indent: string
 ): string[] {
   const lines = [`${indent}${request.id} [${request.runtimeStatus}] ${request.toolName}`];
-  lines.push(`${indent}  mandate: ${request.mandateId}`);
+  lines.push(`${indent}  pass: ${request.mandateId}`);
   if (request.parentMandateId) {
     lines.push(`${indent}  parent: ${request.parentMandateId}`);
   }
@@ -9132,7 +9137,7 @@ function formatApprovalDecision(
   return [
     `Updated approval request ${request.id}`,
     `Status: ${request.runtimeStatus}`,
-    `Mandate: ${request.mandateId}`,
+    `Pass: ${request.mandateId}`,
     ...(request.parentMandateId ? [`Parent: ${request.parentMandateId}`] : []),
     ...(request.delegatedBy ? [`Delegated by: ${request.delegatedBy}`] : []),
     ...(request.delegationPath
@@ -9168,7 +9173,7 @@ function formatAuditLogs(
       labelParts.push(entry.toolName);
     }
     if (entry.mandateId) {
-      labelParts.push(`mandate:${entry.mandateId}`);
+      labelParts.push(`pass:${entry.mandateId}`);
     }
     if (entry.approvalGateId) {
       labelParts.push(`gate:${entry.approvalGateId}`);
@@ -9273,7 +9278,7 @@ function validateProviderSecretValue(
           "supabase-dev only accepts development Supabase credentials; this value looks production, admin, root, live, or service-role scoped.",
         nextActions: [
           "Use a development-project Supabase access token with the narrowest available scope.",
-          "For live dogfood, add project scoping to the upstream command before creating mandates."
+          "For live dogfood, add project scoping to the upstream command before creating passes."
         ]
       };
     }
@@ -9408,7 +9413,7 @@ function shouldWriteContractParserErrorAsJson(args: string[]): boolean {
     return true;
   }
 
-  if (command !== "mandate") {
+  if (command !== "mandate" && command !== "pass") {
     return false;
   }
 
@@ -9471,9 +9476,17 @@ function mandateCommandError(
       : isMandateExpiredMessage(message)
         ? "mandate_expired"
         : fallbackCode,
-    message,
+    message: mandateMessageInPassVocabulary(message),
     nextActions: mandateRecoveryNextActions(message)
   };
+}
+
+// Core error messages still say "mandate" (packages/core is unchanged);
+// rewrite the outgoing human prose to the "pass" vocabulary. This is a
+// word-boundary replace, so a quoted task or id that itself contains the
+// word "mandate" would also be rewritten — an accepted tradeoff.
+function mandateMessageInPassVocabulary(message: string): string {
+  return message.replace(/\bmandate\b/g, "pass");
 }
 
 function isMandateNotFoundMessage(message: string): boolean {
@@ -9491,14 +9504,14 @@ function mandateRecoveryNextActions(message: string): string[] {
   const expired = /^mandate "([^"]+)" is expired$/.exec(message);
   if (expired?.[1]) {
     return [
-      `switchboard mandate renew ${expired[1]} --lease 2h`,
-      `switchboard mandate create ${expired[1]} --lease 2h --agent <role> --profiles <profiles> --branch <branch>`
+      `switchboard pass renew ${expired[1]} --lease 2h`,
+      `switchboard pass create ${expired[1]} --lease 2h --agent <role> --profiles <profiles> --branch <branch>`
     ];
   }
 
   const missing = /^mandate "([^"]+)" was not found/.exec(message);
   if (missing?.[1]) {
-    return ["Run switchboard mandate status to list mandates for this repo."];
+    return ["Run switchboard pass status to list passes for this repo."];
   }
 
   const branchMismatch =
@@ -9508,7 +9521,7 @@ function mandateRecoveryNextActions(message: string): string[] {
   if (branchMismatch?.[2]) {
     return [
       `git switch ${branchMismatch[2]}`,
-      `switchboard mandate status ${branchMismatch[1] ?? ""}`.trim()
+      `switchboard pass status ${branchMismatch[1] ?? ""}`.trim()
     ];
   }
 
@@ -9617,7 +9630,9 @@ async function resolveActiveMandateForCommand(options: {
       return undefined;
     }
 
-    options.writeErr(`error: ${messageFromError(error)}`);
+    options.writeErr(
+      `error: ${mandateMessageInPassVocabulary(messageFromError(error))}`
+    );
     return undefined;
   }
 }
@@ -9959,24 +9974,24 @@ function providerTemplateDoctorNextSteps(
   for (const [profileName, profile] of Object.entries(profiles)) {
     if (profile.provider === "github") {
       steps.push(`switchboard presets check github-ci --profile ${profileName}`);
-      steps.push("switchboard mandate create --from github-ci");
+      steps.push("switchboard pass create --from github-ci");
     }
 
     if (profile.provider === "vercel") {
       steps.push(
         `switchboard presets check vercel-preview --profile ${profileName}`
       );
-      steps.push("switchboard mandate create --from vercel-preview");
+      steps.push("switchboard pass create --from vercel-preview");
     }
 
     if (profile.provider === "stripe") {
       steps.push(`switchboard presets check stripe-test --profile ${profileName}`);
-      steps.push("switchboard mandate create --from stripe-test");
+      steps.push("switchboard pass create --from stripe-test");
     }
 
     if (profile.provider === "supabase") {
       steps.push(`switchboard presets check supabase-dev --profile ${profileName}`);
-      steps.push("switchboard mandate create --from supabase-dev");
+      steps.push("switchboard pass create --from supabase-dev");
     }
   }
 
@@ -10014,7 +10029,7 @@ async function validateRunReadiness(options: {
     return {
       ok: false,
       code: "repo_mismatch",
-      message: `mandate "${options.mandate.id}" is scoped to ${options.mandate.repoPath}, not ${options.cwd}`,
+      message: `pass "${options.mandate.id}" is scoped to ${options.mandate.repoPath}, not ${options.cwd}`,
       nextActions: [`cd ${shellQuoteCommandArg(options.mandate.repoPath)}`],
       envKeys: []
     };
@@ -10024,7 +10039,7 @@ async function validateRunReadiness(options: {
     return {
       ok: false,
       code: "worktree_mismatch",
-      message: `mandate "${options.mandate.id}" is scoped to worktree ${options.mandate.worktreePath}`,
+      message: `pass "${options.mandate.id}" is scoped to worktree ${options.mandate.worktreePath}`,
       nextActions: [`cd ${shellQuoteCommandArg(options.mandate.worktreePath)}`],
       envKeys: []
     };
@@ -10035,7 +10050,7 @@ async function validateRunReadiness(options: {
     return {
       ok: false,
       code: "branch_mismatch",
-      message: `mandate "${options.mandate.id}" is scoped to branch ${options.mandate.branch}, but current branch is ${branch}`,
+      message: `pass "${options.mandate.id}" is scoped to branch ${options.mandate.branch}, but current branch is ${branch}`,
       nextActions: [`git switch ${shellQuoteCommandArg(options.mandate.branch)}`],
       envKeys: []
     };
@@ -10045,8 +10060,8 @@ async function validateRunReadiness(options: {
     return {
       ok: false,
       code: "handoff_closed",
-      message: `mandate "${options.mandate.id}" is closed with handoff state "${options.mandate.handoffState}"`,
-      nextActions: [`switchboard mandate status ${options.mandate.id}`],
+      message: `pass "${options.mandate.id}" is closed with handoff state "${options.mandate.handoffState}"`,
+      nextActions: [`switchboard pass status ${options.mandate.id}`],
       envKeys: []
     };
   }
@@ -10058,7 +10073,7 @@ async function validateRunReadiness(options: {
     return {
       ok: false,
       code: "missing_profiles",
-      message: `mandate profiles were not found: ${missingProfiles.join(", ")}`,
+      message: `pass profiles were not found: ${missingProfiles.join(", ")}`,
       nextActions: ["Run switchboard status to list configured profiles."],
       envKeys: []
     };
@@ -10078,7 +10093,7 @@ async function validateRunReadiness(options: {
           ? `${commandClass.name} is denied by default in switchboard run; shell wrappers and package scripts are not classified in V0.`
           : `${commandClass.name} is unclassified in switchboard run V0.`,
       nextActions: [
-        `Use gh, vercel, stripe, or a fixture CLI directly, or create a mandate with --allow-tool run:${commandClass.name}.`
+        `Use gh, vercel, stripe, or a fixture CLI directly, or create a pass with --allow-tool run:${commandClass.name}.`
       ],
       envKeys: []
     };
@@ -10254,13 +10269,13 @@ function runErrorCode(message: string): string {
 
 function runErrorNextActions(message: string, mandateId: string): string[] {
   if (message.includes("expired")) {
-    return [`switchboard mandate renew ${mandateId} --lease 2h`];
+    return [`switchboard pass renew ${mandateId} --lease 2h`];
   }
   if (message.includes("closed")) {
-    return [`switchboard mandate status ${mandateId}`];
+    return [`switchboard pass status ${mandateId}`];
   }
   if (message.includes("was not found")) {
-    return ["switchboard mandate status"];
+    return ["switchboard pass status"];
   }
   return ["Run switchboard doctor."];
 }
@@ -10323,7 +10338,8 @@ function isSetupIncompleteStep(step: string): boolean {
   return !(
     subcommand.startsWith("test ") ||
     subcommand.startsWith("presets check ") ||
-    subcommand.startsWith("mandate create ")
+    subcommand.startsWith("mandate create ") ||
+    subcommand.startsWith("pass create ")
   );
 }
 
@@ -10527,13 +10543,13 @@ function toolSurfaceFailureNextActions(
   }
   if (mandateId) {
     return [
-      `switchboard mandate status ${mandateId}`,
-      `switchboard mandate report ${mandateId}`
+      `switchboard pass status ${mandateId}`,
+      `switchboard pass report ${mandateId}`
     ];
   }
   return [
-    "switchboard mandate status",
-    "switchboard mandate create --from <preset>"
+    "switchboard pass status",
+    "switchboard pass create --from <preset>"
   ];
 }
 

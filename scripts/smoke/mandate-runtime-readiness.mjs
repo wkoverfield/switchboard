@@ -58,12 +58,12 @@ try {
 
   const expiredStatus = runCliJson("mandate", "status", "fix-ci", "--json");
   assert(
-    expiredStatus.readiness?.blockers?.includes?.('mandate "fix-ci" is expired'),
+    expiredStatus.readiness?.blockers?.includes?.('pass "fix-ci" is expired'),
     "expected expired mandate blocker"
   );
   assert(
     expiredStatus.readiness?.nextActions?.includes?.(
-      "switchboard mandate renew fix-ci --lease 1m"
+      "switchboard pass renew fix-ci --lease 1m"
     ),
     "expected renew next action"
   );
@@ -82,7 +82,7 @@ try {
   const mismatch = runCliJson("mandate", "status", "fix-ci", "--json");
   assert(
     mismatch.readiness?.blockers?.some?.((blocker) =>
-      blocker.includes('mandate "fix-ci" is scoped to branch "main"')
+      blocker.includes('pass "fix-ci" is scoped to branch "main"')
     ),
     "expected branch mismatch blocker"
   );

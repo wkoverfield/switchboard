@@ -618,11 +618,11 @@ function evalExpiredMandate() {
   const nextActions = status.readiness?.nextActions ?? [];
   score(
     "noticed expired mandate",
-    status.readiness?.blockers?.includes?.('mandate "fix-ci" is expired')
+    status.readiness?.blockers?.includes?.('pass "fix-ci" is expired')
   );
   score(
     "followed renew action",
-    nextActions.includes("switchboard mandate renew fix-ci --lease 1m")
+    nextActions.includes("switchboard pass renew fix-ci --lease 1m")
   );
   const renewed = runCliJson(
     "mandate",

@@ -752,7 +752,7 @@ function renderMandateCommandArgs(
   const branch = options.branch ?? template.recommendedMandate.branch;
   return [
     "switchboard",
-    "mandate",
+    "pass",
     "create",
     template.recommendedMandate.task,
     "--agent",

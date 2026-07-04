@@ -73,13 +73,13 @@ try {
     "--require-approval-label",
     "ci"
   );
-  assert(createText.includes("Created mandate fix-ci"), "expected create text");
+  assert(createText.includes("Created pass fix-ci"), "expected create text");
   assert(createText.includes("Next commands:"), "expected create next commands");
   assertHumanNextCommands(createText, { includeTools: true });
 
   const toolsText = runCliText("tools", "--mandate", "fix-ci");
   assert(toolsText.includes("Switchboard tools"), "expected human tools output");
-  assert(toolsText.includes("Mandate: fix-ci (active)"), "expected mandate line");
+  assert(toolsText.includes("Pass: fix-ci (active)"), "expected mandate line");
   assert(
     toolsText.includes("demo_echo_echo (demo_echo) approval-required"),
     "expected approval-required human tool annotation"
@@ -405,7 +405,7 @@ function assertHumanNextCommands(output, options = {}) {
     `switchboard --cwd ${quotedTmpRoot} mcp --mandate fix-ci`,
     `switchboard --cwd ${quotedTmpRoot} approvals --mandate fix-ci --json`,
     `switchboard --cwd ${quotedTmpRoot} logs --mandate fix-ci --json`,
-    `switchboard --cwd ${quotedTmpRoot} mandate handoff fix-ci --state completed --summary <summary>`
+    `switchboard --cwd ${quotedTmpRoot} pass handoff fix-ci --state completed --summary <summary>`
   ];
 
   for (const command of expectedCommands) {

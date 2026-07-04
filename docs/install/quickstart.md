@@ -4,7 +4,7 @@ Use this path to give a bounded GitHub CI agent task repo-scoped tool
 authority. The flow is local-first: Switchboard scans the repo for local
 tool/account hints, writes repo config, stores provider tokens behind
 `secretRef`s, installs a single local MCP endpoint into agent clients, and
-creates mandates for task-scoped authority.
+creates passes for task-scoped authority.
 
 Canonical alpha flow:
 
@@ -36,7 +36,7 @@ switchboard import --dry-run
 switchboard import --write --cleanup-client
 switchboard doctor
 switchboard setup github-ci
-switchboard mandate create --from github-ci --json
+switchboard pass create --from github-ci --json
 ```
 
 For a full local client run, continue:
@@ -44,13 +44,13 @@ For a full local client run, continue:
 ```bash
 switchboard install codex --write
 switchboard mcp --mandate fix-ci
-switchboard mandate report fix-ci --json
+switchboard pass report fix-ci --json
 ```
 
 Production-safe defaults here mean concrete local guardrails: repo-correct
 profiles, token values hidden behind `secretRef`s, non-prod/preview posture where
 the template can express it, risky provider tools denied or approval-gated under
-a mandate, and a local audit trail. Switchboard is runtime-aware, not a sandbox
+a pass, and a local audit trail. Switchboard is runtime-aware, not a sandbox
 guarantee.
 
 `switchboard import --dry-run` is read-only. Use it when a repo already has
@@ -74,9 +74,9 @@ switchboard doctor
 switchboard auth github-ci
 switchboard presets check github-ci --profile github_ci
 switchboard install codex --write
-switchboard mandate create --from github-ci
+switchboard pass create --from github-ci
 switchboard mcp --mandate fix-ci
-switchboard mandate report fix-ci --json
+switchboard pass report fix-ci --json
 ```
 
 ## 1. Add GitHub CI
@@ -98,7 +98,7 @@ switchboard add github-ci
 
 The plan shows the `.switchboard.yaml` change, the `secretRef` command, the
 provider check command, Codex/Claude install commands, and a recommended
-mandate command. It does not write by default.
+pass command. It does not write by default.
 
 Write or update `.switchboard.yaml`:
 
@@ -158,7 +158,7 @@ switchboard presets check github-ci --profile github_ci
 
 The preset check starts the configured GitHub MCP server, discovers its
 namespaced tools, and classifies them against the template's recommended
-mandate policy. Treat `allowed_sensitive` as a signal to tighten the policy
+pass policy. Treat `allowed_sensitive` as a signal to tighten the policy
 before unattended work.
 
 If a runtime command reports a missing `secretRef`, run the exact command it
@@ -195,14 +195,14 @@ switchboard install claude --rollback <backup>
 The generated snippets run `switchboard --cwd <repo> mcp`, which auto-starts
 the local daemon and routes MCP traffic through it.
 
-## 5. Create A CI Mandate
+## 5. Create A CI Pass
 
-Use the mandate command printed by `switchboard add github-ci`; it expands the
+Use the pass command printed by `switchboard add github-ci`; it expands the
 template's allow, deny, and approval policy, uses your current git branch, and
-keeps the full policy inspectable in the created mandate.
+keeps the full policy inspectable in the created pass.
 
 ```bash
-switchboard mandate create --from github-ci
+switchboard pass create --from github-ci
 ```
 
 Then inspect the scoped tool surface:
@@ -212,9 +212,9 @@ switchboard tools --mandate fix-ci
 switchboard tools --mandate fix-ci --json
 ```
 
-## 6. Run The Agent Through The Mandate
+## 6. Run The Agent Through The Pass
 
-For an agent client or harness, use the mandate-scoped endpoint:
+For an agent client or harness, use the pass-scoped endpoint:
 
 ```bash
 switchboard mcp --mandate fix-ci
@@ -238,17 +238,17 @@ switchboard mcp --mandate fix-ci --approval-wait 30s
 
 ```bash
 switchboard logs --mandate fix-ci
-switchboard mandate handoff fix-ci \
+switchboard pass handoff fix-ci \
   --state completed \
   --summary "CI is green" \
   --next-step "merge after review" \
   --by implementer-agent
-switchboard mandate report fix-ci --json
+switchboard pass report fix-ci --json
 ```
 
 ## Local Demo Without GitHub
 
-To exercise the mandate approval path without a provider token, use the fixture
+To exercise the pass approval path without a provider token, use the fixture
 walkthrough:
 
 ```bash
