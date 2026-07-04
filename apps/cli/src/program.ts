@@ -552,11 +552,47 @@ export interface ProgramIo {
   secretIndexPath?: string;
   readSecretFromStdin?: () => Promise<string>;
   readSecretFromPrompt?: (prompt: string) => Promise<string>;
+  /** Force ANSI color on or off; default: on only for a real TTY. */
+  color?: boolean;
+}
+
+// Zero-dependency ANSI painting. Off unless stdout is a real TTY, and
+// always off under NO_COLOR or TERM=dumb, so piped/captured output stays
+// plain text. io.color is the explicit override (used by tests).
+function detectColorEnabled(): boolean {
+  if ("NO_COLOR" in process.env) {
+    return false;
+  }
+  if (process.env.TERM === "dumb") {
+    return false;
+  }
+  return process.stdout.isTTY === true;
+}
+
+type Paint = {
+  bold: (text: string) => string;
+  dim: (text: string) => string;
+  green: (text: string) => string;
+  yellow: (text: string) => string;
+};
+
+function makePaint(enabled: boolean): Paint {
+  const wrap =
+    (open: string, close: string) =>
+    (text: string): string =>
+      enabled ? `[${open}m${text}[${close}m` : text;
+  return {
+    bold: wrap("1", "22"),
+    dim: wrap("2", "22"),
+    green: wrap("32", "39"),
+    yellow: wrap("33", "39")
+  };
 }
 
 export function createProgram(io: ProgramIo = {}): Command {
   const writeOut = io.writeOut ?? ((message: string) => console.log(message));
   const writeErr = io.writeErr ?? ((message: string) => console.error(message));
+  const paint = makePaint(io.color ?? detectColorEnabled());
   const serveMcp = io.serveMcp ?? serveProfilesOverStdio;
   const listToolsForProfiles = io.listTools ?? listToolsOverProfiles;
   const testProfile = io.testProfile ?? testStdioUpstreamProfile;
@@ -2922,7 +2958,8 @@ export function createProgram(io: ProgramIo = {}): Command {
             );
           } else {
             const badge = formatGrantBadge(mandate, {
-              secretRefs: grantSecretRefs(loaded.config, profiles)
+              secretRefs: grantSecretRefs(loaded.config, profiles),
+              paint
             });
             // Only assert "nothing enforces this" on a confirmed zero;
             // a failed detection stays silent rather than stating a guess.
@@ -2930,8 +2967,10 @@ export function createProgram(io: ProgramIo = {}): Command {
               routedClients !== null && routedClients.length === 0
                 ? [
                     "",
-                    "Heads up: no agent client is routed through Switchboard here yet,",
-                    "so nothing enforces this pass. Wire one up with:",
+                    paint.yellow(
+                      "Heads up: no agent client is routed through Switchboard here yet,"
+                    ),
+                    paint.yellow("so nothing enforces this pass. Wire one up with:"),
                     "  switchboard install claude   (or: switchboard install codex)"
                   ].join("\n")
                 : "";
@@ -7416,40 +7455,50 @@ function grantSecretRefs(
 
 function formatGrantBadge(
   mandate: MandateWithStatus,
-  options: { secretRefs: string[] }
+  options: { secretRefs: string[]; paint?: Paint }
 ): string {
+  const paint = options.paint ?? makePaint(false);
   const repoName = basename(mandate.repoPath);
   const reach =
     mandate.allowedTools.length > 0 ? mandate.allowedTools : ["everything"];
   const body: string[] = [
     "",
-    `  ${repoName} · ${mandate.branch}`,
+    `  ${paint.bold(`${repoName} · ${mandate.branch}`)}`,
     `  acting as ${mandate.agentRole}`,
     "",
     "  can reach"
   ];
   for (const tool of reach) {
-    body.push(`    → ${tool}`);
+    body.push(`    ${paint.green("→")} ${tool}`);
   }
-  body.push("  everything else denied", "");
+  body.push(`  ${paint.bold("everything else denied")}`, "");
   if (options.secretRefs.length > 0) {
     body.push(
       `  secrets  ${options.secretRefs.map((ref) => `🔒 ${ref}`).join("   ")}`,
-      "  held in your keychain · never printed, never committed",
+      `  ${paint.dim("held in your keychain · never printed, never committed")}`,
       ""
     );
   }
   body.push(
-    `  expires in ${mandate.lease}   (${mandate.expiresAt})`,
-    "  ends on its own · revoke early with: switchboard revoke",
-    `  pass id ${mandate.id}`,
+    `  ${paint.yellow(`expires in ${mandate.lease}`)}   ${paint.dim(`(${mandate.expiresAt})`)}`,
+    `  ${paint.dim("ends on its own · revoke early with: switchboard revoke")}`,
+    `  ${paint.dim(`pass id ${mandate.id}`)}`,
     ""
   );
 
   // Left-railed card so emoji display width can't break a right border.
+  // Frame widths are measured on plain text, then painted, so ANSI codes
+  // can never skew the rule length.
   const title = "SWITCHBOARD · PASS GRANTED";
   const rule = `╭─ ${title} ${"─".repeat(Math.max(4, 48 - title.length))}`;
-  const lines = [rule, ...body.map((line) => `│${line}`), `╰${"─".repeat(rule.length - 1)}`];
+  const topRule = paint.green(
+    `╭─ ${paint.bold(title)} ${"─".repeat(Math.max(4, 48 - title.length))}`
+  );
+  const lines = [
+    topRule,
+    ...body.map((line) => `${paint.green("│")}${line}`),
+    paint.green(`╰${"─".repeat(rule.length - 1)}`)
+  ];
   return lines.join("\n");
 }
 
