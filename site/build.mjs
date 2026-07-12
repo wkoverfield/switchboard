@@ -168,17 +168,23 @@ function docShell({ title, body, active, entries }) {
   code, pre { font-family: var(--font-mono); }
   a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--hairline-dark); text-underline-offset: 3px; }
   a:hover { text-decoration-color: var(--ink); }
-  header {
-    display: flex; align-items: center; gap: 18px;
-    padding: 15px 24px; border-bottom: 1px solid var(--hairline);
-    background: var(--paper); position: sticky; top: 0; z-index: 10;
+  /* nav: identical to the landing page nav */
+  nav.top {
+    border-bottom: 1px solid var(--hairline);
+    background: var(--paper);
+    position: sticky; top: 0; z-index: 10;
   }
-  .wordmark { font-weight: 500; font-size: 0.95rem; color: var(--ink); font-family: var(--font-mono); text-decoration: none; }
+  nav.top .wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px; }
+  nav.top .row { display: flex; align-items: center; gap: 22px; padding: 15px 0; }
+  .wordmark {
+    font-family: var(--font-mono); font-weight: 500; font-size: 0.95rem;
+    letter-spacing: 0.02em; color: var(--ink); text-decoration: none;
+  }
   .wordmark b { color: var(--grant); font-weight: 500; }
-  header .links { margin-left: auto; display: flex; gap: 18px; font-size: 0.88rem; }
-  header .links a { color: var(--ink-dim); text-decoration: none; }
-  header .links a:hover { color: var(--ink); }
-  header .links a.gh { display: inline-flex; align-items: center; }
+  nav.top .links { margin-left: auto; display: flex; gap: 20px; font-size: 0.88rem; }
+  nav.top .links a { color: var(--ink-dim); text-decoration: none; }
+  nav.top .links a:hover { color: var(--ink); }
+  nav.top .links a.gh { display: inline-flex; align-items: center; }
   .layout { display: grid; grid-template-columns: 240px 1fr; max-width: 1140px; margin: 0 auto; }
   @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } aside { display: none; } }
   aside {
@@ -214,14 +220,18 @@ function docShell({ title, body, active, entries }) {
 </style>
 </head>
 <body>
-<header>
-  <a href="/" class="wordmark">switchboard<b>_</b></a>
-  <div class="links">
+<nav class="top">
+  <div class="wrap">
+    <div class="row">
+      <a href="/" class="wordmark">switchboard<b>_</b></a>
+      <div class="links">
     <a href="/docs/">Docs</a>
     <a href="/docs/roadmap">Roadmap</a>
     <a class="gh" href="https://github.com/wkoverfield/switchboard" aria-label="Switchboard on GitHub"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12c0 5.303 3.438 9.8 8.205 11.385c.6.113.82-.258.82-.577c0-.285-.01-1.04-.015-2.04c-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729c1.205.084 1.838 1.236 1.838 1.236c1.07 1.835 2.809 1.305 3.495.998c.108-.776.417-1.305.76-1.605c-2.665-.3-5.466-1.332-5.466-5.93c0-1.31.465-2.38 1.235-3.22c-.135-.303-.54-1.523.105-3.176c0 0 1.005-.322 3.3 1.23c.96-.267 1.98-.399 3-.405c1.02.006 2.04.138 3 .405c2.28-1.552 3.285-1.23 3.285-1.23c.645 1.653.24 2.873.12 3.176c.765.84 1.23 1.91 1.23 3.22c0 4.61-2.805 5.625-5.475 5.92c.42.36.81 1.096.81 2.22c0 1.606-.015 2.896-.015 3.286c0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg></a>
+      </div>
+    </div>
   </div>
-</header>
+</nav>
 <div class="layout">
   <aside>
 ${nav}

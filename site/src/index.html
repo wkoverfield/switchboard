@@ -612,8 +612,8 @@ npx -y @switchboard-mcp/docs-mcp).
   <div class="wrap">
     <div class="head">
       <span class="index">[ 01 ] · <b>the gap</b></span>
-      <h2>Server-side auth is years away. Your side is yours today.</h2>
-      <p>The MCP ecosystem hands agents whatever the token can do. Switchboard is agent-side authority: it works with the servers you already use, compliant or not.</p>
+      <h2>Most MCP servers have no auth. Switchboard does not wait for them.</h2>
+      <p>It runs on your machine and controls what your agents can call, whatever the server supports. Works with every MCP server you already use.</p>
     </div>
     <div class="stats">
       <div class="stat ticked"><span class="tick-b"></span>
@@ -685,10 +685,10 @@ $ switchboard audit verify
 <section id="limits">
   <div class="wrap">
     <div class="limits ticked"><span class="tick-b"></span>
-      <span class="index">[ 03 ] · <b>what this pass does not cover</b></span>
-      <h2>Trust tooling that overstates itself is worse than none.</h2>
+      <span class="index">[ 03 ] · <b>limits</b></span>
+      <h2>What Switchboard does not do.</h2>
       <p style="color:var(--ink-dim); max-width:60ch; margin:6px 0 0;">
-        These limits are in the README, the threat model, and the product's own output.
+        The short version of the <a href="/docs/security-threat-model">threat model</a>.
       </p>
       <div class="cards">
         <div class="card">
@@ -697,15 +697,15 @@ $ switchboard audit verify
         </div>
         <div class="card">
           <b>No pass, no policy.</b>
-          <p>With no active pass, configured profiles are served without tool policy. Enforcement is opt-in by design today; a default-deny mode is on the roadmap, and we will not claim it before it ships.</p>
+          <p>With no active pass, configured profiles are served without tool policy. Grant a pass to turn enforcement on; a default-deny mode is on the roadmap.</p>
         </div>
         <div class="card">
           <b>Revocation is next-call.</b>
           <p>Revoking a pass stops the next routed call. A call already executing completes. If an in-flight action must die, revoke the token at the provider.</p>
         </div>
         <div class="card">
-          <b>It is alpha software.</b>
-          <p>Single developer, local-first, conservative claims. The pass and audit contracts are versioned JSON; the <a href="/docs/security-threat-model">threat model</a> states every accepted risk.</p>
+          <b>It is alpha.</b>
+          <p>Local-first and moving fast. The pass and audit contracts are versioned JSON, so scripts and harnesses can build on them today.</p>
         </div>
       </div>
     </div>
@@ -715,20 +715,20 @@ $ switchboard audit verify
 <section id="trust">
   <div class="wrap">
     <div class="head">
-      <span class="index">[ 04 ] · <b>diligence</b></span>
-      <h2>Built to be diligenced</h2>
-      <p>The security story is written down, adversarially, with code references. Read it before you trust us. Especially then.</p>
+      <span class="index">[ 04 ] · <b>security</b></span>
+      <h2>The security work is written down</h2>
+      <p>Threat model, audit log design, and secrets handling, documented with code references.</p>
     </div>
     <div class="trust">
       <div class="item">
         <span class="index">threat-model.md</span>
-        <b>A real threat model, not a posture note</b>
-        <span class="body">STRIDE analysis of every surface: what enforcement binds, what it cannot, revocation semantics, socket assumptions, and a ten-item accepted-risks list. <a href="/docs/security-threat-model">Read it</a>.</span>
+        <b>Threat model</b>
+        <span class="body">STRIDE analysis of every surface: what enforcement binds, what it cannot, revocation semantics, and the accepted risks. <a href="/docs/security-threat-model">Read it</a>.</span>
       </div>
       <div class="item">
         <span class="index">audit verify</span>
         <b>Tamper-evident audit log</b>
-        <span class="body">Every routed call, denial, and approval decision is hash-chained JSONL on your machine. Verification reports the exact line where a chain breaks. <a href="/docs/security-audit-logs">What it proves and what it cannot</a>.</span>
+        <span class="body">Every routed call, denial, and approval decision is hash-chained JSONL on your machine. <code style="font-family:var(--font-mono);font-size:0.85em">switchboard audit verify</code> reports the exact line where a chain breaks. <a href="/docs/security-audit-logs">How it works</a>.</span>
       </div>
       <div class="item">
         <span class="index">secretRef</span>
