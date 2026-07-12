@@ -2,7 +2,7 @@
 // Static site build: landing page, docs pages rendered from the repo's
 // markdown, and llms.txt copies. Output goes to site/dist (deployable as-is).
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
 import { marked } from "marked";
@@ -52,11 +52,43 @@ for (const entry of docsManifest) {
   built.push(entry);
 }
 
+// Docs link each other by repo-relative .md path; map those to site URLs.
+// Pages emit as docs/<slug>/index.html so extension-less URLs work on any
+// static host, not just ones with a cleanUrls rewrite.
+const slugBySource = new Map(
+  built.map((entry) => [entry.source, `/docs/${entry.slug}`])
+);
+
+function rewriteDocLink(href, sourceDir) {
+  if (!href || /^(https?:|mailto:|#|\/)/.test(href)) {
+    return href;
+  }
+  const [pathPart, fragment] = href.split("#");
+  const resolved = posix
+    .normalize(posix.join(sourceDir, pathPart))
+    .replace(/^(\.\.\/)+/, "");
+  const mapped = slugBySource.get(resolved);
+  if (mapped) {
+    return fragment ? `${mapped}#${fragment}` : mapped;
+  }
+  // A repo file that is not on the docs site: send to GitHub.
+  return `https://github.com/wkoverfield/switchboard/blob/main/${resolved}`;
+}
+
 for (const entry of built) {
   const markdown = readFileSync(join(repoRoot, entry.source), "utf8");
-  const body = marked.parse(markdown, { async: false });
+  const sourceDir = posix.dirname(entry.source);
+  const tokens = marked.lexer(markdown);
+  marked.walkTokens(tokens, (token) => {
+    if (token.type === "link" || token.type === "image") {
+      token.href = rewriteDocLink(token.href, sourceDir);
+    }
+  });
+  const body = marked.parser(tokens);
+  const pageDir = join(distDir, "docs", entry.slug);
+  mkdirSync(pageDir, { recursive: true });
   writeFileSync(
-    join(distDir, "docs", `${entry.slug}.html`),
+    join(pageDir, "index.html"),
     docShell({ title: entry.title, body, active: entry.slug, entries: built })
   );
 }
