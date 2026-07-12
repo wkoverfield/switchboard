@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added `switchboard dashboard`: a local, read-only web dashboard (127.0.0.1 only) showing live passes, pending approvals, denials, and the audit stream.
+- Re-cut the hero demo (`examples/switchboard.tape`): the climax is now a live out-of-scope DENIED call through the real MCP front door, with an approval-gated call and `switchboard audit verify` in the story. Added `demo-agent.mjs`, a real MCP client that plays the agent.
+
 ## 0.1.6
 
 - Added the `mcpName` field to the published package so the official MCP registry can validate npm ownership.

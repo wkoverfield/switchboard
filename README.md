@@ -132,6 +132,7 @@ provider template instead.
 | `switchboard approvals` | Review and decide approval-gated tool calls |
 | `switchboard tools` | List the tool surface a pass exposes |
 | `switchboard logs` | Read the local audit log |
+| `switchboard dashboard` | Local read-only dashboard: live passes, denials, audit stream |
 | `switchboard audit` | Repo authority posture report, exportable as JSONL |
 
 Commands that report state take `--json` for scripts and harnesses, with

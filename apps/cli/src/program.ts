@@ -119,6 +119,7 @@ import {
   type StartDaemonResult,
   type StopDaemonResult
 } from "./daemon-runtime.js";
+import { startDashboard } from "./dashboard.js";
 
 // Read the version from package.json so it never drifts from the published
 // package. "../package.json" resolves the same from dist/program.js and from
@@ -4354,6 +4355,44 @@ export function createProgram(io: ProgramIo = {}): Command {
       }
 
       writeOut(formatAuditLogs(path, entries));
+    });
+
+  program
+    .command("dashboard")
+    .description(
+      "Serve a local read-only dashboard: live passes, denials, and the audit stream."
+    )
+    .option("--port <port>", "port to listen on (localhost only)", "7878")
+    .action(async (options: { port: string }) => {
+      const port = parsePositiveInteger(options.port);
+      if (port === undefined) {
+        writeErr("error: --port must be a positive integer");
+        process.exitCode = 1;
+        return;
+      }
+
+      try {
+        const dashboard = await startDashboard({
+          port,
+          ...(io.auditLogPath ? { auditLogPath: io.auditLogPath } : {}),
+          ...(io.mandateStorePath
+            ? { mandateStorePath: io.mandateStorePath }
+            : {}),
+          ...(io.approvalStorePath
+            ? { approvalStorePath: io.approvalStorePath }
+            : {})
+        });
+        writeOut(
+          [
+            `Switchboard dashboard: ${dashboard.url}`,
+            "Local only, read-only: live passes, denials, and the audit stream.",
+            "Press Ctrl-C to stop."
+          ].join("\n")
+        );
+      } catch (error) {
+        writeErr(`error: ${messageFromError(error)}`);
+        process.exitCode = 1;
+      }
     });
 
   program
