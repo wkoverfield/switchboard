@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Added a full STRIDE threat model at `docs/security/threat-model.md`: trust boundaries, what enforcement binds vs what it cannot, revocation semantics, daemon socket assumptions, secrets backends, and the audit-log threat surface, ending in an accepted-risks list. `trust-model.md` is now a short posture summary that points at it.
+
 ## 0.1.6
 
 - Added the `mcpName` field to the published package so the official MCP registry can validate npm ownership.

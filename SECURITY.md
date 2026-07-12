@@ -16,6 +16,10 @@ reports get fixed fast and credited if you want credit.
 
 ## Scope
 
+The full security analysis, including trust boundaries and the accepted-risks
+list, is in the [threat model](docs/security/threat-model.md). If shipped
+behavior contradicts that document, the contradiction itself is in scope.
+
 Reports that matter most:
 
 - Secret values surfacing anywhere: output, logs, JSON, audit entries, MCP

@@ -192,7 +192,7 @@ vulnerabilities privately per [SECURITY.md](SECURITY.md).
 Smoke tests and fresh-agent evals live in `scripts/`; CI runs the full set.
 The top demo is a VHS tape: `brew install vhs && pnpm build && vhs examples/switchboard.tape`.
 Deeper docs: [quickstart](docs/install/quickstart.md),
-[trust model](docs/security/trust-model.md),
+[threat model](docs/security/threat-model.md),
 [provider safety templates](docs/providers/safety-templates.md),
 [roadmap](docs/product/roadmap.md).
 

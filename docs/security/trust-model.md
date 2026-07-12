@@ -1,36 +1,29 @@
 # Trust Model
 
-Switchboard is local-first. Remote telemetry is planned to be opt-in only.
-Provider secrets should not be stored in repo config, agent MCP config, mandate
-records, harness JSON payloads, or audit logs.
+The full, adversarial security analysis lives in
+[threat-model.md](threat-model.md). That document is the diligence artifact:
+components, trust boundaries, STRIDE analysis, and the accepted-risks list.
+This page is the short posture summary.
 
-Switchboard now writes local JSONL audit logs for profile tests, routed tool
-calls, mandate policy denials, and approval-gated blocks. Logs are stored under
-XDG state paths and are never uploaded automatically. Audit entries record
-metadata such as profile, namespace, tool, mandate, status, and duration; they
-do not record raw provider secrets.
+- **Local-first.** No server, no account, no telemetry. State lives on the
+  user's machine under XDG paths with restrictive file modes.
+- **Binding on routed paths.** Pass (mandate) policy is enforced on every call
+  through Switchboard MCP endpoints and `switchboard run`: deny-wins tool
+  policy, branch binding, profile filtering, approval gates, lease expiry, and
+  child-pass subset validation.
+- **Advisory everywhere else.** Raw shell, provider CLIs, direct MCP routes,
+  and browser sessions bypass Switchboard. `switchboard scan` detects and
+  reports those routes; Switchboard is not a sandbox and does not claim to be.
+- **Secrets stay in the OS keychain.** Config and profiles hold printable
+  `secretRef` ids, never values. Weaker backends require an explicit unsafe
+  opt-in. Values are injected only into the spawned upstream that declared
+  them.
+- **Audit is local and tamper-evident.** JSONL entries are hash-chained and
+  checkable with `switchboard audit verify`. Logs are metadata-only, redacted,
+  and never uploaded. See [audit-logs.md](audit-logs.md).
+- **The accepted trust boundary is the OS user.** A malicious same-uid process
+  can defeat local controls; defending against that is explicitly out of
+  scope, and the threat model says exactly what that implies.
 
-Switchboard has local mandate enforcement for allow/deny/approval-required tool
-patterns, local approval request decisions, direct MCP bypass findings, and
-backup-protected client cleanup. These controls apply to routed Switchboard MCP
-and `switchboard run` paths. They do not sandbox the agent process, prevent raw
-env access, control browser sessions, or stop a provider CLI/API call made
-outside Switchboard. Full approval brokering, deeper provider-side enforcement,
-provider-specific secret flows, and stronger daemon socket security are later
-milestones.
-
-The accepted secrets direction is local OS-backed secret storage referenced by
-printable `secretRef` ids from config/profiles. `switchboard secrets` stores
-values through the local keychain adapter and maintains a value-free ref index
-for listing. Native OS-protected backends are allowed by default; file/null/CLI
-fallback storage, including Linux `secret-tool`, requires an explicit unsafe
-dev/demo opt-in. Active mandates
-should grant temporary access to profiles and tools, not raw secret values.
-Mandate reports and escalations may identify missing `secretRef` ids for scoped
-profiles as local readiness blockers, but they must not include secret values.
-The CI smoke suite now proves a secret-backed profile can run under
-`serve --mandate` with mandate-linked audit entries and no raw secret value in
-CLI output, MCP responses, audit logs, or mandate reports. Provider presets now
-exist for GitHub CI, Vercel Preview, and Stripe Test, but they should be treated
-as authority recipes backed by fixture/live dogfood evidence, not as broad
-provider integrations. See `secrets-keychain-architecture.md`.
+If behavior and these statements ever disagree, report it via
+[SECURITY.md](../../SECURITY.md).
