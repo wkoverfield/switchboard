@@ -99,7 +99,10 @@ print(badge(red, "SWITCHBOARD · DENIED", [
 process.exit(1);
 
 function classifyError(message) {
-  const detail = (message ?? "").split("\n")[0] ?? "";
+  const detail = ((message ?? "").split("\n")[0] ?? "").replace(
+    /^MCP error [-\d]+:\s*/,
+    ""
+  );
   if (/approval/i.test(detail)) {
     return { kind: "approval", detail };
   }
