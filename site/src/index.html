@@ -25,6 +25,7 @@
     --ink-dim: #6b665e;
     --stamp: #b02a2a;          /* DENIED only */
     --grant: #166b41;          /* granted / allowed, text-safe on paper */
+    --gate: #8a6d1a;          /* approval-gated, text-safe on paper */
     --term-bg: #14120f;
     --term-ink: #d8d4cc;
     --term-dim: #8d887e;
@@ -136,8 +137,23 @@
   .btn.primary:hover { background: #000; }
   .btn.ghost { color: var(--ink); border-color: var(--hairline-dark); background: var(--paper-raised); }
   .btn.ghost:hover { border-color: var(--ink); }
+  .install-area { margin-top: 18px; }
+  .mode {
+    display: inline-flex; align-items: center; gap: 12px;
+    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em;
+    text-transform: uppercase; margin-bottom: 10px;
+  }
+  .mode .sep { color: var(--hairline-dark); }
+  .mode input { position: absolute; opacity: 0; pointer-events: none; }
+  .mode label { color: var(--ink-dim); cursor: pointer; padding: 2px 2px; }
+  .mode label:hover { color: var(--ink); }
+  .mode input:checked + label {
+    color: var(--ink);
+    box-shadow: 0 2px 0 var(--grant);
+  }
+  .mode input:focus-visible + label { outline: 2px solid var(--grant); outline-offset: 3px; }
   .install {
-    display: block; width: fit-content; margin: 18px auto 0;
+    display: block; width: fit-content; margin: 0 auto;
     font-family: var(--font-mono); font-size: 0.85rem;
     color: var(--ink);
     background: var(--paper-raised);
@@ -146,6 +162,17 @@
     user-select: all;
   }
   .install .p { color: var(--grant); user-select: none; }
+  /* CSS-only toggle; if :has is unsupported both commands show, which is fine */
+  .install-area:has(#mode-human:checked) .install.agent { display: none; }
+  .install-area:has(#mode-agent:checked) .install.human { display: none; }
+
+  /* topology: what a pass decides, in one glance */
+  .topology { max-width: 880px; margin: 44px auto 0; }
+  .topology svg { display: block; width: 100%; height: auto; }
+  .topology-caption {
+    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--ink-dim); margin: 10px 0 0;
+  }
   .hero .fine {
     font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em;
     text-transform: uppercase; color: var(--ink-dim); margin-top: 18px;
@@ -290,6 +317,20 @@
   @media (max-width: 800px) { .waitlist .inner { grid-template-columns: 1fr; } }
   .waitlist p { color: var(--ink-dim); margin: 0; }
 
+  /* closer */
+  .closer { text-align: center; padding: 110px 0 30px; }
+  .closer h2 {
+    font-size: clamp(1.9rem, 4vw, 2.6rem); font-weight: 600;
+    letter-spacing: -0.03em; margin: 0 0 24px;
+  }
+  .closer h2 .pass-word {
+    color: var(--grant);
+    text-decoration: underline;
+    text-decoration-thickness: 3px;
+    text-decoration-color: color-mix(in srgb, var(--grant) 35%, transparent);
+    text-underline-offset: 6px;
+  }
+
   footer {
     margin-top: 84px; border-top: 1px solid var(--hairline);
     padding: 26px 0 44px;
@@ -353,8 +394,70 @@
       <a class="btn primary" href="/docs/install-quickstart">Start in 5 minutes</a>
       <a class="btn ghost" href="/docs/">View docs</a>
     </div>
-    <code class="install rise d4"><span class="p">$</span> npm install -g @switchboard-mcp/cli</code>
+    <div class="install-area rise d4">
+      <div class="mode" role="group" aria-label="Install instructions for">
+        <input type="radio" id="mode-human" name="install-mode" checked>
+        <label for="mode-human">for humans</label>
+        <span class="sep">|</span>
+        <input type="radio" id="mode-agent" name="install-mode">
+        <label for="mode-agent">for agents</label>
+      </div>
+      <code class="install human"><span class="p">$</span> npm install -g @switchboard-mcp/cli</code>
+      <code class="install agent"><span class="p">$</span> claude mcp add switchboard-docs -- npx -y @switchboard-mcp/docs-mcp</code>
+    </div>
     <div class="fine rise d5"><span>No account</span><span>No server</span><span>No telemetry</span><span>MIT</span></div>
+
+    <div class="topology rise d6" aria-hidden="true">
+      <svg viewBox="0 0 880 250" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+        <!-- edges first, under the nodes -->
+        <!-- agents into switchboard -->
+        <path d="M150 55 C 250 55, 280 110, 355 118" fill="none" stroke="var(--hairline-dark)" stroke-width="1.5"/>
+        <path d="M150 125 L 355 125" fill="none" stroke="var(--hairline-dark)" stroke-width="1.5"/>
+        <path d="M150 195 C 250 195, 280 140, 355 132" fill="none" stroke="var(--hairline-dark)" stroke-width="1.5"/>
+        <!-- allowed: reaches the provider -->
+        <path d="M525 110 C 610 96, 640 62, 718 56" fill="none" stroke="var(--grant)" stroke-width="1.5"/>
+        <!-- gated: reaches, but through a pause -->
+        <path d="M525 125 L 620 125 M652 125 L 718 125" fill="none" stroke="var(--gate)" stroke-width="1.5" stroke-dasharray="3 4"/>
+        <!-- denied: stops inside switchboard, never leaves -->
+        <path d="M525 140 C 570 148, 590 160, 612 170" fill="none" stroke="var(--stamp)" stroke-width="1.5"/>
+        <!-- agent nodes -->
+        <g fill="var(--ink)" font-size="13">
+          <rect x="20" y="36" width="130" height="38" rx="7" fill="var(--paper-raised)" stroke="var(--hairline-dark)"/>
+          <text x="85" y="60" text-anchor="middle">claude code</text>
+          <rect x="20" y="106" width="130" height="38" rx="7" fill="var(--paper-raised)" stroke="var(--hairline-dark)"/>
+          <text x="85" y="130" text-anchor="middle">codex</text>
+          <rect x="20" y="176" width="130" height="38" rx="7" fill="var(--paper-raised)" stroke="var(--hairline-dark)"/>
+          <text x="85" y="200" text-anchor="middle">cursor</text>
+        </g>
+        <!-- the pass -->
+        <g>
+          <rect x="355" y="88" width="170" height="74" rx="8" fill="var(--term-bg)"/>
+          <text x="440" y="115" text-anchor="middle" fill="var(--term-green)" font-size="12" letter-spacing="1">SWITCHBOARD</text>
+          <text x="440" y="136" text-anchor="middle" fill="var(--term-ink)" font-size="11">pass · expires 4h</text>
+          <text x="440" y="152" text-anchor="middle" fill="var(--term-dim)" font-size="10">everything else denied</text>
+        </g>
+        <!-- provider nodes -->
+        <g font-size="13">
+          <rect x="718" y="36" width="142" height="38" rx="7" fill="var(--paper-raised)" stroke="var(--grant)"/>
+          <text x="789" y="60" text-anchor="middle" fill="var(--grant)">github_ci_*</text>
+          <rect x="718" y="106" width="142" height="38" rx="7" fill="var(--paper-raised)" stroke="var(--hairline-dark)"/>
+          <text x="789" y="130" text-anchor="middle" fill="var(--ink)">rerun_workflow</text>
+          <rect x="718" y="176" width="142" height="38" rx="7" fill="var(--paper-raised)" stroke="var(--hairline-dark)" stroke-dasharray="3 3" opacity="0.55"/>
+          <text x="789" y="200" text-anchor="middle" fill="var(--ink-dim)" text-decoration="line-through">delete_file</text>
+        </g>
+        <!-- gate + denial markers -->
+        <g fill="var(--gate)">
+          <rect x="630" y="119" width="2.5" height="12" rx="1"/>
+          <rect x="636" y="119" width="2.5" height="12" rx="1"/>
+        </g>
+        <text x="628" y="178" text-anchor="middle" fill="var(--stamp)" font-size="13" font-weight="600">✕</text>
+        <text x="628" y="196" text-anchor="middle" fill="var(--stamp)" font-size="9" letter-spacing="1">DENIED</text>
+        <!-- edge legends -->
+        <text x="640" y="52" fill="var(--grant)" font-size="10" text-anchor="middle">allowed</text>
+        <text x="672" y="112" fill="var(--gate)" font-size="10" text-anchor="middle">a human decides</text>
+      </svg>
+      <p class="topology-caption">One pass decides what leaves the machine. Denied calls never do.</p>
+    </div>
   </div>
 </header>
 
@@ -545,6 +648,16 @@ $ npx -y @switchboard-mcp/cli@latest scan</pre>
         it, we want to build it against your real workflow:
         <a href="https://github.com/wkoverfield/switchboard/issues/new?title=Team%20tier%20interest">raise your hand on GitHub</a>.
       </p>
+    </div>
+  </div>
+</section>
+
+<section class="closer">
+  <div class="wrap">
+    <h2>Put your agents on a <span class="pass-word">pass</span>.</h2>
+    <div class="cta-row">
+      <a class="btn primary" href="/docs/install-quickstart">Start in 5 minutes</a>
+      <a class="btn ghost" href="https://github.com/wkoverfield/switchboard">Star on GitHub</a>
     </div>
   </div>
 </section>
