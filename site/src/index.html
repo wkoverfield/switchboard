@@ -290,6 +290,43 @@
     font-size: 0.8rem; color: var(--ink-dim); margin-top: 18px; max-width: 74ch;
   }
 
+  /* without / with: the problem answered by the product */
+  .vs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+  @media (max-width: 800px) { .vs { grid-template-columns: 1fr; } }
+  .vs .index { margin-bottom: 8px; }
+  .vs-col:last-child .index { color: var(--grant); }
+  .vs pre.term {
+    background: var(--term-bg); color: var(--term-ink);
+    border-radius: 8px; padding: 16px 18px; margin: 0;
+    font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.7;
+    overflow-x: auto; min-height: 148px;
+  }
+  .vs pre.term .c { color: var(--term-dim); }
+  .vs pre.term .g { color: var(--term-green); }
+  .vs pre.term .r { color: var(--term-red); }
+
+  /* product shot: the dashboard, framed like the credential artifacts */
+  .product-shot {
+    margin: 44px 0 0; position: relative;
+    background: var(--paper-raised);
+    border: 1px solid var(--hairline-dark);
+    padding: 10px;
+  }
+  .product-shot .frame-label {
+    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--ink-dim);
+    padding: 2px 4px 10px;
+  }
+  .product-shot .screen { background: var(--term-bg); border-radius: 6px; overflow: hidden; }
+  .product-shot img { display: block; width: 100%; height: auto; }
+  .product-shot figcaption {
+    font-size: 0.85rem; color: var(--ink-dim); padding: 12px 4px 2px;
+  }
+  .product-shot figcaption code {
+    font-family: var(--font-mono); font-size: 0.85em;
+    background: var(--paper); border: 1px solid var(--hairline); border-radius: 4px; padding: 1px 5px;
+  }
+
   /* steps */
   .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
   @media (max-width: 900px) { .steps { grid-template-columns: 1fr; } }
@@ -632,6 +669,25 @@ npx -y @switchboard-mcp/docs-mcp).
         <p>the MCP spec revision lands. Rollout will take the ecosystem years.</p>
       </div>
     </div>
+    <div class="vs">
+      <div class="vs-col">
+        <span class="index">without switchboard</span>
+        <pre class="term">your agent's reach = your token's reach
+
+  <span class="r">&rarr;</span> delete_file        <span class="r">&rarr;</span> create_repository
+  <span class="r">&rarr;</span> deploy_prod        <span class="r">&rarr;</span> admin_org_*
+  <span class="c">&rarr;</span> <span class="c">716 more GitHub tools, all day, no record</span></pre>
+      </div>
+      <div class="vs-col">
+        <span class="index">with switchboard</span>
+        <pre class="term">agent &rarr; delete_file
+<span class="r">SWITCHBOARD · DENIED</span>
+  <span class="c">never reached GitHub</span>
+
+$ switchboard audit verify
+<span class="g">Chain: OK</span></pre>
+      </div>
+    </div>
     <p class="stats-foot">
       Sources: <a href="https://modelcontextprotocol.io/specification">MCP specification</a> (revision dated July 28, 2026);
       OAuth and scoping figures from the <a href="https://nhimg.org">nhimg.org</a> MCP server practitioner survey.
@@ -685,27 +741,27 @@ $ switchboard audit verify
 <section id="limits">
   <div class="wrap">
     <div class="limits ticked"><span class="tick-b"></span>
-      <span class="index">[ 03 ] · <b>limits</b></span>
-      <h2>What Switchboard does not do.</h2>
+      <span class="index">[ 03 ] · <b>control</b></span>
+      <h2>The pass is the perimeter.</h2>
       <p style="color:var(--ink-dim); max-width:60ch; margin:6px 0 0;">
-        The short version of the <a href="/docs/security-threat-model">threat model</a>.
+        Everything routed through Switchboard obeys it. Full boundaries in the <a href="/docs/security-threat-model">threat model</a>.
       </p>
       <div class="cards">
         <div class="card">
-          <b>It is not a sandbox.</b>
-          <p>Switchboard governs the paths routed through it: its MCP endpoints and <code>switchboard run</code>. Raw shell, provider CLIs, browser sessions, and direct MCP routes bypass it. <code>switchboard scan</code> reports those routes so you can close them or accept them deliberately.</p>
+          <b>Denied before it leaves the machine.</b>
+          <p>Out-of-scope calls die inside Switchboard; the provider never sees them. Routes that go around the pass, like raw shell or a direct MCP entry, are exactly what <code>switchboard scan</code> finds and reports.</p>
         </div>
         <div class="card">
-          <b>No pass, no policy.</b>
-          <p>With no active pass, configured profiles are served without tool policy. Grant a pass to turn enforcement on; a default-deny mode is on the roadmap.</p>
+          <b>Risky calls wait for a human.</b>
+          <p>Approval gates hold a call until you decide, in your client or from the CLI. Provider templates ship sane gates for GitHub, Vercel, Stripe, and Supabase.</p>
         </div>
         <div class="card">
-          <b>Revocation is next-call.</b>
-          <p>Revoking a pass stops the next routed call. A call already executing completes. If an in-flight action must die, revoke the token at the provider.</p>
+          <b>Access that ends itself.</b>
+          <p>Passes expire on their own; revoke ends access at the next routed call. No pass means configured profiles run without tool policy, so keep one live; default-deny is on the roadmap.</p>
         </div>
         <div class="card">
-          <b>It is alpha.</b>
-          <p>Local-first and moving fast. The pass and audit contracts are versioned JSON, so scripts and harnesses can build on them today.</p>
+          <b>Alpha, with stable contracts.</b>
+          <p>Local-first and moving fast. Passes and audit entries are versioned JSON, so scripts and harnesses can build on them today.</p>
         </div>
       </div>
     </div>
@@ -741,6 +797,14 @@ $ switchboard audit verify
         <span class="body">A lead agent can hand narrower passes to subagents; children are validated as strict subsets of the parent, and parent deny lists are inherited.</span>
       </div>
     </div>
+    <figure class="product-shot ticked"><span class="tick-b"></span>
+      <div class="frame-label"><span>switchboard dashboard · 127.0.0.1 · read-only</span></div>
+      <div class="screen">
+        <img src="/assets/dashboard.png" width="1360" height="428" loading="lazy"
+             alt="The Switchboard dashboard: one live pass with its allow and deny lists, counts of allowed and denied calls, and an audit stream showing ok, gated, and denied tool calls.">
+      </div>
+      <figcaption>Live passes, denials, and the audit stream. <code>switchboard dashboard</code> ships today and never leaves your machine.</figcaption>
+    </figure>
   </div>
 </section>
 

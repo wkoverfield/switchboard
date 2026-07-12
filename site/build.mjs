@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Static site build: landing page, docs pages rendered from the repo's
 // markdown, and llms.txt copies. Output goes to site/dist (deployable as-is).
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
@@ -39,6 +39,10 @@ for (const name of ["llms.txt", "llms-full.txt"]) {
   if (existsSync(source)) {
     copyFileSync(source, join(distDir, name));
   }
+}
+const assetsDir = join(siteDir, "src", "assets");
+if (existsSync(assetsDir)) {
+  cpSync(assetsDir, join(distDir, "assets"), { recursive: true });
 }
 
 // Docs pages.
