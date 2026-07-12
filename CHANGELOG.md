@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Made the audit log tamper-evident: entries are hash-chained (`prevHash`/`hash` fields), appends are serialized with a lockfile, and `switchboard audit verify` checks the chain and reports exactly where it breaks. Pre-existing entries are treated as legacy and keep working.
+
 ## 0.1.6
 
 - Added the `mcpName` field to the published package so the official MCP registry can validate npm ownership.

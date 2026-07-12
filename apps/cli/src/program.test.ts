@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createApprovalRequest,
+  createJsonlAuditLogger,
   createMemorySecretStore,
   markApprovalRequestStale,
   type SecretStore
@@ -9486,6 +9487,56 @@ describe("switchboard CLI program", () => {
         }
       ]
     });
+  });
+
+  it("verifies an intact audit log hash chain", async () => {
+    const root = makeTempProject();
+    const logPath = join(root, "switchboard.jsonl");
+    const logger = createJsonlAuditLogger({ path: logPath });
+    await logger.log({ action: "profile_test", status: "ok", profileName: "one" });
+    await logger.log({ action: "tool_call", status: "ok", profileName: "two" });
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      auditLogPath: logPath
+    });
+    await program.parseAsync(["audit", "verify", "--json"], { from: "user" });
+
+    expect(JSON.parse(output[0] ?? "{}")).toEqual({
+      ok: true,
+      schemaVersion: "switchboard.audit-verify.v1",
+      path: logPath,
+      counts: {
+        totalLines: 2,
+        chainedEntries: 2,
+        legacyEntries: 0
+      },
+      failures: []
+    });
+    expect(process.exitCode).not.toBe(1);
+  });
+
+  it("fails audit verify with exit code 1 when the log was tampered with", async () => {
+    const root = makeTempProject();
+    const logPath = join(root, "switchboard.jsonl");
+    const logger = createJsonlAuditLogger({ path: logPath });
+    await logger.log({ action: "tool_call", status: "error", toolName: "denied_tool" });
+    await logger.log({ action: "tool_call", status: "ok", toolName: "allowed_tool" });
+
+    const raw = readFileSync(logPath, "utf8");
+    writeFileSync(logPath, raw.replace('"status":"error"', '"status":"ok"'));
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      auditLogPath: logPath
+    });
+    await program.parseAsync(["audit", "verify"], { from: "user" });
+
+    expect(output.join("\n")).toContain("Chain: FAILED");
+    expect(output.join("\n")).toContain("line 1");
+    expect(process.exitCode).toBe(1);
   });
 
   it("prints local audit log JSON errors to stdout", async () => {
