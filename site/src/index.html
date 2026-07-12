@@ -162,8 +162,37 @@
     user-select: all;
   }
   .install .p { color: var(--grant); user-select: none; }
-  /* CSS-only toggle; if :has is unsupported both commands show, which is fine */
-  .install-area:has(#mode-human:checked) .install.agent { display: none; }
+  /* the copy-paste setup prompt for agents */
+  .prompt-card {
+    max-width: 620px; margin: 0 auto; text-align: left;
+    background: var(--paper-raised);
+    border: 1px solid var(--hairline-dark); border-radius: 8px;
+    overflow: hidden;
+  }
+  .prompt-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 8px 12px;
+    border-bottom: 1px solid var(--hairline);
+    font-family: var(--font-mono); font-size: 0.68rem;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-dim);
+  }
+  .copy-btn {
+    font-family: var(--font-mono); font-size: 0.68rem;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    background: var(--ink); color: var(--paper);
+    border: none; border-radius: 5px; padding: 6px 12px; cursor: pointer;
+  }
+  .copy-btn:hover { background: #000; }
+  .copy-btn.copied { background: var(--grant); }
+  .prompt-card pre {
+    margin: 0; padding: 14px 16px;
+    font-family: var(--font-mono); font-size: 0.74rem; line-height: 1.6;
+    color: var(--ink);
+    overflow-x: auto;
+    user-select: all;
+  }
+  /* CSS-only toggle; if :has is unsupported both variants show, which is fine */
+  .install-area:has(#mode-human:checked) .prompt-card { display: none; }
   .install-area:has(#mode-agent:checked) .install.human { display: none; }
 
   /* topology: what a pass decides, in one glance */
@@ -403,7 +432,28 @@
         <label for="mode-agent">for agents</label>
       </div>
       <code class="install human"><span class="p">$</span> npm install -g @switchboard-mcp/cli</code>
-      <code class="install agent"><span class="p">$</span> claude mcp add switchboard-docs -- npx -y @switchboard-mcp/docs-mcp</code>
+      <div class="prompt-card">
+        <div class="prompt-head">
+          <span>paste this into claude code, codex, or cursor</span>
+          <button class="copy-btn" type="button" hidden>copy prompt</button>
+        </div>
+        <pre id="setup-prompt">Set up Switchboard in this repo. It puts you, the agent, on a scoped
+expiring pass instead of raw keys. Reference: llms.txt at
+https://github.com/wkoverfield/switchboard (or add the docs MCP server:
+npx -y @switchboard-mcp/docs-mcp).
+
+1. Install the CLI: npm install -g @switchboard-mcp/cli
+2. Run `switchboard scan` and show me what agents can already reach here.
+3. Run `switchboard import --dry-run`, walk me through the plan, then run
+   `switchboard import --write --cleanup-client`.
+4. If import moved tokens, give me the exact `switchboard secrets set &lt;ref&gt;`
+   command to run myself. Never read or handle the token value.
+5. Route this client through Switchboard: `switchboard install claude --write`
+   (or codex).
+6. Ask me how long the pass should last, then `switchboard grant --for &lt;duration&gt;`.
+7. Verify with `switchboard status` and `switchboard doctor`, and report what
+   is now allowed, approval-gated, and denied.</pre>
+      </div>
     </div>
     <div class="fine rise d5"><span>No account</span><span>No server</span><span>No telemetry</span><span>MIT</span></div>
 
@@ -673,6 +723,28 @@ $ npx -y @switchboard-mcp/cli@latest scan</pre>
   </div>
 </footer>
 
+<script>
+  // Progressive enhancement only: the copy button appears when JS runs;
+  // without it the prompt is still select-all copyable.
+  const copyBtn = document.querySelector(".copy-btn");
+  const promptText = document.getElementById("setup-prompt");
+  if (copyBtn && promptText && navigator.clipboard) {
+    copyBtn.hidden = false;
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(promptText.textContent.trim());
+        copyBtn.textContent = "copied";
+        copyBtn.classList.add("copied");
+        setTimeout(() => {
+          copyBtn.textContent = "copy prompt";
+          copyBtn.classList.remove("copied");
+        }, 1600);
+      } catch {
+        promptText.focus();
+      }
+    });
+  }
+</script>
 
 </body>
 </html>
