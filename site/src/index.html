@@ -404,6 +404,31 @@
   }
   @media (max-width: 800px) { .waitlist .inner { grid-template-columns: 1fr; } }
   .waitlist p { color: var(--ink-dim); margin: 0; }
+  .waitlist .inner > div > p { margin-top: 10px; }
+  .waitlist-side { align-self: center; }
+  .waitlist-form { display: flex; gap: 10px; flex-wrap: wrap; }
+  .waitlist-form input[type="email"] {
+    flex: 1 1 220px;
+    height: 46px;
+    font-family: var(--font-mono); font-size: 0.85rem;
+    color: var(--ink);
+    background: var(--paper-raised);
+    border: 1px solid var(--hairline-dark); border-radius: 8px;
+    padding: 0 16px;
+  }
+  .waitlist-form input[type="email"]::placeholder { color: var(--ink-dim); }
+  .waitlist-form input[type="email"]:focus-visible {
+    outline: 2px solid var(--grant); outline-offset: 2px; border-color: var(--grant);
+  }
+  .waitlist-form .gotcha { position: absolute; left: -9999px; height: 0; width: 0; border: 0; padding: 0; }
+  .waitlist-fine {
+    font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-dim); margin-top: 12px;
+  }
+  .waitlist-done {
+    font-family: var(--font-mono); font-size: 0.85rem;
+    color: var(--grant); margin-top: 4px;
+  }
 
   /* closer */
   .closer { text-align: center; padding: 110px 0 30px; }
@@ -832,14 +857,26 @@ $ npx -y @switchboard-mcp/cli@latest scan</pre>
       <div>
         <span class="index">[ 06 ] · <b>teams</b></span>
         <h2>Running a fleet, or a team?</h2>
+        <p>
+          Switchboard is free, local, and MIT licensed, and it stays that way.
+          The team tier adds shared policy, multi-user identity, central
+          visibility, and SIEM export (<a href="/docs/roadmap">roadmap</a>).
+          Waitlist members get it first, and we build it against your workflow.
+        </p>
       </div>
-      <p>
-        Switchboard is free, local, and MIT licensed, and it stays that way.
-        The org layer (shared policy, multi-user identity, central visibility,
-        SIEM export) is on the <a href="/docs/roadmap">roadmap</a>. If you want
-        it, we want to build it against your real workflow:
-        <a href="https://github.com/wkoverfield/switchboard/issues/new?title=Team%20tier%20interest">raise your hand on GitHub</a>.
-      </p>
+      <div class="waitlist-side">
+        <!-- TODO(wilson): create a form at formspree.io and replace
+             YOUR_FORM_ID below with the real id (e.g. mqkrbvzo). -->
+        <form class="waitlist-form" action="https://formspree.io/f/YOUR_FORM_ID" method="POST">
+          <input type="email" name="email" required placeholder="you@company.com"
+                 autocomplete="email" aria-label="Work email">
+          <input type="text" name="_gotcha" tabindex="-1" autocomplete="off" aria-hidden="true" class="gotcha">
+          <input type="hidden" name="context" value="team-tier-waitlist">
+          <button class="btn primary" type="submit">Join the waitlist</button>
+        </form>
+        <p class="waitlist-fine">One email when the team tier opens. Nothing else.</p>
+        <p class="waitlist-done" hidden>You're on the list. We'll be in touch.</p>
+      </div>
     </div>
   </div>
 </section>
@@ -883,6 +920,33 @@ $ npx -y @switchboard-mcp/cli@latest scan</pre>
         }, 2000);
       } catch {
         promptText.focus();
+      }
+    });
+  }
+
+  // Waitlist: AJAX submit keeps the visitor on the page; without JS the
+  // form still POSTs to Formspree and lands on their confirmation page.
+  const waitlistForm = document.querySelector(".waitlist-form");
+  if (waitlistForm && window.fetch) {
+    waitlistForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = waitlistForm.querySelector("button");
+      button.disabled = true;
+      button.textContent = "joining…";
+      try {
+        const response = await fetch(waitlistForm.action, {
+          method: "POST",
+          body: new FormData(waitlistForm),
+          headers: { Accept: "application/json" }
+        });
+        if (!response.ok) throw new Error("submit failed");
+        waitlistForm.hidden = true;
+        document.querySelector(".waitlist-fine").hidden = true;
+        document.querySelector(".waitlist-done").hidden = false;
+      } catch {
+        button.disabled = false;
+        button.textContent = "Join the waitlist";
+        waitlistForm.submit();
       }
     });
   }
