@@ -52,8 +52,12 @@ Enter
 # behind approval, deletes and repo administration denied.
 Type 'switchboard pass create --from github-ci --profiles github_acme_ci >/dev/null 2>&1'
 Enter
+# Let the setup commands finish and the clear land before capture resumes,
+# otherwise the first visible frame shows the hidden setup backlog.
+Sleep 2s
 Type 'clear'
 Enter
+Sleep 1.5s
 Show
 
 # ---------- the story ----------
