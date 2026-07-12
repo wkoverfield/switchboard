@@ -48,7 +48,7 @@
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
   }
-  main, header.hero, nav.top, footer, .demo-wrap, section { position: relative; z-index: 1; }
+  main, header.hero, nav.top, footer, section { position: relative; z-index: 1; }
   a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--hairline-dark); text-underline-offset: 3px; }
   a:hover { text-decoration-color: var(--ink); }
   .mono { font-family: var(--font-mono); }
@@ -196,42 +196,23 @@
   .install-area:has(#mode-agent:checked) .install.human { display: none; }
 
   /* topology: what a pass decides, in one glance */
-  .topology { max-width: 880px; margin: 44px auto 0; }
+  .topology { max-width: 880px; margin: 56px auto 0; position: relative; }
   .topology svg { display: block; width: 100%; height: auto; }
   .topology-caption {
     font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em;
-    text-transform: uppercase; color: var(--ink-dim); margin: 10px 0 0;
+    text-transform: uppercase; color: var(--ink-dim); margin: 14px 0 0;
   }
+  .topology-caption a { color: var(--ink-dim); }
+  .topology-caption a:hover { color: var(--ink); }
   .hero .fine {
     font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em;
     text-transform: uppercase; color: var(--ink-dim); margin-top: 18px;
   }
   .hero .fine span + span::before { content: "·"; margin: 0 8px; color: var(--hairline-dark); }
 
-  /* demo window */
-  .demo-wrap { padding: 40px 0 20px; }
-  .demo {
-    max-width: 920px; margin: 0 auto; position: relative;
-    background: var(--paper-raised);
-    border: 1px solid var(--hairline-dark);
-    padding: 10px;
-  }
-  .demo .frame-label {
-    display: flex; justify-content: space-between;
-    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.12em;
-    text-transform: uppercase; color: var(--ink-dim);
-    padding: 2px 4px 10px;
-  }
-  .demo .screen { display: block; background: var(--term-bg); border-radius: 6px; overflow: hidden; }
-  .demo img { display: block; width: 100%; height: auto; }
-  .demo .caption {
-    font-size: 0.85rem; color: var(--ink-dim); padding: 12px 4px 2px; margin: 0;
-    display: flex; gap: 10px; align-items: baseline; text-align: left;
-  }
-  .demo .caption .live { font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--grant); white-space: nowrap; }
   /* the stamp */
   .stamp {
-    position: absolute; top: -18px; right: -14px;
+    position: absolute; top: -26px; right: 6px;
     font-family: var(--font-mono); font-weight: 500;
     font-size: 0.78rem; letter-spacing: 0.14em;
     color: var(--stamp);
@@ -457,7 +438,7 @@ npx -y @switchboard-mcp/docs-mcp).
     </div>
     <div class="fine rise d5"><span>No account</span><span>No server</span><span>No telemetry</span><span>MIT</span></div>
 
-    <div class="topology rise d6" aria-hidden="true">
+    <div class="topology rise d6">
       <svg viewBox="0 0 880 250" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
         <!-- edges first, under the nodes -->
         <!-- agents into switchboard -->
@@ -506,29 +487,14 @@ npx -y @switchboard-mcp/docs-mcp).
         <text x="640" y="52" fill="var(--grant)" font-size="10" text-anchor="middle">allowed</text>
         <text x="672" y="112" fill="var(--gate)" font-size="10" text-anchor="middle">a human decides</text>
       </svg>
-      <p class="topology-caption">One pass decides what leaves the machine. Denied calls never do.</p>
+      <p class="topology-caption">
+        One pass decides what leaves the machine. Denied calls never do.
+        <a href="https://github.com/wkoverfield/switchboard/blob/main/examples/switchboard.gif">Watch it live (30s)</a>.
+      </p>
+      <div class="stamp">DENIED · OUT OF SCOPE</div>
     </div>
   </div>
 </header>
-
-<div class="demo-wrap">
-  <div class="wrap">
-    <figure class="demo ticked rise d6" style="margin:0">
-      <span class="tick-b"></span>
-      <div class="frame-label"><span>switchboard · demo.tape · live enforcement</span></div>
-      <div class="screen">
-        <img src="https://raw.githubusercontent.com/wkoverfield/switchboard/main/examples/switchboard.gif"
-             alt="Terminal demo: an agent on a scoped pass makes an allowed call, an approval-gated call that waits for a human, and an out-of-scope call that gets a red SWITCHBOARD DENIED badge. switchboard audit verify then reports the hash chain OK."
-             loading="lazy" width="1100" height="700">
-      </div>
-      <figcaption class="caption">
-        <span class="live">not a mockup</span>
-        <span>A real MCP client on a real pass. The delete call never reached GitHub, and it is already in the hash-chained audit log.</span>
-      </figcaption>
-      <div class="stamp">DENIED · OUT OF SCOPE</div>
-    </figure>
-  </div>
-</div>
 
 <section id="gap">
   <div class="wrap">
