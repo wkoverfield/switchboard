@@ -110,56 +110,73 @@ function docShell({ title, body, active, entries }) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)} · Switchboard Docs</title>
+<link rel="preconnect" href="https://api.fontshare.com">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0b0e12; --panel: #11161d; --line: #1e2630;
-    --text: #d7dee8; --dim: #8b98a7; --green: #3fd68f; --red: #ff5f6d; --yellow: #f2c94c;
+    /* credential-paper tokens, mirrored from the landing page */
+    --paper: #f7f5f0; --paper-raised: #fdfcfa;
+    --hairline: #e6e2d9; --hairline-dark: #d8d3c8;
+    --ink: #1c1a17; --ink-dim: #6b665e;
+    --grant: #166b41; --stamp: #b02a2a;
+    --term-bg: #14120f; --term-ink: #d8d4cc;
+    --font-sans: "General Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--font-sans);
     line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
   }
-  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  a { color: var(--green); text-decoration: none; }
-  a:hover { text-decoration: underline; }
+  code, pre { font-family: var(--font-mono); }
+  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--hairline-dark); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: var(--ink); }
   header {
     display: flex; align-items: center; gap: 18px;
-    padding: 14px 24px; border-bottom: 1px solid var(--line);
+    padding: 15px 24px; border-bottom: 1px solid var(--hairline);
+    background: var(--paper); position: sticky; top: 0; z-index: 10;
   }
-  .wordmark { font-weight: 700; letter-spacing: 0.05em; color: var(--text); font-family: ui-monospace, Menlo, monospace; }
-  .wordmark b { color: var(--green); font-weight: 700; }
-  header .links { margin-left: auto; display: flex; gap: 16px; font-size: 0.9rem; }
-  header .links a { color: var(--dim); }
+  .wordmark { font-weight: 500; font-size: 0.95rem; color: var(--ink); font-family: var(--font-mono); text-decoration: none; }
+  .wordmark b { color: var(--grant); font-weight: 500; }
+  header .links { margin-left: auto; display: flex; gap: 18px; font-size: 0.88rem; }
+  header .links a { color: var(--ink-dim); text-decoration: none; }
+  header .links a:hover { color: var(--ink); }
   .layout { display: grid; grid-template-columns: 240px 1fr; max-width: 1140px; margin: 0 auto; }
   @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } aside { display: none; } }
   aside {
-    border-right: 1px solid var(--line); padding: 26px 18px; font-size: 0.9rem;
-    position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+    border-right: 1px solid var(--hairline); padding: 28px 18px; font-size: 0.88rem;
+    position: sticky; top: 53px; align-self: start; height: calc(100vh - 53px); overflow-y: auto;
   }
-  .nav-section { margin-bottom: 20px; display: flex; flex-direction: column; gap: 4px; }
+  .nav-section { margin-bottom: 22px; display: flex; flex-direction: column; gap: 3px; }
   .nav-section span {
-    color: var(--dim); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em;
-    margin-bottom: 4px;
+    color: var(--ink-dim); font-family: var(--font-mono);
+    font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.14em;
+    margin-bottom: 6px;
   }
-  .nav-section a { color: var(--text); padding: 3px 8px; border-radius: 6px; }
-  .nav-section a:hover { background: var(--panel); text-decoration: none; }
-  .nav-section a.active { background: var(--panel); color: var(--green); }
-  main { padding: 30px 34px 80px; min-width: 0; }
-  main h1 { letter-spacing: -0.01em; line-height: 1.2; }
-  main h1, main h2, main h3 { scroll-margin-top: 20px; }
-  main h2 { margin-top: 2.2em; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  .nav-section a { color: var(--ink); padding: 3px 8px; border-radius: 6px; text-decoration: none; }
+  .nav-section a:hover { background: var(--paper-raised); }
+  .nav-section a.active { background: var(--paper-raised); color: var(--grant); box-shadow: inset 2px 0 0 var(--grant); }
+  main { padding: 34px 38px 90px; min-width: 0; }
+  main h1 { letter-spacing: -0.02em; line-height: 1.15; font-weight: 600; }
+  main h1, main h2, main h3 { scroll-margin-top: 70px; }
+  main h2 { margin-top: 2.2em; border-bottom: 1px solid var(--hairline); padding-bottom: 6px; font-weight: 600; letter-spacing: -0.01em; }
+  main h3 { font-weight: 600; }
   main pre {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-    padding: 14px 16px; overflow-x: auto; font-size: 0.86rem; line-height: 1.55;
+    background: var(--term-bg); color: var(--term-ink);
+    border-radius: 8px;
+    padding: 14px 16px; overflow-x: auto; font-size: 0.84rem; line-height: 1.55;
   }
-  main code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: 0.88em; }
-  main pre code { background: none; border: none; padding: 0; }
+  main code { background: var(--paper-raised); border: 1px solid var(--hairline); border-radius: 4px; padding: 1px 5px; font-size: 0.86em; }
+  main pre code { background: none; border: none; padding: 0; color: inherit; }
   main table { border-collapse: collapse; width: 100%; font-size: 0.92rem; display: block; overflow-x: auto; }
-  main th, main td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
-  main th { background: var(--panel); }
-  main blockquote { border-left: 3px solid var(--line); margin: 0; padding: 2px 18px; color: var(--dim); }
+  main th, main td { border: 1px solid var(--hairline-dark); padding: 8px 10px; text-align: left; vertical-align: top; }
+  main th { background: var(--paper-raised); }
+  main blockquote { border-left: 3px solid var(--hairline-dark); margin: 0; padding: 2px 18px; color: var(--ink-dim); }
   main img { max-width: 100%; }
 </style>
 </head>

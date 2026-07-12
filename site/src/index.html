@@ -8,236 +8,420 @@
 <meta property="og:title" content="Switchboard">
 <meta property="og:description" content="A firewall and password manager for your AI coding agents. Passes, not keys.">
 <meta property="og:type" content="website">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%230b0e12'/%3E%3Cpath d='M30 68V32h14a12 12 0 0 1 0 24H30' fill='none' stroke='%233fd68f' stroke-width='8' stroke-linecap='round'/%3E%3Ccircle cx='68' cy='62' r='7' fill='%23ff5f6d'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='14' fill='%23f7f5f0'/%3E%3Crect x='8' y='8' width='84' height='84' rx='10' fill='none' stroke='%231c1a17' stroke-width='4'/%3E%3Cpath d='M32 66V34h13a11 11 0 0 1 0 22H32' fill='none' stroke='%231c1a17' stroke-width='8' stroke-linecap='round'/%3E%3Ccircle cx='66' cy='60' r='7' fill='%23b02a2a'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://api.fontshare.com">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0b0e12;
-    --panel: #11161d;
-    --panel2: #0e1319;
-    --line: #1e2630;
-    --text: #d7dee8;
-    --dim: #8b98a7;
-    --green: #3fd68f;
-    --red: #ff5f6d;
-    --yellow: #f2c94c;
-    --max: 1080px;
+    /* credential-paper tokens: locked in DIRECT/TOKENIZE, do not hardcode offshoots */
+    --paper: #f7f5f0;
+    --paper-raised: #fdfcfa;
+    --hairline: #e6e2d9;
+    --hairline-dark: #d8d3c8;
+    --ink: #1c1a17;
+    --ink-dim: #6b665e;
+    --stamp: #b02a2a;          /* DENIED only */
+    --grant: #166b41;          /* granted / allowed, text-safe on paper */
+    --term-bg: #14120f;
+    --term-ink: #d8d4cc;
+    --term-dim: #8d887e;
+    --term-green: #3fd68f;
+    --term-red: #ff5f6d;
+    --term-yellow: #f2c94c;
+    --max: 1060px;
+    --font-sans: "General Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
   }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body {
     margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 16px;
     line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
   }
-  code, pre, .mono {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  }
-  a { color: var(--green); text-decoration: none; }
-  a:hover { text-decoration: underline; }
+  main, header.hero, nav.top, footer, .demo-wrap, section { position: relative; z-index: 1; }
+  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--hairline-dark); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: var(--ink); }
+  .mono { font-family: var(--font-mono); }
   .wrap { max-width: var(--max); margin: 0 auto; padding: 0 24px; }
 
-  nav {
-    display: flex; align-items: center; gap: 22px;
-    padding: 18px 0;
-    border-bottom: 1px solid var(--line);
+  /* microlabel: the signature index device */
+  .index {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    color: var(--ink-dim);
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 14px;
   }
-  .wordmark { font-weight: 700; letter-spacing: 0.05em; color: var(--text); }
-  .wordmark .dot { color: var(--green); }
-  nav .links { margin-left: auto; display: flex; gap: 18px; font-size: 0.92rem; }
-  nav .links a { color: var(--dim); }
-  nav .links a:hover { color: var(--text); text-decoration: none; }
+  .index b { color: var(--ink); font-weight: 500; }
 
-  .hero { padding: 72px 0 40px; }
-  .hero h1 {
-    font-size: clamp(2rem, 5vw, 3.1rem);
-    line-height: 1.12;
-    margin: 0 0 18px;
-    letter-spacing: -0.02em;
-    max-width: 21ch;
+  /* corner ticks */
+  .ticked { position: relative; }
+  .ticked::before, .ticked::after,
+  .ticked > .tick-b::before, .ticked > .tick-b::after {
+    content: ""; position: absolute; width: 10px; height: 10px;
+    border-color: var(--ink-dim); border-style: solid;
   }
-  .hero h1 em { font-style: normal; color: var(--green); }
-  .hero p.sub {
-    font-size: 1.12rem; color: var(--dim); max-width: 58ch; margin: 0 0 28px;
+  .ticked::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
+  .ticked::after { top: -1px; right: -1px; border-width: 1px 1px 0 0; }
+  .ticked > .tick-b::before { bottom: -1px; left: -1px; border-width: 0 0 1px 1px; }
+  .ticked > .tick-b::after { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+
+  /* nav */
+  nav.top {
+    border-bottom: 1px solid var(--hairline);
+    background: var(--paper);
+    position: sticky; top: 0; z-index: 10;
   }
-  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
-  .btn {
-    display: inline-block; padding: 10px 18px; border-radius: 8px;
-    font-weight: 600; font-size: 0.95rem; border: 1px solid var(--line);
+  nav.top .row { display: flex; align-items: center; gap: 22px; padding: 15px 0; }
+  .wordmark {
+    font-family: var(--font-mono); font-weight: 500; font-size: 0.95rem;
+    letter-spacing: 0.02em; text-decoration: none;
   }
-  .btn.primary { background: var(--green); color: #06281a; border-color: var(--green); }
-  .btn.primary:hover { text-decoration: none; filter: brightness(1.08); }
-  .btn.ghost { color: var(--text); }
-  .btn.ghost:hover { text-decoration: none; border-color: var(--dim); }
-  .install {
+  .wordmark b { color: var(--grant); font-weight: 500; }
+  nav.top .links { margin-left: auto; display: flex; gap: 20px; font-size: 0.88rem; }
+  nav.top .links a { color: var(--ink-dim); text-decoration: none; }
+  nav.top .links a:hover { color: var(--ink); }
+
+  /* hero */
+  .hero { padding: 88px 0 36px; text-align: center; }
+  .pass-chip {
     display: inline-flex; align-items: center; gap: 10px;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-    padding: 10px 14px; font-size: 0.92rem; color: var(--text);
+    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.12em;
+    color: var(--ink-dim); text-transform: uppercase;
+    border: 1px solid var(--hairline-dark); border-radius: 999px;
+    padding: 6px 14px; margin-bottom: 28px;
+    background: var(--paper-raised);
   }
-  .install .prompt { color: var(--green); }
-  .hero .gif {
-    margin-top: 40px; border: 1px solid var(--line); border-radius: 12px;
-    overflow: hidden; background: var(--panel);
+  .pass-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--grant); }
+  .hero h1 {
+    font-size: clamp(2.3rem, 5.4vw, 3.6rem);
+    font-weight: 600;
+    line-height: 1.06;
+    letter-spacing: -0.03em;
+    margin: 0 auto 20px;
+    max-width: 22ch;
+    text-wrap: balance;
   }
-  .hero .gif img { display: block; width: 100%; height: auto; }
-  .hero .gif-caption { font-size: 0.85rem; color: var(--dim); padding: 10px 14px; border-top: 1px solid var(--line); }
+  .hero h1 .pass-word {
+    color: var(--grant);
+    text-decoration: underline;
+    text-decoration-thickness: 3px;
+    text-decoration-color: color-mix(in srgb, var(--grant) 35%, transparent);
+    text-underline-offset: 6px;
+  }
+  .hero p.sub {
+    font-size: 1.06rem; color: var(--ink-dim); max-width: 56ch;
+    margin: 0 auto 30px;
+  }
+  .cta-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; align-items: center; }
+  .btn {
+    display: inline-block; padding: 11px 20px; border-radius: 8px;
+    font-weight: 500; font-size: 0.93rem; text-decoration: none;
+    border: 1px solid var(--ink);
+    transition: transform 160ms var(--ease), background 160ms var(--ease), color 160ms var(--ease);
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn.primary { background: var(--ink); color: var(--paper); }
+  .btn.primary:hover { background: #000; }
+  .btn.ghost { color: var(--ink); border-color: var(--hairline-dark); background: var(--paper-raised); }
+  .btn.ghost:hover { border-color: var(--ink); }
+  .install {
+    display: block; width: fit-content; margin: 18px auto 0;
+    font-family: var(--font-mono); font-size: 0.85rem;
+    color: var(--ink);
+    background: var(--paper-raised);
+    border: 1px solid var(--hairline-dark); border-radius: 8px;
+    padding: 10px 16px;
+    user-select: all;
+  }
+  .install .p { color: var(--grant); user-select: none; }
+  .hero .fine {
+    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--ink-dim); margin-top: 18px;
+  }
+  .hero .fine span + span::before { content: "·"; margin: 0 8px; color: var(--hairline-dark); }
 
-  .stat-band {
-    border-top: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
-    background: var(--panel2);
-    padding: 44px 0;
+  /* demo window */
+  .demo-wrap { padding: 40px 0 20px; }
+  .demo {
+    max-width: 920px; margin: 0 auto; position: relative;
+    background: var(--paper-raised);
+    border: 1px solid var(--hairline-dark);
+    padding: 10px;
   }
-  .stat-band .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
-  @media (max-width: 800px) { .stat-band .grid { grid-template-columns: 1fr; } }
-  .stat .big { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; }
-  .stat .big.red { color: var(--red); }
-  .stat .big.yellow { color: var(--yellow); }
-  .stat .big.green { color: var(--green); }
-  .stat p { color: var(--dim); margin: 6px 0 0; font-size: 0.95rem; max-width: 34ch; }
-  .stat-band .foot { color: var(--dim); font-size: 0.82rem; margin-top: 26px; }
-
-  section.block { padding: 64px 0 8px; }
-  section.block h2 {
-    font-size: 1.6rem; letter-spacing: -0.01em; margin: 0 0 8px;
+  .demo .frame-label {
+    display: flex; justify-content: space-between;
+    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--ink-dim);
+    padding: 2px 4px 10px;
   }
-  section.block > .wrap > p.lead { color: var(--dim); max-width: 62ch; margin: 0 0 30px; }
+  .demo .screen { display: block; background: var(--term-bg); border-radius: 6px; overflow: hidden; }
+  .demo img { display: block; width: 100%; height: auto; }
+  .demo .caption {
+    font-size: 0.85rem; color: var(--ink-dim); padding: 12px 4px 2px; margin: 0;
+    display: flex; gap: 10px; align-items: baseline; text-align: left;
+  }
+  .demo .caption .live { font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--grant); white-space: nowrap; }
+  /* the stamp */
+  .stamp {
+    position: absolute; top: -18px; right: -14px;
+    font-family: var(--font-mono); font-weight: 500;
+    font-size: 0.78rem; letter-spacing: 0.14em;
+    color: var(--stamp);
+    border: 2px solid var(--stamp); border-radius: 4px;
+    padding: 7px 12px;
+    background: var(--paper);
+    box-shadow: 0 1px 0 rgba(28, 26, 23, 0.06);
+  }
+  @media (max-width: 1000px) { .stamp { right: 8px; } }
 
-  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  /* sections */
+  section { padding: 84px 0 0; }
+  section .head { max-width: 640px; margin-bottom: 40px; }
+  section h2 {
+    font-size: clamp(1.5rem, 3vw, 1.9rem); font-weight: 600;
+    letter-spacing: -0.02em; line-height: 1.15; margin: 0 0 10px;
+  }
+  section .head p { color: var(--ink-dim); margin: 0; }
+
+  /* stat band */
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 800px) { .stats { grid-template-columns: 1fr; } }
+  .stat {
+    background: var(--paper-raised);
+    border: 1px solid var(--hairline-dark);
+    padding: 22px 22px 18px;
+  }
+  .stat .big {
+    font-size: clamp(2.6rem, 5vw, 3.4rem); font-weight: 600;
+    letter-spacing: -0.03em; line-height: 1; margin: 18px 0 10px;
+  }
+  .stat p { color: var(--ink-dim); font-size: 0.9rem; margin: 0; max-width: 32ch; }
+  .stats-foot {
+    font-size: 0.8rem; color: var(--ink-dim); margin-top: 18px; max-width: 74ch;
+  }
+
+  /* steps */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
   @media (max-width: 900px) { .steps { grid-template-columns: 1fr; } }
-  .step {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-    padding: 18px 18px 8px;
+  .step { border-top: 1px solid var(--hairline-dark); padding-top: 18px; position: relative; }
+  .step .n {
+    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.14em;
+    color: var(--ink-dim); text-transform: uppercase;
   }
-  .step .k { color: var(--dim); font-size: 0.78rem; letter-spacing: 0.1em; text-transform: uppercase; }
-  .step h3 { margin: 6px 0 10px; font-size: 1.05rem; }
+  .step h3 { font-size: 1.02rem; font-weight: 600; margin: 8px 0 12px; letter-spacing: -0.01em; }
   .step pre {
-    background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
-    padding: 12px; font-size: 0.82rem; overflow-x: auto; line-height: 1.5;
+    background: var(--term-bg); color: var(--term-ink);
+    border-radius: 8px; padding: 14px 16px; margin: 0 0 12px;
+    font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.6;
+    overflow-x: auto;
   }
-  .step pre .c { color: var(--dim); }
-  .step pre .g { color: var(--green); }
-  .step pre .r { color: var(--red); }
-  .step pre .y { color: var(--yellow); }
-  .step p { color: var(--dim); font-size: 0.9rem; }
+  .step pre .c { color: var(--term-dim); }
+  .step pre .g { color: var(--term-green); }
+  .step pre .r { color: var(--term-red); }
+  .step pre .y { color: var(--term-yellow); }
+  .step p { color: var(--ink-dim); font-size: 0.88rem; margin: 0; }
 
-  .honest {
-    background: var(--panel2);
-    border-top: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
-    margin-top: 56px; padding: 56px 0;
+  /* honesty: the back of the pass */
+  .limits {
+    background: var(--paper-raised);
+    border: 1px solid var(--hairline-dark);
+    padding: 36px;
   }
-  .honest h2 { font-size: 1.6rem; margin: 0 0 8px; }
-  .honest .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 26px; }
-  @media (max-width: 800px) { .honest .cards { grid-template-columns: 1fr; } }
-  .honest .card {
-    border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px;
-    background: var(--panel);
+  @media (max-width: 700px) { .limits { padding: 24px 18px; } }
+  .limits .cards {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+    border-top: 1px solid var(--hairline);
+    margin-top: 26px;
   }
-  .honest .card b { display: block; margin-bottom: 6px; }
-  .honest .card p { margin: 0; color: var(--dim); font-size: 0.92rem; }
+  @media (max-width: 800px) { .limits .cards { grid-template-columns: 1fr; } }
+  .limits .card { padding: 20px 24px 20px 0; border-bottom: 1px solid var(--hairline); }
+  .limits .card:nth-child(odd) { border-right: 1px solid var(--hairline); padding-right: 24px; }
+  .limits .card:nth-child(even) { padding-left: 24px; padding-right: 0; }
+  @media (max-width: 800px) {
+    .limits .card, .limits .card:nth-child(odd), .limits .card:nth-child(even) { border-right: none; padding-left: 0; padding-right: 0; }
+  }
+  .limits .card b { display: block; margin-bottom: 6px; font-weight: 600; letter-spacing: -0.01em; }
+  .limits .card p { margin: 0; color: var(--ink-dim); font-size: 0.9rem; }
+  .limits .card code {
+    font-family: var(--font-mono); font-size: 0.82em;
+    background: var(--paper); border: 1px solid var(--hairline); border-radius: 4px; padding: 1px 5px;
+  }
 
-  .trust-list { list-style: none; padding: 0; margin: 26px 0 0; display: grid; gap: 14px; }
-  .trust-list li {
-    border-left: 3px solid var(--green); padding: 2px 0 2px 16px;
+  /* trust list */
+  .trust { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 800px) { .trust { grid-template-columns: 1fr; } }
+  .trust .item {
+    border: 1px solid var(--hairline-dark); background: var(--paper-raised);
+    padding: 20px 22px;
   }
-  .trust-list li b { display: block; }
-  .trust-list li span { color: var(--dim); font-size: 0.93rem; }
+  .trust .item b { display: block; font-weight: 600; letter-spacing: -0.01em; margin: 10px 0 6px; }
+  .trust .item span.body { color: var(--ink-dim); font-size: 0.9rem; }
+  .trust .item .index { margin-bottom: 0; }
 
-  .agents pre, .waitlist pre {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-    padding: 16px; font-size: 0.86rem; overflow-x: auto; max-width: 640px;
+  /* agents */
+  .agents pre {
+    background: var(--term-bg); color: var(--term-ink);
+    border-radius: 8px; padding: 18px 20px;
+    font-family: var(--font-mono); font-size: 0.84rem; line-height: 1.7;
+    overflow-x: auto; max-width: 680px; margin: 0 0 14px;
   }
+  .agents pre .c { color: var(--term-dim); }
+  .agents .also { font-size: 0.85rem; color: var(--ink-dim); }
+
+  /* waitlist */
+  .waitlist { padding-bottom: 20px; }
+  .waitlist .inner {
+    border-top: 1px solid var(--ink);
+    padding-top: 36px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 30px;
+  }
+  @media (max-width: 800px) { .waitlist .inner { grid-template-columns: 1fr; } }
+  .waitlist p { color: var(--ink-dim); margin: 0; }
 
   footer {
-    border-top: 1px solid var(--line); margin-top: 72px; padding: 28px 0 40px;
-    color: var(--dim); font-size: 0.88rem;
+    margin-top: 84px; border-top: 1px solid var(--hairline);
+    padding: 26px 0 44px;
+    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-dim);
   }
-  footer .wrap { display: flex; gap: 20px; flex-wrap: wrap; }
-  footer a { color: var(--dim); }
+  footer .wrap { display: flex; gap: 18px; flex-wrap: wrap; }
+  footer a { color: var(--ink-dim); text-decoration: none; }
+  footer a:hover { color: var(--ink); }
   footer .spacer { margin-left: auto; }
+
+  /* motion: load entrances only, pure CSS, hero + demo */
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+  .rise { animation: rise 560ms var(--ease) both; }
+  .rise.d1 { animation-delay: 70ms; }
+  .rise.d2 { animation-delay: 140ms; }
+  .rise.d3 { animation-delay: 210ms; }
+  .rise.d4 { animation-delay: 280ms; }
+  .rise.d5 { animation-delay: 350ms; }
+  .rise.d6 { animation-delay: 430ms; }
+  @keyframes stamp-in {
+    from { opacity: 0; transform: rotate(6deg) scale(1.16); }
+    to { opacity: 1; transform: rotate(6deg) scale(1); }
+  }
+  .stamp { transform: rotate(6deg); animation: stamp-in 380ms var(--ease) 720ms both; }
+  @media (prefers-reduced-motion: reduce) {
+    .rise, .stamp { animation: none; }
+    html { scroll-behavior: auto; }
+  }
 </style>
 </head>
 <body>
 
-<div class="wrap">
-  <nav>
-    <span class="wordmark mono">switchboard<span class="dot">_</span></span>
-    <div class="links">
-      <a href="/docs/">Docs</a>
-      <a href="/docs/roadmap">Roadmap</a>
-      <a href="https://github.com/wkoverfield/switchboard">GitHub</a>
-      <a href="https://www.npmjs.com/package/@switchboard-mcp/cli">npm</a>
+<nav class="top">
+  <div class="wrap">
+    <div class="row">
+      <a class="wordmark" href="/">switchboard<b>_</b></a>
+      <div class="links">
+        <a href="/docs/">Docs</a>
+        <a href="/docs/roadmap">Roadmap</a>
+        <a href="https://github.com/wkoverfield/switchboard">GitHub</a>
+        <a href="https://www.npmjs.com/package/@switchboard-mcp/cli">npm</a>
+      </div>
     </div>
-  </nav>
-</div>
+  </div>
+</nav>
 
 <header class="hero">
   <div class="wrap">
-    <h1>Give your coding agents a <em>pass</em>, not your keys.</h1>
-    <p class="sub">
+    <div class="pass-chip rise"><span class="dot"></span> scoped pass · expires on its own · local-first</div>
+    <h1 class="rise d1">Give your coding agents a <span class="pass-word">pass</span>, not your keys.</h1>
+    <p class="sub rise d2">
       Switchboard is a firewall and password manager for AI coding agents.
       It finds what Claude Code and Codex can already reach in a repo, moves
-      your tokens into the OS keychain, and puts each agent on a scoped pass
-      that expires on its own. Out of scope gets denied before it ever
-      reaches the provider.
+      your tokens into the OS keychain, and scopes each agent to named tools
+      for a few hours. Out of scope gets denied before it ever reaches the
+      provider.
     </p>
-    <div class="cta-row">
+    <div class="cta-row rise d3">
       <a class="btn primary" href="/docs/install-quickstart">Start in 5 minutes</a>
       <a class="btn ghost" href="/docs/">View docs</a>
-      <span class="install mono"><span class="prompt">$</span> npm install -g @switchboard-mcp/cli</span>
     </div>
-    <p class="sub" style="font-size:0.9rem; margin-top:6px;">
-      Local-first. No account, no server, no telemetry. MIT licensed.
-    </p>
-    <div class="gif">
-      <img src="https://raw.githubusercontent.com/wkoverfield/switchboard/main/examples/switchboard.gif"
-           alt="Terminal demo: an agent on a scoped pass makes an allowed call, an approval-gated call that waits for a human, and an out-of-scope call that gets a red SWITCHBOARD DENIED badge. switchboard audit verify then reports the hash chain OK."
-           loading="lazy" width="1100" height="700">
-      <div class="gif-caption">
-        Live enforcement, not a mockup: a real MCP client on a real pass. The denial never reached GitHub, and it is already in the hash-chained audit log.
-      </div>
-    </div>
+    <code class="install rise d4"><span class="p">$</span> npm install -g @switchboard-mcp/cli</code>
+    <div class="fine rise d5"><span>No account</span><span>No server</span><span>No telemetry</span><span>MIT</span></div>
   </div>
 </header>
 
-<div class="stat-band">
+<div class="demo-wrap">
   <div class="wrap">
-    <div class="grid">
-      <div class="stat">
-        <div class="big red">~8.5%</div>
-        <p>of MCP servers implement OAuth at all, per a 2026 practitioner survey.</p>
+    <figure class="demo ticked rise d6" style="margin:0">
+      <span class="tick-b"></span>
+      <div class="frame-label"><span>switchboard · demo.tape · live enforcement</span></div>
+      <div class="screen">
+        <img src="https://raw.githubusercontent.com/wkoverfield/switchboard/main/examples/switchboard.gif"
+             alt="Terminal demo: an agent on a scoped pass makes an allowed call, an approval-gated call that waits for a human, and an out-of-scope call that gets a red SWITCHBOARD DENIED badge. switchboard audit verify then reports the hash chain OK."
+             loading="lazy" width="1100" height="700">
       </div>
-      <div class="stat">
-        <div class="big yellow">~18%</div>
-        <p>do any scoping whatsoever. The other four fifths hand your agent everything the token can do.</p>
-      </div>
-      <div class="stat">
-        <div class="big green">July 28</div>
-        <p>the MCP spec revision lands. Server-side auth will take years to roll out. Your side of the connection is yours today.</p>
-      </div>
-    </div>
-    <div class="foot">
-      Sources: <a href="https://modelcontextprotocol.io/specification">MCP specification</a> (revision dated July 28, 2026);
-      OAuth and scoping adoption figures from the <a href="https://nhimg.org">nhimg.org</a> MCP server practitioner survey.
-      Switchboard is agent-side authority: it works with the servers you already use, compliant or not.
-    </div>
+      <figcaption class="caption">
+        <span class="live">not a mockup</span>
+        <span>A real MCP client on a real pass. The delete call never reached GitHub, and it is already in the hash-chained audit log.</span>
+      </figcaption>
+      <div class="stamp">DENIED · OUT OF SCOPE</div>
+    </figure>
   </div>
 </div>
 
-<section class="block" id="how">
+<section id="gap">
   <div class="wrap">
-    <h2>Three commands to a governed agent</h2>
-    <p class="lead">
-      Start in a repo where your agents already work. Switchboard meets your
-      existing MCP config where it is.
+    <div class="head">
+      <span class="index">[ 01 ] · <b>the gap</b></span>
+      <h2>Server-side auth is years away. Your side is yours today.</h2>
+      <p>The MCP ecosystem hands agents whatever the token can do. Switchboard is agent-side authority: it works with the servers you already use, compliant or not.</p>
+    </div>
+    <div class="stats">
+      <div class="stat ticked"><span class="tick-b"></span>
+        <span class="index">&rarr; stat</span>
+        <div class="big">~8.5%</div>
+        <p>of MCP servers implement OAuth at all, per a 2026 practitioner survey.</p>
+      </div>
+      <div class="stat ticked"><span class="tick-b"></span>
+        <span class="index">&rarr; stat</span>
+        <div class="big">~18%</div>
+        <p>do any scoping whatsoever. The rest expose everything the token can reach.</p>
+      </div>
+      <div class="stat ticked"><span class="tick-b"></span>
+        <span class="index">&rarr; date</span>
+        <div class="big">Jul 28</div>
+        <p>the MCP spec revision lands. Rollout will take the ecosystem years.</p>
+      </div>
+    </div>
+    <p class="stats-foot">
+      Sources: <a href="https://modelcontextprotocol.io/specification">MCP specification</a> (revision dated July 28, 2026);
+      OAuth and scoping figures from the <a href="https://nhimg.org">nhimg.org</a> MCP server practitioner survey.
     </p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <div class="head">
+      <span class="index">[ 02 ] · <b>the loop</b></span>
+      <h2>Three commands to a governed agent</h2>
+      <p>Start in a repo where your agents already work. Switchboard meets your existing MCP config where it is.</p>
+    </div>
     <div class="steps">
       <div class="step">
-        <span class="k">1 · See it</span>
+        <span class="n">01 / see it</span>
         <h3>scan, then import</h3>
-        <pre class="mono">$ switchboard scan
+        <pre>$ switchboard scan
 <span class="r">high</span> claude:github
   <span class="c">token in plaintext .mcp.json</span>
 $ switchboard import --write
@@ -246,9 +430,9 @@ $ switchboard import --write
         <p>Every server and token your agents can already touch, including the routes that bypass everything.</p>
       </div>
       <div class="step">
-        <span class="k">2 · Scope it</span>
+        <span class="n">02 / scope it</span>
         <h3>grant a pass</h3>
-        <pre class="mono">$ switchboard grant --for 4h
+        <pre>$ switchboard grant --for 4h
 <span class="g">SWITCHBOARD · PASS GRANTED</span>
   <span class="g">&rarr;</span> github_ci_*
   <span class="c">everything else denied</span>
@@ -256,9 +440,9 @@ $ switchboard import --write
         <p>Named tools reachable, everything else denied, gone on its own. Revoke early any time.</p>
       </div>
       <div class="step">
-        <span class="k">3 · Watch it hold</span>
+        <span class="n">03 / watch it hold</span>
         <h3>denied, on the record</h3>
-        <pre class="mono">agent &rarr; delete_file
+        <pre>agent &rarr; delete_file
 <span class="r">SWITCHBOARD · DENIED</span>
   <span class="c">never reached the provider</span>
 $ switchboard audit verify
@@ -269,97 +453,107 @@ $ switchboard audit verify
   </div>
 </section>
 
-<div class="honest">
+<section id="limits">
   <div class="wrap">
-    <h2>What Switchboard does not do</h2>
-    <p class="lead" style="color:var(--dim); max-width:62ch;">
-      Trust tooling that overstates itself is worse than none. These limits
-      are in the README, the threat model, and the product's own output.
-    </p>
-    <div class="cards">
-      <div class="card">
-        <b>It is not a sandbox.</b>
-        <p>Switchboard governs the paths routed through it: its MCP endpoints and <span class="mono">switchboard run</span>. Raw shell, provider CLIs, browser sessions, and direct MCP routes bypass it. <span class="mono">switchboard scan</span> reports those routes so you can close them or accept them deliberately.</p>
-      </div>
-      <div class="card">
-        <b>No pass, no policy.</b>
-        <p>With no active pass, configured profiles are served without tool policy. Enforcement is opt-in by design today; a default-deny mode is on the roadmap, and we will not claim it before it ships.</p>
-      </div>
-      <div class="card">
-        <b>Revocation is next-call.</b>
-        <p>Revoking a pass stops the next routed call. A call already executing completes. If an in-flight action must die, revoke the token at the provider.</p>
-      </div>
-      <div class="card">
-        <b>It is alpha software.</b>
-        <p>Single developer, local-first, conservative claims. The pass and audit contracts are versioned JSON; the <a href="/docs/security-threat-model">threat model</a> states every accepted risk.</p>
+    <div class="limits ticked"><span class="tick-b"></span>
+      <span class="index">[ 03 ] · <b>what this pass does not cover</b></span>
+      <h2>Trust tooling that overstates itself is worse than none.</h2>
+      <p style="color:var(--ink-dim); max-width:60ch; margin:6px 0 0;">
+        These limits are in the README, the threat model, and the product's own output.
+      </p>
+      <div class="cards">
+        <div class="card">
+          <b>It is not a sandbox.</b>
+          <p>Switchboard governs the paths routed through it: its MCP endpoints and <code>switchboard run</code>. Raw shell, provider CLIs, browser sessions, and direct MCP routes bypass it. <code>switchboard scan</code> reports those routes so you can close them or accept them deliberately.</p>
+        </div>
+        <div class="card">
+          <b>No pass, no policy.</b>
+          <p>With no active pass, configured profiles are served without tool policy. Enforcement is opt-in by design today; a default-deny mode is on the roadmap, and we will not claim it before it ships.</p>
+        </div>
+        <div class="card">
+          <b>Revocation is next-call.</b>
+          <p>Revoking a pass stops the next routed call. A call already executing completes. If an in-flight action must die, revoke the token at the provider.</p>
+        </div>
+        <div class="card">
+          <b>It is alpha software.</b>
+          <p>Single developer, local-first, conservative claims. The pass and audit contracts are versioned JSON; the <a href="/docs/security-threat-model">threat model</a> states every accepted risk.</p>
+        </div>
       </div>
     </div>
   </div>
-</div>
+</section>
 
-<section class="block" id="trust">
+<section id="trust">
   <div class="wrap">
-    <h2>Built to be diligenced</h2>
-    <p class="lead">
-      The security story is written down, adversarially, with code references.
-      Read it before you trust us. Especially then.
-    </p>
-    <ul class="trust-list">
-      <li>
-        <b>A real threat model, not a posture note.</b>
-        <span>STRIDE analysis of every surface: what enforcement binds, what it cannot, revocation semantics, socket assumptions, and a ten-item accepted-risks list. <a href="/docs/security-threat-model">Read the threat model</a>.</span>
-      </li>
-      <li>
-        <b>Tamper-evident audit log.</b>
-        <span>Every routed call, denial, and approval decision is hash-chained JSONL on your machine. <span class="mono">switchboard audit verify</span> reports the exact line where a chain breaks. <a href="/docs/security-audit-logs">How it works and what it cannot prove</a>.</span>
-      </li>
-      <li>
-        <b>Secrets stay in the OS keychain.</b>
-        <span>Config carries named refs, never values. Weaker backends require an explicit unsafe opt-in. Values are injected only into the upstream that declared them, at spawn, and redacted everywhere else.</span>
-      </li>
-      <li>
-        <b>Delegation that cannot widen.</b>
-        <span>A lead agent can hand narrower passes to subagents; children are validated as strict subsets of the parent, and parent deny lists are inherited.</span>
-      </li>
-    </ul>
+    <div class="head">
+      <span class="index">[ 04 ] · <b>diligence</b></span>
+      <h2>Built to be diligenced</h2>
+      <p>The security story is written down, adversarially, with code references. Read it before you trust us. Especially then.</p>
+    </div>
+    <div class="trust">
+      <div class="item">
+        <span class="index">threat-model.md</span>
+        <b>A real threat model, not a posture note</b>
+        <span class="body">STRIDE analysis of every surface: what enforcement binds, what it cannot, revocation semantics, socket assumptions, and a ten-item accepted-risks list. <a href="/docs/security-threat-model">Read it</a>.</span>
+      </div>
+      <div class="item">
+        <span class="index">audit verify</span>
+        <b>Tamper-evident audit log</b>
+        <span class="body">Every routed call, denial, and approval decision is hash-chained JSONL on your machine. Verification reports the exact line where a chain breaks. <a href="/docs/security-audit-logs">What it proves and what it cannot</a>.</span>
+      </div>
+      <div class="item">
+        <span class="index">secretRef</span>
+        <b>Secrets stay in the OS keychain</b>
+        <span class="body">Config carries named refs, never values. Weaker backends require an explicit unsafe opt-in. Values are injected only into the upstream that declared them, at spawn, and redacted everywhere else.</span>
+      </div>
+      <div class="item">
+        <span class="index">child &sube; parent</span>
+        <b>Delegation that cannot widen</b>
+        <span class="body">A lead agent can hand narrower passes to subagents; children are validated as strict subsets of the parent, and parent deny lists are inherited.</span>
+      </div>
+    </div>
   </div>
 </section>
 
-<section class="block agents" id="agents">
+<section id="agents" class="agents">
   <div class="wrap">
-    <h2>Installable by the agent reading this</h2>
-    <p class="lead">
-      The docs ship as an MCP server, and llms.txt is kept current. An agent
-      can evaluate Switchboard, read the threat model, and set it up without
-      leaving its own tools.
-    </p>
-    <pre class="mono">$ claude mcp add switchboard-docs -- npx -y @switchboard-mcp/docs-mcp
-<span style="color:var(--dim)"># tools: list_docs · read_doc · search_docs</span>
+    <div class="head">
+      <span class="index">[ 05 ] · <b>for agents</b></span>
+      <h2>Installable by the agent reading this</h2>
+      <p>The docs ship as an MCP server, and llms.txt is kept current. An agent can evaluate Switchboard, read the threat model, and set it up without leaving its own tools.</p>
+    </div>
+    <pre class="">$ claude mcp add switchboard-docs -- npx -y @switchboard-mcp/docs-mcp
+<span class="c"># tools: list_docs · read_doc · search_docs</span>
 
 $ npx -y @switchboard-mcp/cli@latest scan</pre>
-    <p style="color:var(--dim); font-size:0.9rem;">
+    <p class="also">
       Also: <a href="/llms.txt">llms.txt</a> · <a href="/llms-full.txt">llms-full.txt</a> ·
       <a href="https://github.com/wkoverfield/switchboard/blob/main/server.json">MCP registry manifest</a>
     </p>
   </div>
 </section>
 
-<section class="block waitlist" id="team">
+<section id="team" class="waitlist">
   <div class="wrap">
-    <h2>Running a fleet, or a team?</h2>
-    <p class="lead">
-      Switchboard is free, local, and MIT licensed, and it stays that way.
-      The org layer (shared policy, multi-user identity, central visibility,
-      SIEM export) is on the <a href="/docs/roadmap">roadmap</a>. If you want
-      it, we want to build it against your real workflow:
-      <a href="https://github.com/wkoverfield/switchboard/issues/new?title=Team%20tier%20interest">raise your hand on GitHub</a>.
-    </p>
+    <div class="inner">
+      <div>
+        <span class="index">[ 06 ] · <b>teams</b></span>
+        <h2>Running a fleet, or a team?</h2>
+      </div>
+      <p>
+        Switchboard is free, local, and MIT licensed, and it stays that way.
+        The org layer (shared policy, multi-user identity, central visibility,
+        SIEM export) is on the <a href="/docs/roadmap">roadmap</a>. If you want
+        it, we want to build it against your real workflow:
+        <a href="https://github.com/wkoverfield/switchboard/issues/new?title=Team%20tier%20interest">raise your hand on GitHub</a>.
+      </p>
+    </div>
   </div>
 </section>
 
 <footer>
   <div class="wrap">
-    <span>MIT · built by <a href="https://wkoverfield.com">Wilson Overfield</a> / WKO</span>
+    <span>MIT · <a href="https://wkoverfield.com">Wilson Overfield</a> / WKO</span>
     <span class="spacer"></span>
     <a href="https://github.com/wkoverfield/switchboard">GitHub</a>
     <a href="https://www.npmjs.com/package/@switchboard-mcp/cli">npm</a>
@@ -367,6 +561,7 @@ $ npx -y @switchboard-mcp/cli@latest scan</pre>
     <a href="https://github.com/wkoverfield/switchboard/blob/main/SECURITY.md">Security</a>
   </div>
 </footer>
+
 
 </body>
 </html>
