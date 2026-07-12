@@ -1,0 +1,13 @@
+{
+  "name": "@switchboard-mcp/site",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Landing page and docs site for Switchboard.",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "marked": "^15.0.4"
+  }
+}

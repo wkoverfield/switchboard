@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Added the storefront: a static landing page and docs site under `site/` (worldview narrative anchored on the July 28, 2026 MCP spec revision and the ~8.5% OAuth / ~18% scoping adoption gap, with citations), rendered from the repo's own markdown.
+- Added `@switchboard-mcp/docs-mcp`: the official MCP server for the Switchboard docs (`list_docs`, `read_doc`, `search_docs`), bundled and offline.
+- Rewrote `llms.txt` and `llms-full.txt` to match the shipped product (they described a pre-daemon milestone) and added honesty constraints for agents.
+- Added `docs/product/public-roadmap.md`: the honest shipped / next / later split. Org model, richer policy engine, enterprise surface, and daemon socket hardening are roadmap entries, deliberately not built.
+
 ## 0.1.6
 
 - Added the `mcpName` field to the published package so the official MCP registry can validate npm ownership.
