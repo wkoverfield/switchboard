@@ -4,6 +4,8 @@
 
 - Added a full STRIDE threat model at `docs/security/threat-model.md`: trust boundaries, what enforcement binds vs what it cannot, revocation semantics, daemon socket assumptions, secrets backends, and the audit-log threat surface, ending in an accepted-risks list. `trust-model.md` is now a short posture summary that points at it.
 - Made the audit log tamper-evident: entries are hash-chained (`prevHash`/`hash` fields), appends are serialized with a lockfile, and `switchboard audit verify` checks the chain and reports exactly where it breaks. Pre-existing entries are treated as legacy and keep working.
+- Added `switchboard dashboard`: a local, read-only web dashboard (127.0.0.1 only) showing live passes, pending approvals, denials, and the audit stream.
+- Re-cut the hero demo (`examples/switchboard.tape`): the climax is now a live out-of-scope DENIED call through the real MCP front door, with an approval-gated call and `switchboard audit verify` in the story. Added `demo-agent.mjs`, a real MCP client that plays the agent.
 
 ## 0.1.6
 
