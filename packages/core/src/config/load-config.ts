@@ -45,6 +45,7 @@ export interface LoadedConfig {
 
 const builtInConfig: SwitchboardConfig = {
   version: 1,
+  enforcement: "default",
   defaults: {
     auditLog: true,
     confirmDestructive: true,

@@ -25,6 +25,17 @@ export const enforcementLevelSchema = z.enum([
   "advisory"
 ]);
 
+// Top-level enforcement posture, distinct from the per-profile
+// `enforcement` layer above. "default" preserves the historical behavior of
+// serving configured profiles ungoverned when no pass is bound; "strict"
+// denies all routed calls until a pass is granted (opt-in default-deny).
+export const enforcementModeSchema = z.enum(["default", "strict"]);
+
+// Surfaced to an agent when strict mode is on and no pass is bound: routed
+// tools/list is empty and every call is rejected with this message.
+export const strictNoPassReason =
+  "no active pass; grant one with switchboard grant";
+
 export const secretRefEnvValueSchema = z.object({
   secretRef: z.string().min(1).refine((value) => validateSecretRef(value).ok, {
     message:
@@ -125,6 +136,7 @@ export const acceptedRisksSchema = z
 export const switchboardConfigSchema = z
   .object({
     version: z.literal(1).default(1),
+    enforcement: enforcementModeSchema.default("default"),
     defaults: z.record(z.string(), z.unknown()).default({}),
     profiles: z.record(z.string(), profileSchema).default({}),
     workspaces: z.record(z.string(), workspaceSchema).default({}),

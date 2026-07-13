@@ -28,6 +28,11 @@ a shipped control.
 - **Tamper-evident audit**: hash-chained local JSONL, `switchboard audit
   verify`, and a local read-only dashboard for passes, denials, and the
   audit stream.
+- **Opt-in strict mode**: set `enforcement: strict` in `.switchboard.yaml`
+  (or pass `--strict` to `switchboard mcp` / `switchboard serve`) and an
+  unbound connection is denied instead of served ungoverned. No pass means an
+  empty tool list and calls rejected with "no active pass; grant one with
+  switchboard grant", on both the daemon and daemonless paths.
 - **A written threat model** ([docs/security/threat-model.md](../security/threat-model.md))
   that states what enforcement binds and what it cannot.
 
@@ -36,9 +41,10 @@ a shipped control.
 - **Third-party evidence**: named developers running the GitHub CI and
   Vercel Preview flows end to end with least-privilege tokens, plus live
   (not fixture) Stripe and Supabase runs.
-- **Default-deny operating mode**: today, no active pass means configured
-  profiles are served without tool policy. Closing that gap is the highest
-  priority enforcement change on the list.
+- **Default-deny by default**: opt-in strict mode ships today (see Shipped),
+  so no pass can already mean nothing moves. The remaining work is making
+  default-deny the recommended posture with the onboarding to match, so a
+  new install lands safe without reading the docs first.
 - **Docs as product**: docs site, llms.txt, and the docs MCP server
   (`@switchboard-mcp/docs-mcp`) kept current with each release.
 

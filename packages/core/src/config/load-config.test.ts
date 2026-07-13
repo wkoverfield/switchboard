@@ -74,6 +74,34 @@ describe("loadSwitchboardConfig", () => {
     expect(loaded.config.profiles.web?.environment).toBe("local");
   });
 
+  it("defaults enforcement to 'default' and accepts 'strict'", () => {
+    const root = makeTempProject();
+    const loaded = loadSwitchboardConfig({ cwd: root, env: {}, homeDir: root });
+    expect(loaded.config.enforcement).toBe("default");
+
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      ["version: 1", "enforcement: strict"].join("\n")
+    );
+    const strict = loadSwitchboardConfig({ cwd: root, env: {}, homeDir: root });
+    expect(strict.diagnostics).toEqual([]);
+    expect(strict.config.enforcement).toBe("strict");
+  });
+
+  it("rejects an unknown enforcement value", () => {
+    const root = makeTempProject();
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      ["version: 1", "enforcement: paranoid"].join("\n")
+    );
+
+    const loaded = loadSwitchboardConfig({ cwd: root, env: {}, homeDir: root });
+    expect(loaded.diagnostics.some((item) => item.level === "error")).toBe(true);
+    expect(
+      loaded.diagnostics.some((item) => item.message.includes("enforcement"))
+    ).toBe(true);
+  });
+
   it("returns schema diagnostics for invalid profiles", () => {
     const root = makeTempProject();
     writeFileSync(

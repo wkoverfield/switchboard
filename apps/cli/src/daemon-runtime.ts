@@ -19,6 +19,7 @@ import {
   resolveActiveMandate,
   resolveDaemonPaths,
   safeAuditLog,
+  strictNoPassReason,
   writeDaemonState,
   type DaemonPaths,
   type DaemonStatus,
@@ -239,6 +240,10 @@ async function daemonHeartbeat(socketPath: string): Promise<boolean> {
 
 export interface DaemonSocketContext {
   cwd?: string;
+  // Per-connection strict override (from `switchboard mcp --strict`). ORed with
+  // the repo's `enforcement` config: strict only ever strengthens, so a client
+  // can request default-deny but never weaken a repo that already enforces it.
+  strict?: boolean;
 }
 
 function handleDaemonSocket(socket: Socket, context: DaemonSocketContext): void {
@@ -335,6 +340,7 @@ export async function handleDaemonRequest(
       mandateId?: unknown;
       approvalWaitMs?: unknown;
       cwd?: unknown;
+      strict?: unknown;
     };
     const id = typeof request.id === "string" ? request.id : "unknown";
     if (request.type === "ping") {
@@ -363,10 +369,19 @@ export async function handleDaemonRequest(
         error: "Daemon request cwd must be a non-empty string."
       };
     }
-    const requestContext: DaemonSocketContext =
+    if (request.strict !== undefined && typeof request.strict !== "boolean") {
+      return {
+        id,
+        ok: false,
+        error: "Daemon request strict must be a boolean."
+      };
+    }
+    const baseContext: DaemonSocketContext =
       typeof request.cwd === "string"
         ? { ...context, cwd: resolve(request.cwd) }
         : context;
+    const requestContext: DaemonSocketContext =
+      request.strict === true ? { ...baseContext, strict: true } : baseContext;
     if (request.type === "list_tools") {
       if (
         request.mandateId !== undefined &&
@@ -1128,6 +1143,21 @@ async function routerForConfiguredProfiles(
     // automatically. Falls through to all configured profiles when no pass is
     // live, preserving the prior no-mandate behavior.
     mandate = await resolveAutoGrantPass(configCwdBase(loaded, context.cwd));
+  }
+
+  // Strict mode: with no pass bound, deny everything instead of serving the
+  // configured profiles ungoverned. The flag (per-connection) only strengthens
+  // the repo's `enforcement` config, so either turning it on is enough.
+  const strict = context.strict === true || loaded.config.enforcement === "strict";
+  if (!mandate && strict) {
+    return {
+      ok: true,
+      mandate: undefined,
+      router: new GenericMcpRouter([], {
+        auditLogger: createJsonlAuditLogger(),
+        denyAll: { reason: strictNoPassReason }
+      })
+    };
   }
 
   let profiles: StdioUpstreamProfile[];

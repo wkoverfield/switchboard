@@ -12,7 +12,8 @@ import {
   listApprovalRequests,
   markApprovalRequestStale,
   readAuditLogEntries,
-  resolveAuditLogPath
+  resolveAuditLogPath,
+  strictNoPassReason
 } from "@switchboard-mcp/core";
 import {
   handleDaemonRequest,
@@ -714,6 +715,194 @@ describe("daemon runtime mandate context", () => {
     });
   });
 });
+
+describe("daemon runtime strict mode", () => {
+  const previousStateHome = process.env.XDG_STATE_HOME;
+
+  afterEach(() => {
+    if (previousStateHome === undefined) {
+      delete process.env.XDG_STATE_HOME;
+    } else {
+      process.env.XDG_STATE_HOME = previousStateHome;
+    }
+  });
+
+  it("serves an empty tool list when strict config is set and no pass is bound", async () => {
+    const root = await makeStrictRepo();
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({ id: "list", type: "list_tools" }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "list",
+      ok: true,
+      tools: []
+    });
+  });
+
+  it("rejects strict-mode calls with a grant-a-pass message and audits the denial", async () => {
+    const root = await makeStrictRepo();
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "call",
+          type: "call_tool",
+          name: "github_findu_echo",
+          arguments: {}
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "call",
+      ok: false,
+      error: strictNoPassReason,
+      mcpError: {
+        message: strictNoPassReason,
+        toolName: "github_findu_echo"
+      }
+    });
+
+    const entries = await readAuditLogEntries();
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "tool_call",
+          status: "error",
+          toolName: "github_findu_echo",
+          error: strictNoPassReason
+        })
+      ])
+    );
+  });
+
+  it("denies via the --strict request flag even when config is default", async () => {
+    // Repo config has no `enforcement: strict`; the per-connection flag alone
+    // (as sent by `switchboard mcp --strict`) must still deny.
+    const root = await makeUngovernedRepo();
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({ id: "list", type: "list_tools", strict: true }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({ id: "list", ok: true, tools: [] });
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "call",
+          type: "call_tool",
+          name: "github_findu_echo",
+          strict: true,
+          arguments: {}
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "call",
+      ok: false,
+      error: strictNoPassReason
+    });
+  });
+
+  it("still serves configured profiles ungoverned when strict is off (default preserved)", async () => {
+    const root = await makeUngovernedRepo();
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({ id: "list", type: "list_tools" }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "list",
+      ok: true,
+      tools: expect.arrayContaining([
+        expect.objectContaining({ name: "github_findu_echo" })
+      ])
+    });
+  });
+
+  it("lets a bound pass govern normally even when strict is on", async () => {
+    // Strict only denies when NO pass is bound. With an active pass, the repo's
+    // auto-bind path still applies the pass policy instead of deny-all.
+    const root = await makeStrictRepoWithPass();
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({ id: "list", type: "list_tools" }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "list",
+      ok: true,
+      tools: [expect.objectContaining({ name: "github_findu_echo" })]
+    });
+  });
+
+  it("rejects a non-boolean strict flag", async () => {
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({ id: "bad", type: "list_tools", strict: "yes" }),
+        {}
+      )
+    ).resolves.toMatchObject({
+      id: "bad",
+      ok: false,
+      error: "Daemon request strict must be a boolean."
+    });
+  });
+});
+
+async function makeStrictRepo(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "switchboard-daemon-strict-"));
+  process.env.XDG_STATE_HOME = join(root, "state");
+  await writeFile(join(root, ".switchboard.yaml"), strictProfileConfig(true));
+  return root;
+}
+
+async function makeUngovernedRepo(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "switchboard-daemon-strict-"));
+  process.env.XDG_STATE_HOME = join(root, "state");
+  await writeFile(join(root, ".switchboard.yaml"), strictProfileConfig(false));
+  return root;
+}
+
+async function makeStrictRepoWithPass(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "switchboard-daemon-strict-"));
+  process.env.XDG_STATE_HOME = join(root, "state");
+  await writeFile(join(root, ".switchboard.yaml"), strictProfileConfig(true));
+  await createMandate({
+    task: "fix-ci",
+    repoPath: root,
+    worktreePath: root,
+    branch: "fix/ci",
+    agentRole: "implementer",
+    profiles: ["github_findu"],
+    allowedTools: ["github_findu_echo"],
+    lease: "2h"
+  });
+  return root;
+}
+
+function strictProfileConfig(strict: boolean): string {
+  return [
+    "version: 1",
+    ...(strict ? ["enforcement: strict"] : []),
+    "profiles:",
+    "  github_findu:",
+    "    provider: generic",
+    "    namespace: github_findu",
+    "    upstream:",
+    "      type: stdio",
+    `      command: ${JSON.stringify(process.execPath)}`,
+    "      args:",
+    `        - ${JSON.stringify(fixtureServerPath)}`,
+    "        - github-findu"
+  ].join("\n");
+}
 
 async function makeMandateRepoOnWrongBranch(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "switchboard-daemon-runtime-"));

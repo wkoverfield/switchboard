@@ -27,6 +27,7 @@ import {
   diffManifestClientRoutes,
   type LoadConfigOptions,
   loadSwitchboardConfig,
+  strictNoPassReason,
   type MandateAuthoritySource,
   type ManifestRouteDiff,
   type MandateLeaseEvent,
@@ -531,6 +532,7 @@ export interface ProgramIo {
         branch?: string;
       };
       toolPolicy?: MandateToolPolicy;
+      denyAll?: { reason: string };
     }
   ) => Promise<void>;
   listTools?: (
@@ -556,7 +558,12 @@ export interface ProgramIo {
   startDaemon?: typeof startDaemon;
   serveDaemonMcp?: (
     socketPath: string,
-    options?: { mandateId?: string; approvalWaitMs?: number; cwd?: string }
+    options?: {
+      mandateId?: string;
+      approvalWaitMs?: number;
+      cwd?: string;
+      strict?: boolean;
+    }
   ) => Promise<void>;
   secretStore?: SecretStore;
   secretIndexPath?: string;
@@ -2595,12 +2602,17 @@ export function createProgram(io: ProgramIo = {}): Command {
       "wait for approval decisions during gated tool calls, like 30s, 2m, or 0"
     )
     .option("--no-auto-start", "fail if the daemon is not already running")
+    .option(
+      "--strict",
+      "deny all routed calls when no pass is bound (default-deny)"
+    )
     .action(
       async (options: {
         runtimeDir?: string;
         mandate?: string;
         approvalWait?: string;
         autoStart?: boolean;
+        strict?: boolean;
       }) => {
         const globalOptions = program.opts<{ cwd?: string }>();
         const daemonOptions = {
@@ -2656,7 +2668,8 @@ export function createProgram(io: ProgramIo = {}): Command {
           {
             cwd: desiredCwd,
             ...(mandate ? { mandateId: mandate.id } : {}),
-            ...(approvalWaitMs > 0 ? { approvalWaitMs } : {})
+            ...(approvalWaitMs > 0 ? { approvalWaitMs } : {}),
+            ...(options.strict ? { strict: true } : {})
           }
         );
       }
@@ -2666,7 +2679,11 @@ export function createProgram(io: ProgramIo = {}): Command {
     .command("serve")
     .description("Serve configured stdio MCP upstreams through one Switchboard MCP endpoint.")
     .option("--mandate <id>", "bind routed tool calls to an active pass")
-    .action(async (options: { mandate?: string }) => {
+    .option(
+      "--strict",
+      "deny all routed calls when no pass is bound (default-deny)"
+    )
+    .action(async (options: { mandate?: string; strict?: boolean }) => {
       const globalOptions = program.opts<{ cwd?: string }>();
       const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
 
@@ -2683,6 +2700,19 @@ export function createProgram(io: ProgramIo = {}): Command {
         : undefined;
       if (options.mandate && !mandate) {
         process.exitCode = 1;
+        return;
+      }
+
+      // Strict mode with no pass bound: serve a deny-all endpoint instead of
+      // the configured profiles ungoverned. The flag only strengthens the
+      // repo's `enforcement` config, so either turning it on is enough.
+      const strict =
+        options.strict === true || loaded.config.enforcement === "strict";
+      if (!mandate && strict) {
+        await serveMcp([], {
+          auditLogger,
+          denyAll: { reason: strictNoPassReason }
+        });
         return;
       }
 
@@ -10766,6 +10796,7 @@ async function serveProfilesOverStdio(
       branch?: string;
     };
     toolPolicy?: MandateToolPolicy;
+    denyAll?: { reason: string };
   } = {}
 ): Promise<void> {
   const router = new GenericMcpRouter(
@@ -10774,7 +10805,8 @@ async function serveProfilesOverStdio(
       ...(options.auditLogger ? { auditLogger: options.auditLogger } : {}),
       ...(options.mandateId ? { mandateId: options.mandateId } : {}),
       ...(options.auditContext ? { auditContext: options.auditContext } : {}),
-      ...(options.toolPolicy ? { toolPolicy: options.toolPolicy } : {})
+      ...(options.toolPolicy ? { toolPolicy: options.toolPolicy } : {}),
+      ...(options.denyAll ? { denyAll: options.denyAll } : {})
     }
   );
   await serveSwitchboardMcpStdio(router);

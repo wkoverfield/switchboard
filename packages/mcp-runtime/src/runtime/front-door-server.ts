@@ -39,6 +39,8 @@ export interface DaemonBackedMcpServerOptions extends SwitchboardMcpServerOption
   approvalWaitMs?: number;
   // Repo cwd sent with every daemon request so one daemon can serve many repos.
   cwd?: string;
+  // Per-connection strict override: deny all routed calls when no pass is bound.
+  strict?: boolean;
   listTools?: () => Promise<NamespacedTool[]>;
   callTool?: (
     name: string,
@@ -104,7 +106,8 @@ export function createDaemonBackedSwitchboardMcpServer(
     (async () => {
       const response = await listDaemonTools(socketPath, {
         ...(options.mandateId ? { mandateId: options.mandateId } : {}),
-        ...(options.cwd ? { cwd: options.cwd } : {})
+        ...(options.cwd ? { cwd: options.cwd } : {}),
+        ...(options.strict ? { strict: true } : {})
       });
       return response.tools;
     });
@@ -120,7 +123,8 @@ export function createDaemonBackedSwitchboardMcpServer(
           ...(options.approvalWaitMs !== undefined
             ? { approvalWaitMs: options.approvalWaitMs }
             : {}),
-          ...(options.cwd ? { cwd: options.cwd } : {})
+          ...(options.cwd ? { cwd: options.cwd } : {}),
+          ...(options.strict ? { strict: true } : {})
         }
       );
       return response.result;
