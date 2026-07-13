@@ -143,13 +143,21 @@ network sandbox, and the JSON output says so on every invocation.
 These are true today and easy to misunderstand; diligence readers should know
 them:
 
-- **No active pass means no policy on the daemon path.** When no pass is bound
-  (none granted, or more than one matches so auto-bind refuses), the daemon
-  serves all configured profiles with no tool policy
-  (`daemon-runtime.ts:1124-1131`, `:1154-1187`). Enforcement is opt-in via a
-  pass. "Configured profiles" is still a real boundary (nothing outside
-  `.switchboard.yaml` is reachable), but within it, no pass means no deny
-  list. The planned default-deny operating mode is roadmap, not shipped.
+- **No active pass means no policy on the daemon path, unless strict mode is
+  on.** When no pass is bound (none granted, or more than one matches so
+  auto-bind refuses), the default posture serves all configured profiles with
+  no tool policy (`daemon-runtime.ts`, `routerForConfiguredProfiles`).
+  Enforcement is opt-in via a pass. "Configured profiles" is still a real
+  boundary (nothing outside `.switchboard.yaml` is reachable), but within it,
+  no pass means no deny list. Opt-in **strict mode** closes this: set
+  `enforcement: strict` in `.switchboard.yaml` (or pass `--strict` to
+  `switchboard mcp` / `switchboard serve`) and an unbound connection is
+  denied, not served ungoverned. In strict mode the routed `tools/list` is
+  empty and every call is rejected with `no active pass; grant one with
+  switchboard grant`, on both the daemon and the daemonless serve paths. The
+  flag only ever strengthens the config, so a repo that sets strict can never
+  be weakened by a client that omits the flag. Strict is off by default, so
+  the fail-open behavior above is still what an unconfigured install does.
 - **An empty tool policy allows everything within scope.** A pass with no
   allow, deny, or gate entries scopes profiles, branch, and lease, but not
   individual tools (`generic-router.ts:49`, `mandates.ts:341-349`).
@@ -357,8 +365,12 @@ The short list a reviewer should walk away with:
 1. **Not a sandbox.** Unrouted capability (shell, CLIs, browser, direct MCP)
    bypasses Switchboard entirely. Detection via `scan`, honesty in every
    surface. This is the product boundary, not a bug.
-2. **No pass, no policy.** Absent an active pass, the daemon path serves
-   configured profiles without tool policy. Default-deny mode is roadmap.
+2. **No pass, no policy (unless strict).** By default, absent an active pass,
+   the routed paths serve configured profiles without tool policy. Opt-in
+   strict mode (`enforcement: strict`, or `--strict`) flips this to
+   default-deny: no pass means an empty tool list and rejected calls. Strict is
+   off by default, so this remains the accepted posture for unconfigured
+   installs (see 4.3).
 3. **Same-uid actor defeats everything local.** Store edits, socket access,
    keychain (with OS-dependent friction), audit rewrite-with-rechain. This is
    the accepted trust boundary (A4).

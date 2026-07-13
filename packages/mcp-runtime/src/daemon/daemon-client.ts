@@ -60,7 +60,13 @@ export type DaemonResponse =
 
 export type DaemonRequest =
   | { id: string; type: "ping" }
-  | { id: string; type: "list_tools"; mandateId?: string; cwd?: string }
+  | {
+      id: string;
+      type: "list_tools";
+      mandateId?: string;
+      cwd?: string;
+      strict?: boolean;
+    }
   | {
       id: string;
       type: "call_tool";
@@ -69,6 +75,7 @@ export type DaemonRequest =
       mandateId?: string;
       approvalWaitMs?: number;
       cwd?: string;
+      strict?: boolean;
     };
 
 export interface DaemonClientOptions {
@@ -79,6 +86,8 @@ export interface DaemonClientOptions {
   // resolves config/profiles/mandate/audit against its own cwd rather than a
   // single daemon-bound directory.
   cwd?: string;
+  // Per-connection strict override: deny all routed calls when no pass is bound.
+  strict?: boolean;
 }
 
 export async function pingDaemon(
@@ -118,6 +127,9 @@ export async function listDaemonTools(
   }
   if (options.cwd) {
     request.cwd = options.cwd;
+  }
+  if (options.strict) {
+    request.strict = true;
   }
   const response = await requestDaemon(
     socketPath,
@@ -161,6 +173,9 @@ export async function callDaemonTool(
   }
   if (options.cwd) {
     request.cwd = options.cwd;
+  }
+  if (options.strict) {
+    request.strict = true;
   }
   const response = await requestDaemon(socketPath, request, {
     timeoutMs: options.timeoutMs ?? daemonToolCallTimeoutMs(options)

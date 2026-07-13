@@ -29,6 +29,11 @@ export interface GenericMcpRouterOptions {
     branch?: string;
   };
   toolPolicy?: MandateToolPolicy;
+  // Strict-mode short circuit: when set, no upstream is discovered or called.
+  // tools/list is empty and every call is rejected with `reason`. Used when
+  // enforcement is strict and no pass is bound, so "no pass" means "nothing
+  // moves" instead of serving configured profiles ungoverned.
+  denyAll?: { reason: string };
 }
 
 export class GenericMcpRouter {
@@ -38,6 +43,7 @@ export class GenericMcpRouter {
   private readonly mandateId: string | undefined;
   private readonly auditContext: GenericMcpRouterOptions["auditContext"];
   private readonly toolPolicy: MandateToolPolicy;
+  private readonly denyAll: { reason: string } | undefined;
 
   constructor(
     private readonly profiles: StdioUpstreamProfile[],
@@ -47,6 +53,7 @@ export class GenericMcpRouter {
     this.mandateId = options.mandateId;
     this.auditContext = options.auditContext;
     this.toolPolicy = options.toolPolicy ?? {};
+    this.denyAll = options.denyAll;
 
     for (const profile of profiles) {
       if (this.connections.has(profile.profileName)) {
@@ -61,6 +68,13 @@ export class GenericMcpRouter {
   }
 
   async discoverTools(options?: RequestOptions): Promise<NamespacedTool[]> {
+    // Strict mode with no pass bound: expose nothing and never touch an
+    // upstream. An empty tools/list is the honest surface for "no authority".
+    if (this.denyAll) {
+      this.routes = new Map();
+      return [];
+    }
+
     const tools: NamespacedTool[] = [];
     const routes = new Map<string, ToolRoute>();
 
@@ -110,6 +124,24 @@ export class GenericMcpRouter {
     namespacedName: string,
     args?: Record<string, unknown>
   ): Promise<UpstreamToolResult> {
+    // Strict mode with no pass bound: reject every call with a clear reason,
+    // and record the denial so the audit log shows what was refused.
+    if (this.denyAll) {
+      await safeAuditLog(
+        this.auditLogger,
+        this.auditEntry(
+          {
+            action: "tool_call",
+            status: "error",
+            toolName: namespacedName,
+            error: this.denyAll.reason
+          },
+          undefined
+        )
+      );
+      throw new Error(this.denyAll.reason);
+    }
+
     const route = this.routes.get(namespacedName);
     if (!route) {
       throw new Error(

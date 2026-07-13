@@ -361,6 +361,38 @@ describe("GenericMcpRouter", () => {
     }
   });
 
+  it("serves an empty tool list and rejects every call when denyAll is set", async () => {
+    const auditEntries: unknown[] = [];
+    const router = new GenericMcpRouter([fixtureProfile("alpha", "alpha_tools")], {
+      denyAll: { reason: "no active pass; grant one with switchboard grant" },
+      auditLogger: {
+        async log(entry) {
+          auditEntries.push(entry);
+        }
+      }
+    });
+
+    try {
+      // No upstream is touched: tools/list is empty even though a profile is
+      // configured, and any call is rejected with the deny reason and audited.
+      expect(await router.discoverTools()).toEqual([]);
+      await expect(
+        router.callTool("alpha_tools_echo", { message: "hello" })
+      ).rejects.toThrow("no active pass; grant one with switchboard grant");
+
+      expect(auditEntries).toEqual([
+        expect.objectContaining({
+          action: "tool_call",
+          status: "error",
+          toolName: "alpha_tools_echo",
+          error: "no active pass; grant one with switchboard grant"
+        })
+      ]);
+    } finally {
+      await router.close();
+    }
+  });
+
   it("rejects namespaced collisions within the same namespace", async () => {
     const router = new GenericMcpRouter([
       fixtureProfile("alpha", "shared"),

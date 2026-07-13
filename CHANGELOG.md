@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added opt-in strict mode: set `enforcement: strict` in `.switchboard.yaml`, or pass `--strict` to `switchboard mcp` / `switchboard serve`, and a connection with no bound pass is denied instead of served ungoverned. The routed `tools/list` is empty and every call is rejected with "no active pass; grant one with switchboard grant", on both the daemon and daemonless serve paths. Strict is off by default (the flag only ever strengthens the config), so unconfigured installs keep their current behavior.
 - Added a full STRIDE threat model at `docs/security/threat-model.md`: trust boundaries, what enforcement binds vs what it cannot, revocation semantics, daemon socket assumptions, secrets backends, and the audit-log threat surface, ending in an accepted-risks list. `trust-model.md` is now a short posture summary that points at it.
 - Made the audit log tamper-evident: entries are hash-chained (`prevHash`/`hash` fields), appends are serialized with a lockfile, and `switchboard audit verify` checks the chain and reports exactly where it breaks. Pre-existing entries are treated as legacy and keep working.
 - Added `switchboard dashboard`: a local, read-only web dashboard (127.0.0.1 only) showing live passes, pending approvals, denials, and the audit stream.
