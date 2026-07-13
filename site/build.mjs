@@ -229,7 +229,7 @@ function docShell({ title, body, active, entries }) {
 <nav class="top">
   <div class="wrap">
     <div class="row">
-      <a href="/" class="wordmark"><svg class="mark" viewBox="0 0 32 32" width="20" height="20" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#3fd68f"/><rect x="9" y="8.5" width="3.4" height="15" rx="1.7" fill="#0d1712"/><rect x="19.6" y="8.5" width="3.4" height="15" rx="1.7" fill="#0d1712"/><circle cx="16" cy="16" r="2.9" fill="#0d1712"/></svg>switchboard<b>_</b></a>
+      <a href="/" class="wordmark"><svg class="mark" viewBox="0 0 32 32" width="20" height="20" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#3fd68f"/><rect x="9" y="8.5" width="3.4" height="15" rx="1.7" fill="#0d1712"/><rect x="19.6" y="8.5" width="3.4" height="15" rx="1.7" fill="#0d1712"/><circle cx="16" cy="16" r="2.9" fill="#0d1712"/></svg>switchboard</a>
       <div class="links">
     <a href="/docs/">Docs</a>
     <a href="/docs/roadmap">Roadmap</a>

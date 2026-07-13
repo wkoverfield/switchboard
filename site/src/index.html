@@ -452,11 +452,6 @@
   }
   .arc div:first-child dt { color: var(--grant); }
   .arc dd { margin: 0; color: var(--ink-dim); font-size: 0.9rem; }
-  .waitlist .family {
-    margin-top: 18px; padding-top: 14px;
-    border-top: 1px solid var(--hairline);
-    font-size: 0.9rem;
-  }
 
   /* closer */
   .closer { text-align: center; padding: 110px 0 30px; }
@@ -511,7 +506,7 @@
 <nav class="top">
   <div class="wrap">
     <div class="row">
-      <a class="wordmark" href="/"><svg class="mark" viewBox="0 0 32 32" width="20" height="20" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#3fd68f"/><rect x="9" y="8.5" width="3.4" height="15" rx="1.7" fill="#0d1712"/><rect x="19.6" y="8.5" width="3.4" height="15" rx="1.7" fill="#0d1712"/><circle cx="16" cy="16" r="2.9" fill="#0d1712"/></svg>switchboard<b>_</b></a>
+      <a class="wordmark" href="/"><svg class="mark" viewBox="0 0 32 32" width="20" height="20" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#3fd68f"/><rect x="9" y="8.5" width="3.4" height="15" rx="1.7" fill="#0d1712"/><rect x="19.6" y="8.5" width="3.4" height="15" rx="1.7" fill="#0d1712"/><circle cx="16" cy="16" r="2.9" fill="#0d1712"/></svg>switchboard</a>
       <div class="links">
         <a href="/docs/">Docs</a>
         <a href="/docs/roadmap">Roadmap</a>
@@ -861,10 +856,6 @@ $ npx -y @switchboard-mcp/cli@latest scan</pre>
           <div><dt>today</dt><dd>local passes, expiry, revocation, hash-chained audit, one machine</dd></div>
           <div><dt>teams</dt><dd>shared policy, multi-user identity, central visibility, SIEM export (<a href="/docs/roadmap">roadmap</a>)</dd></div>
         </dl>
-        <p class="family">
-          Switchboard governs what every actor may do. Its sibling
-          <a href="https://github.com/wkoverfield/quilt">Quilt</a> tracks what they did.
-        </p>
       </div>
       <div class="waitlist-side">
         <!-- TODO(wilson): create a form at formspree.io and replace
