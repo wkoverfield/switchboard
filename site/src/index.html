@@ -784,7 +784,7 @@ $ switchboard audit verify
     <div class="head" style="max-width:none;">
       <span class="index">[ 04 ] · <b>security</b></span>
       <h2>Honest about its edges, and written down.</h2>
-      <p style="max-width:64ch;">Switchboard governs the routed paths and says so. Raw shell, provider CLIs, and direct MCP routes bypass it, and <code style="font-family:var(--font-mono);font-size:0.9em">scan</code> reports them. With no pass active, nothing is governed; <code style="font-family:var(--font-mono);font-size:0.9em">status</code> tells you which. It is alpha, with versioned pass and audit contracts you can build on today. All of it is documented with code references:</p>
+      <p style="max-width:64ch;">Switchboard governs the routed paths and says so. Raw shell, provider CLIs, and direct MCP routes bypass it, and <code style="font-family:var(--font-mono);font-size:0.9em">scan</code> reports them. Run in strict mode and no pass means nothing routes; <code style="font-family:var(--font-mono);font-size:0.9em">status</code> always tells you which mode you are in. It is alpha, with versioned pass and audit contracts you can build on today. All of it is documented with code references:</p>
     </div>
     <div class="trust">
       <div class="item">
@@ -795,7 +795,7 @@ $ switchboard audit verify
       <div class="item">
         <span class="index">audit verify</span>
         <b>Tamper-evident audit log</b>
-        <span class="body">Every routed call, denial, and approval decision is hash-chained JSONL on your machine. <code style="font-family:var(--font-mono);font-size:0.85em">switchboard audit verify</code> reports the exact line where a chain breaks. <a href="/docs/security-audit-logs">How it works</a>.</span>
+        <span class="body">Every routed call, denial, and approval decision is hash-chained JSONL on your machine. <code style="font-family:var(--font-mono);font-size:0.85em">switchboard audit verify</code> catches tampering and truncation, and names the entry where the chain breaks. <a href="/docs/security-audit-logs">How it works</a>.</span>
       </div>
       <div class="item">
         <span class="index">secretRef</span>
