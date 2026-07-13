@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Added a full STRIDE threat model at `docs/security/threat-model.md`: trust boundaries, what enforcement binds vs what it cannot, revocation semantics, daemon socket assumptions, secrets backends, and the audit-log threat surface, ending in an accepted-risks list. `trust-model.md` is now a short posture summary that points at it.
+- Made the audit log tamper-evident: entries are hash-chained (`prevHash`/`hash` fields), appends are serialized with a lockfile, and `switchboard audit verify` checks the chain and reports exactly where it breaks. Pre-existing entries are treated as legacy and keep working.
 
 ## 0.1.6
 

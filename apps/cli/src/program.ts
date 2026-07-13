@@ -38,6 +38,7 @@ import {
   parseMandateLease,
   readAuditLogEntries,
   renewMandate,
+  verifyAuditLog,
   renderSwitchboardClientConfig,
   resolveApprovalRequestStorePath,
   resolveAuditLogPath,
@@ -137,6 +138,7 @@ const approvalRequestsSchemaVersion = "switchboard.approvals.v1";
 const approvalWatchSchemaVersion = "switchboard.approvals-watch.v1";
 const toolSurfaceSchemaVersion = "switchboard.tool-surface.v1";
 const auditLogSchemaVersion = "switchboard.audit-log.v1";
+const auditVerifySchemaVersion = "switchboard.audit-verify.v1";
 const repoAuditExportSchemaVersion = "switchboard.repo-audit-export.v1";
 const repoManifestSchemaVersion = "switchboard.repo-manifest.v1";
 const secretsSchemaVersion = "switchboard.secrets.v1";
@@ -803,6 +805,45 @@ export function createProgram(io: ProgramIo = {}): Command {
         writeOut(formatRepoAuditJsonl(audit, evidence));
       }
     );
+
+  auditCommand
+    .command("verify")
+    .description("Verify the hash chain of the local audit log.")
+    .option("--json", "print machine-readable JSON")
+    .action(async (options: { json?: boolean }) => {
+      // Commander hands a repeated flag to the parent command, so accept
+      // --json from either `audit verify --json` or `audit --json verify`.
+      const json =
+        options.json ?? auditCommand.opts<{ json?: boolean }>().json;
+      const path = io.auditLogPath ?? resolveAuditLogPath();
+      const verification = await verifyAuditLog({ path });
+
+      if (json) {
+        writeOut(
+          JSON.stringify(
+            {
+              ok: verification.ok,
+              schemaVersion: auditVerifySchemaVersion,
+              path: verification.path,
+              counts: {
+                totalLines: verification.totalLines,
+                chainedEntries: verification.chainedEntries,
+                legacyEntries: verification.legacyEntries
+              },
+              failures: verification.failures
+            },
+            null,
+            2
+          )
+        );
+      } else {
+        writeOut(formatAuditVerification(verification));
+      }
+
+      if (!verification.ok) {
+        process.exitCode = 1;
+      }
+    });
 
   program
     .command("run")
@@ -9225,6 +9266,38 @@ function formatAuditLogs(
       lines.push(`  error: ${entry.error}`);
     }
   }
+
+  return lines.join("\n");
+}
+
+function formatAuditVerification(
+  verification: Awaited<ReturnType<typeof verifyAuditLog>>
+): string {
+  const lines = [
+    "Switchboard audit log verification",
+    `Path: ${verification.path}`,
+    `Entries: ${verification.totalLines} total, ${verification.chainedEntries} chained, ${verification.legacyEntries} legacy (pre-chain)`
+  ];
+
+  if (verification.ok) {
+    lines.push(
+      "",
+      verification.chainedEntries === 0
+        ? "Chain: OK (no chained entries yet; new entries are chained as they are written)"
+        : "Chain: OK"
+    );
+    return lines.join("\n");
+  }
+
+  lines.push("", "Chain: FAILED");
+  for (const failure of verification.failures) {
+    lines.push(`  line ${failure.lineNumber}: ${failure.reason}`);
+  }
+  lines.push(
+    "",
+    "The audit log does not match the hashes recorded when entries were written.",
+    "Treat the entries at and after the first failing line as untrustworthy."
+  );
 
   return lines.join("\n");
 }

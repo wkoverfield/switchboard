@@ -1,4 +1,13 @@
-import { appendFile, chmod, mkdir, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import {
+  appendFile,
+  chmod,
+  mkdir,
+  open,
+  readFile,
+  rm,
+  stat
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { PathResolutionOptions } from "../config/paths.js";
@@ -37,6 +46,8 @@ export interface AuditLogEntry {
   stderrSnippet?: string;
   durationMs?: number;
   error?: string;
+  prevHash?: string;
+  hash?: string;
 }
 
 export interface AuditLogger {
@@ -58,6 +69,30 @@ export interface SafeAuditLogOptions {
   onError?: (error: unknown) => void;
 }
 
+export interface VerifyAuditLogOptions {
+  path?: string;
+}
+
+export interface AuditLogVerificationFailure {
+  lineNumber: number;
+  reason: string;
+}
+
+export interface AuditLogVerification {
+  ok: boolean;
+  path: string;
+  totalLines: number;
+  chainedEntries: number;
+  legacyEntries: number;
+  failures: AuditLogVerificationFailure[];
+}
+
+export const auditLogChainGenesis = "genesis";
+
+const auditLogLockTimeoutMs = 5_000;
+const auditLogStaleLockMs = 30_000;
+const auditLogTailReadBytes = 64 * 1024;
+
 export function resolveAuditLogPath(
   options: PathResolutionOptions = {}
 ): string {
@@ -70,6 +105,15 @@ export function resolveAuditLogPath(
   return join(stateRoot, "switchboard", "logs", "switchboard.jsonl");
 }
 
+export function computeAuditLogEntryHash(
+  entry: Omit<AuditLogEntry, "hash">
+): string {
+  const digest = createHash("sha256")
+    .update(JSON.stringify(entry))
+    .digest("hex");
+  return `sha256:${digest}`;
+}
+
 export function createJsonlAuditLogger(
   options: JsonlAuditLoggerOptions = {}
 ): AuditLogger {
@@ -79,16 +123,24 @@ export function createJsonlAuditLogger(
   return {
     async log(entry) {
       await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-      const completeEntry: AuditLogEntry = {
-        version: 1,
-        timestamp: now().toISOString(),
-        ...redactAuditEntry(entry)
-      };
+      await withAuditLogLock(path, async () => {
+        const prevHash = await readChainTipHash(path);
+        const unhashedEntry: Omit<AuditLogEntry, "hash"> = {
+          version: 1,
+          timestamp: now().toISOString(),
+          ...redactAuditEntry(entry),
+          prevHash
+        };
+        const completeEntry: AuditLogEntry = {
+          ...unhashedEntry,
+          hash: computeAuditLogEntryHash(unhashedEntry)
+        };
 
-      await appendFile(path, `${JSON.stringify(completeEntry)}\n`, {
-        mode: 0o600
+        await appendFile(path, `${JSON.stringify(completeEntry)}\n`, {
+          mode: 0o600
+        });
+        await chmod(path, 0o600);
       });
-      await chmod(path, 0o600);
     }
   };
 }
@@ -115,18 +167,7 @@ export async function readAuditLogEntries(
   options: ReadAuditLogOptions = {}
 ): Promise<AuditLogEntry[]> {
   const path = options.path ?? resolveAuditLogPath();
-  const raw = await readFile(path, "utf8").catch((error: unknown) => {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      error.code === "ENOENT"
-    ) {
-      return "";
-    }
-
-    throw error;
-  });
+  const raw = await readAuditLogFile(path);
   const entries = raw
     .split("\n")
     .filter(Boolean)
@@ -140,6 +181,210 @@ export async function readAuditLogEntries(
   }
 
   return entries.slice(Math.max(entries.length - options.limit, 0));
+}
+
+export async function verifyAuditLog(
+  options: VerifyAuditLogOptions = {}
+): Promise<AuditLogVerification> {
+  const path = options.path ?? resolveAuditLogPath();
+  const raw = await readAuditLogFile(path);
+  const lines = raw.split("\n").filter(Boolean);
+  const failures: AuditLogVerificationFailure[] = [];
+  let chainedEntries = 0;
+  let legacyEntries = 0;
+  let previousHash: string | undefined;
+
+  lines.forEach((line, index) => {
+    const lineNumber = index + 1;
+    let parsed: AuditLogEntry;
+    try {
+      parsed = JSON.parse(line) as AuditLogEntry;
+    } catch {
+      failures.push({
+        lineNumber,
+        reason: "line is not valid JSON"
+      });
+      return;
+    }
+
+    if (parsed.hash === undefined && parsed.prevHash === undefined) {
+      legacyEntries += 1;
+      if (previousHash !== undefined) {
+        failures.push({
+          lineNumber,
+          reason:
+            "unchained entry appears after the hash chain began (possible tampering or a downgraded writer)"
+        });
+      }
+      return;
+    }
+
+    chainedEntries += 1;
+    const { hash, ...unhashed } = parsed;
+
+    if (typeof hash !== "string") {
+      failures.push({
+        lineNumber,
+        reason: "chained entry is missing its hash"
+      });
+      return;
+    }
+
+    const expectedHash = computeAuditLogEntryHash(unhashed);
+    if (hash !== expectedHash) {
+      failures.push({
+        lineNumber,
+        reason: "entry hash does not match entry contents (entry was modified)"
+      });
+    }
+
+    const expectedPrevHash = previousHash ?? auditLogChainGenesis;
+    if (parsed.prevHash !== expectedPrevHash) {
+      failures.push({
+        lineNumber,
+        reason:
+          previousHash === undefined
+            ? "first chained entry does not link to the chain genesis marker"
+            : "entry does not link to the previous entry (entries were removed, reordered, or inserted)"
+      });
+    }
+
+    previousHash = hash;
+  });
+
+  return {
+    ok: failures.length === 0,
+    path,
+    totalLines: lines.length,
+    chainedEntries,
+    legacyEntries,
+    failures
+  };
+}
+
+async function readAuditLogFile(path: string): Promise<string> {
+  return readFile(path, "utf8").catch((error: unknown) => {
+    if (isNodeErrorCode(error, "ENOENT")) {
+      return "";
+    }
+
+    throw error;
+  });
+}
+
+async function readChainTipHash(path: string): Promise<string> {
+  const lastLine = await readLastAuditLogLine(path);
+  if (lastLine === undefined) {
+    return auditLogChainGenesis;
+  }
+
+  const [parsed] = parseAuditLogLine(lastLine);
+  if (parsed && typeof parsed.hash === "string") {
+    return parsed.hash;
+  }
+
+  // Legacy tail (pre-chain entry or unparseable line): start a fresh chain.
+  return auditLogChainGenesis;
+}
+
+async function readLastAuditLogLine(
+  path: string
+): Promise<string | undefined> {
+  const handle = await open(path, "r").catch((error: unknown) => {
+    if (isNodeErrorCode(error, "ENOENT")) {
+      return undefined;
+    }
+
+    throw error;
+  });
+
+  if (handle === undefined) {
+    return undefined;
+  }
+
+  try {
+    const { size } = await handle.stat();
+    if (size === 0) {
+      return undefined;
+    }
+
+    const readLength = Math.min(size, auditLogTailReadBytes);
+    const buffer = Buffer.alloc(readLength);
+    await handle.read(buffer, 0, readLength, size - readLength);
+    const lines = buffer.toString("utf8").split("\n").filter(Boolean);
+    return lines.length > 0 ? lines[lines.length - 1] : undefined;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function withAuditLogLock<T>(
+  path: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const lockPath = `${path}.lock`;
+  const startedAt = Date.now();
+
+  while (true) {
+    try {
+      const handle = await open(lockPath, "wx", 0o600);
+      try {
+        await handle.writeFile(
+          JSON.stringify({
+            pid: process.pid,
+            createdAt: new Date().toISOString()
+          })
+        );
+      } finally {
+        await handle.close();
+      }
+      break;
+    } catch (error) {
+      if (!isNodeErrorCode(error, "EEXIST")) {
+        throw error;
+      }
+
+      await removeStaleAuditLogLock(lockPath);
+      if (Date.now() - startedAt > auditLogLockTimeoutMs) {
+        throw new Error(`timed out waiting for audit log lock at ${lockPath}`);
+      }
+      await sleep(25);
+    }
+  }
+
+  try {
+    return await fn();
+  } finally {
+    await rm(lockPath, { force: true });
+  }
+}
+
+async function removeStaleAuditLogLock(lockPath: string): Promise<void> {
+  const lockStat = await stat(lockPath).catch((error: unknown) => {
+    if (isNodeErrorCode(error, "ENOENT")) {
+      return undefined;
+    }
+    throw error;
+  });
+
+  if (lockStat && Date.now() - lockStat.mtimeMs > auditLogStaleLockMs) {
+    await rm(lockPath, { force: true });
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolveSleep) => {
+    setTimeout(resolveSleep, ms);
+  });
+}
+
+function isNodeErrorCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as NodeJS.ErrnoException).code === code
+  );
 }
 
 function redactAuditEntry(
