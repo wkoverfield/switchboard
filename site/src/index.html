@@ -593,18 +593,9 @@ npx -y @switchboard-mcp/docs-mcp).
             <stop offset="45%" stop-color="#16130f"/>
             <stop offset="100%" stop-color="#1b1712"/>
           </linearGradient>
-          <linearGradient id="holo" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#3fd68f" stop-opacity="0.35"/>
-            <stop offset="45%" stop-color="#57c8d8" stop-opacity="0.22"/>
-            <stop offset="100%" stop-color="#3fd68f" stop-opacity="0.05"/>
-          </linearGradient>
           <linearGradient id="markTile" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0%" stop-color="#4fe39c"/>
             <stop offset="100%" stop-color="#2fb877"/>
-          </linearGradient>
-          <linearGradient id="chipFace" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#cfc8b8"/>
-            <stop offset="100%" stop-color="#a49d8d"/>
           </linearGradient>
           <!-- Switchboard mark: a gate (two posts) with a credential passing
                through it. Firewall + pass, one glyph. -->
@@ -666,64 +657,19 @@ npx -y @switchboard-mcp/docs-mcp).
         <rect x="740" y="292" width="190" height="56" rx="12" fill="var(--paper-raised)" stroke="var(--hairline-dark)" stroke-dasharray="4 4" filter="url(#chipShadow)"/>
         <text x="758" y="326" font-size="13.5" fill="var(--ink-dim)" text-decoration="line-through">everything else</text>
 
-        <!-- the pass card -->
+        <!-- the pass card: read it in one glance -->
         <g filter="url(#cardShadow)">
-          <rect x="380" y="103" width="200" height="194" rx="16" fill="url(#cardSheen)"/>
-          <rect x="380.5" y="103.5" width="199" height="193" rx="15.5" fill="none" stroke="#3f3930" stroke-width="1"/>
-          <rect x="384.5" y="107.5" width="191" height="185" rx="12" fill="none" stroke="#2b2620" stroke-width="0.75"/>
-          <!-- lanyard slot -->
-          <rect x="452" y="113" width="56" height="8" rx="4" fill="#0a0908"/>
-          <rect x="452.5" y="113.5" width="55" height="7" rx="3.5" fill="none" stroke="#3f3930" stroke-width="0.75"/>
-          <!-- holo security strip -->
-          <rect x="566" y="138" width="3" height="128" rx="1.5" fill="url(#holo)"/>
-          <!-- issuer lockup: mark + wordmark -->
-          <use href="#sb-mark" x="396" y="132" width="30" height="30"/>
-          <text x="434" y="149" font-size="12.5" letter-spacing="1.5" fill="var(--term-green)" font-weight="500">SWITCHBOARD</text>
-          <text x="434.5" y="160.5" font-size="6.5" letter-spacing="2.2" fill="var(--term-dim)">AGENT ACCESS PASS</text>
-          <line x1="396" y1="174" x2="564" y2="174" stroke="#2b2620" stroke-width="1"/>
-          <!-- fields -->
-          <g font-size="8" letter-spacing="1.5" fill="var(--term-dim)">
-            <text x="396" y="191">HOLDER</text>
-            <text x="396" y="211">SCOPE</text>
-            <text x="396" y="231">EXPIRES</text>
-          </g>
-          <g font-size="11">
-            <text x="452" y="192" fill="var(--term-ink)">acme-app · fix/ci</text>
-            <text x="452" y="212" fill="var(--term-green)">github_ci_*</text>
-            <text x="452" y="232" fill="var(--term-yellow)">in 4h</text>
-          </g>
-          <text x="396" y="248" font-size="7" letter-spacing="2" fill="var(--term-dim)">EVERYTHING ELSE DENIED</text>
-          <!-- smartcard chip -->
-          <g>
-            <rect x="396" y="256" width="30" height="22" rx="4" fill="url(#chipFace)"/>
-            <rect x="396.5" y="256.5" width="29" height="21" rx="3.5" fill="none" stroke="#8d887e" stroke-width="0.6"/>
-            <rect x="404" y="262" width="14" height="10" rx="2" fill="none" stroke="#7a7568" stroke-width="0.7"/>
-            <line x1="396" y1="267" x2="404" y2="267" stroke="#7a7568" stroke-width="0.7"/>
-            <line x1="418" y1="267" x2="426" y2="267" stroke="#7a7568" stroke-width="0.7"/>
-            <line x1="411" y1="256" x2="411" y2="262" stroke="#7a7568" stroke-width="0.7"/>
-            <line x1="411" y1="272" x2="411" y2="278" stroke="#7a7568" stroke-width="0.7"/>
-          </g>
-          <!-- pass number -->
-          <text x="436" y="263" font-size="6.5" letter-spacing="1.5" fill="var(--term-dim)">PASS Nº</text>
-          <text x="436" y="274" font-size="10" letter-spacing="1" fill="var(--term-ink)">0047 · A7F2</text>
-          <!-- barcode -->
-          <g fill="var(--term-ink)" opacity="0.42">
-            <rect x="494" y="258" width="2" height="20"/>
-            <rect x="499" y="258" width="1" height="20"/>
-            <rect x="503" y="258" width="3" height="20"/>
-            <rect x="509" y="258" width="1" height="20"/>
-            <rect x="513" y="258" width="2" height="20"/>
-            <rect x="518" y="258" width="2" height="20"/>
-            <rect x="523" y="258" width="1" height="20"/>
-            <rect x="527" y="258" width="3" height="20"/>
-            <rect x="533" y="258" width="2" height="20"/>
-            <rect x="538" y="258" width="1" height="20"/>
-            <rect x="542" y="258" width="1" height="20"/>
-            <rect x="546" y="258" width="3" height="20"/>
-            <rect x="552" y="258" width="2" height="20"/>
-            <rect x="557" y="258" width="1" height="20"/>
-            <rect x="561" y="258" width="2" height="20"/>
-          </g>
+          <rect x="380" y="120" width="200" height="160" rx="16" fill="url(#cardSheen)"/>
+          <rect x="380.5" y="120.5" width="199" height="159" rx="15.5" fill="none" stroke="#3f3930" stroke-width="1"/>
+          <!-- issuer lockup -->
+          <use href="#sb-mark" x="404" y="142" width="26" height="26"/>
+          <text x="438" y="160" font-size="12.5" letter-spacing="1.5" fill="var(--term-green)" font-weight="500">SWITCHBOARD</text>
+          <line x1="404" y1="182" x2="556" y2="182" stroke="#2b2620" stroke-width="1"/>
+          <!-- the one thing that matters: the scope -->
+          <text x="404" y="214" font-size="18" letter-spacing="0.5" fill="var(--term-green)">github_ci_*</text>
+          <text x="404" y="233" font-size="9.5" letter-spacing="0.5" fill="var(--term-dim)">everything else denied</text>
+          <!-- ephemeral -->
+          <text x="404" y="262" font-size="11.5" letter-spacing="0.5" fill="var(--term-yellow)">expires in 4h</text>
         </g>
       </svg>
       <p class="topology-caption">
