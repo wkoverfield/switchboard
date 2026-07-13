@@ -425,6 +425,20 @@
     font-family: var(--font-mono); font-size: 0.85rem;
     color: var(--grant); margin-top: 4px;
   }
+  .arc { margin: 18px 0 0; display: grid; gap: 8px; }
+  .arc div { display: flex; gap: 14px; align-items: baseline; }
+  .arc dt {
+    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink-dim);
+    flex: 0 0 52px;
+  }
+  .arc div:first-child dt { color: var(--grant); }
+  .arc dd { margin: 0; color: var(--ink-dim); font-size: 0.9rem; }
+  .waitlist .family {
+    margin-top: 18px; padding-top: 14px;
+    border-top: 1px solid var(--hairline);
+    font-size: 0.9rem;
+  }
 
   /* closer */
   .closer { text-align: center; padding: 110px 0 30px; }
@@ -679,7 +693,7 @@ npx -y @switchboard-mcp/docs-mcp).
         </g>
       </svg>
       <p class="topology-caption">
-        One pass decides what leaves the machine. Denied calls never do.
+        One pass decides what your agents' tool calls can reach. Denied calls never leave the machine.
         <a href="https://github.com/wkoverfield/switchboard/blob/main/examples/switchboard.gif">Watch it live (30s)</a>.
       </p>
       <div class="stamp">DENIED · OUT OF SCOPE</div>
@@ -692,7 +706,7 @@ npx -y @switchboard-mcp/docs-mcp).
     <div class="head">
       <span class="index">[ 01 ] · <b>the gap</b></span>
       <h2>Most MCP servers have no auth. Switchboard does not wait for them.</h2>
-      <p>It runs on your machine and controls what your agents can call, whatever the server supports. Works with every MCP server you already use.</p>
+      <p>Your agents act as you: every token you hand them carries your entire reach. Switchboard runs on your machine and controls what they can call, whatever the server supports.</p>
     </div>
     <div class="stats">
       <div class="stat ticked"><span class="tick-b"></span>
@@ -718,7 +732,7 @@ npx -y @switchboard-mcp/docs-mcp).
 
   <span class="r">&rarr;</span> delete_file        <span class="r">&rarr;</span> create_repository
   <span class="r">&rarr;</span> deploy_prod        <span class="r">&rarr;</span> admin_org_*
-  <span class="c">&rarr;</span> <span class="c">716 more GitHub tools, all day, no record</span></pre>
+  <span class="c">&rarr;</span> <span class="c">everything else the token can do, all day, no record</span></pre>
       </div>
       <div class="vs-col">
         <span class="index">with switchboard</span>
@@ -799,7 +813,7 @@ $ switchboard audit verify
         </div>
         <div class="card">
           <b>Access that ends itself.</b>
-          <p>Passes expire on their own; revoke ends access at the next routed call. No pass means configured profiles run without tool policy, so keep one live; default-deny is on the roadmap.</p>
+          <p>Passes expire on their own; revoke ends access at the next routed call. With no pass active, nothing is governed: <code>switchboard status</code> always tells you which state you are in. Default-deny is on the roadmap.</p>
         </div>
         <div class="card">
           <b>Alpha, with stable contracts.</b>
@@ -876,9 +890,16 @@ $ npx -y @switchboard-mcp/cli@latest scan</pre>
         <h2>Running a fleet, or a team?</h2>
         <p>
           Switchboard is free, local, and MIT licensed, and it stays that way.
-          The team tier adds shared policy, multi-user identity, central
-          visibility, and SIEM export (<a href="/docs/roadmap">roadmap</a>).
-          Waitlist members get it first, and we build it against your workflow.
+          Waitlist members get the team tier first, and we build it against
+          your workflow.
+        </p>
+        <dl class="arc">
+          <div><dt>today</dt><dd>local passes, expiry, revocation, hash-chained audit, one machine</dd></div>
+          <div><dt>teams</dt><dd>shared policy, multi-user identity, central visibility, SIEM export (<a href="/docs/roadmap">roadmap</a>)</dd></div>
+        </dl>
+        <p class="family">
+          Switchboard governs what every actor may do. Its sibling
+          <a href="https://github.com/wkoverfield/quilt">Quilt</a> tracks what they did.
         </p>
       </div>
       <div class="waitlist-side">
