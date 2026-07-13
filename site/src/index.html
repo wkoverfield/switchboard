@@ -618,12 +618,14 @@ npx -y @switchboard-mcp/docs-mcp).
         <!-- denied: stops dead. never reaches the right column -->
         <path d="M580 235 C 630 250, 660 285, 700 302" class="edge-deny"/>
 
-        <!-- edge labels -->
-        <text x="668" y="118" text-anchor="middle" font-size="10.5" letter-spacing="1.5" fill="var(--grant)">ALLOWED</text>
+        <!-- edge labels: paper halo so the text clears the line under it -->
+        <rect x="636" y="99" width="64" height="15" rx="4" fill="var(--paper)"/>
+        <text x="668" y="110" text-anchor="middle" font-size="10.5" letter-spacing="1.5" fill="var(--grant)">ALLOWED</text>
         <g fill="var(--gate)">
           <rect x="664" y="192" width="3" height="16" rx="1.5"/>
           <rect x="671" y="192" width="3" height="16" rx="1.5"/>
         </g>
+        <rect x="607" y="171" width="124" height="15" rx="4" fill="var(--paper)"/>
         <text x="669" y="182" text-anchor="middle" font-size="10.5" letter-spacing="1.5" fill="var(--gate)">A HUMAN DECIDES</text>
 
         <!-- agent chips -->
