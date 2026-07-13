@@ -10,3 +10,5 @@ coverage/
 .switchboard.yaml.switchboard-backup-*
 .switchboard-evals/
 .switchboard-live-dogfood/
+packages/docs-mcp/docs-bundle/
+site/dist/

@@ -195,7 +195,12 @@ The top demo is a VHS tape: `brew install vhs && pnpm build && vhs examples/swit
 Deeper docs: [quickstart](docs/install/quickstart.md),
 [threat model](docs/security/threat-model.md),
 [provider safety templates](docs/providers/safety-templates.md),
-[roadmap](docs/product/roadmap.md).
+[roadmap](docs/product/public-roadmap.md).
+
+Agents can read these docs over MCP:
+`npx -y @switchboard-mcp/docs-mcp` serves `list_docs`, `read_doc`, and
+`search_docs`, and [llms.txt](llms.txt) is kept current. The landing and docs
+site lives in `site/` (static build, `pnpm --filter @switchboard-mcp/site build`).
 
 ## License
 

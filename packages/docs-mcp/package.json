@@ -1,0 +1,36 @@
+{
+  "name": "@switchboard-mcp/docs-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Official MCP server for the Switchboard docs: list, read, and search them from any agent.",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wkoverfield/switchboard.git",
+    "directory": "packages/docs-mcp"
+  },
+  "homepage": "https://github.com/wkoverfield/switchboard#readme",
+  "bugs": {
+    "url": "https://github.com/wkoverfield/switchboard/issues"
+  },
+  "bin": {
+    "switchboard-docs-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "docs-bundle",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/bundle-docs.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  }
+}

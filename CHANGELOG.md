@@ -6,6 +6,10 @@
 - Made the audit log tamper-evident: entries are hash-chained (`prevHash`/`hash` fields), appends are serialized with a lockfile, and `switchboard audit verify` checks the chain and reports exactly where it breaks. Pre-existing entries are treated as legacy and keep working.
 - Added `switchboard dashboard`: a local, read-only web dashboard (127.0.0.1 only) showing live passes, pending approvals, denials, and the audit stream.
 - Re-cut the hero demo (`examples/switchboard.tape`): the climax is now a live out-of-scope DENIED call through the real MCP front door, with an approval-gated call and `switchboard audit verify` in the story. Added `demo-agent.mjs`, a real MCP client that plays the agent.
+- Added a static landing page and docs site under `site/` (narrative anchored on the July 28, 2026 MCP spec revision and the ~8.5% OAuth / ~18% scoping adoption gap, with citations), rendered from the repo's own markdown.
+- Added `@switchboard-mcp/docs-mcp`: the official MCP server for the Switchboard docs (`list_docs`, `read_doc`, `search_docs`), bundled and offline.
+- Rewrote `llms.txt` and `llms-full.txt` to match the shipped product (they described a pre-daemon milestone) and added honesty constraints for agents.
+- Added `docs/product/public-roadmap.md`: the honest shipped / next / later split. Org model, richer policy engine, enterprise surface, and daemon socket hardening are roadmap entries, deliberately not built.
 
 ## 0.1.6
 
