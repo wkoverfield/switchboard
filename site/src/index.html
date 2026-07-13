@@ -374,7 +374,7 @@
   /* steps */
   .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
   @media (max-width: 900px) { .steps { grid-template-columns: 1fr; } }
-  .step { border-top: 1px solid var(--hairline-dark); padding-top: 18px; position: relative; }
+  .step { position: relative; }
   .step .n {
     font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.14em;
     color: var(--ink-dim); text-transform: uppercase;
@@ -670,7 +670,7 @@ npx -y @switchboard-mcp/docs-mcp).
         </g>
       </svg>
       <p class="topology-caption">
-        One pass decides what your agents' tool calls can reach. Denied calls never leave the machine.
+        Denied calls never leave the machine.
         <a href="https://github.com/wkoverfield/switchboard/blob/main/examples/switchboard.gif">Watch it live (30s)</a>.
       </p>
       <div class="stamp">DENIED · OUT OF SCOPE</div>
@@ -682,8 +682,8 @@ npx -y @switchboard-mcp/docs-mcp).
   <div class="wrap">
     <div class="head">
       <span class="index">[ 01 ] · <b>the gap</b></span>
-      <h2>Most MCP servers have no auth. Switchboard does not wait for them.</h2>
-      <p>Your agents act as you: every token you hand them carries your entire reach. Switchboard runs on your machine and controls what they can call, whatever the server supports.</p>
+      <h2>Your coding agent acts with your full access.</h2>
+      <p>Whatever your tokens reach, it reaches, and most MCP servers scope nothing of their own. One bad instruction can hit real infrastructure. Switchboard puts the limits on your machine.</p>
     </div>
     <div class="stats">
       <div class="stat ticked"><span class="tick-b"></span>
