@@ -290,21 +290,6 @@
     font-size: 0.8rem; color: var(--ink-dim); margin-top: 18px; max-width: 74ch;
   }
 
-  /* without / with: the problem answered by the product */
-  .vs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
-  @media (max-width: 800px) { .vs { grid-template-columns: 1fr; } }
-  .vs .index { margin-bottom: 8px; }
-  .vs-col:last-child .index { color: var(--grant); }
-  .vs pre.term {
-    background: var(--term-bg); color: var(--term-ink);
-    border-radius: 8px; padding: 16px 18px; margin: 0;
-    font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.7;
-    overflow-x: auto; min-height: 148px;
-  }
-  .vs pre.term .c { color: var(--term-dim); }
-  .vs pre.term .g { color: var(--term-green); }
-  .vs pre.term .r { color: var(--term-red); }
-
   /* product shot: the dashboard, framed like the credential artifacts */
   .product-shot {
     margin: 44px 0 0; position: relative;
@@ -404,32 +389,6 @@
   .step pre .r { color: var(--term-red); }
   .step pre .y { color: var(--term-yellow); }
   .step p { color: var(--ink-dim); font-size: 0.88rem; margin: 0; }
-
-  /* honesty: the back of the pass */
-  .limits {
-    background: var(--paper-raised);
-    border: 1px solid var(--hairline-dark);
-    padding: 36px;
-  }
-  @media (max-width: 700px) { .limits { padding: 24px 18px; } }
-  .limits .cards {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 0;
-    border-top: 1px solid var(--hairline);
-    margin-top: 26px;
-  }
-  @media (max-width: 800px) { .limits .cards { grid-template-columns: 1fr; } }
-  .limits .card { padding: 20px 24px 20px 0; border-bottom: 1px solid var(--hairline); }
-  .limits .card:nth-child(odd) { border-right: 1px solid var(--hairline); padding-right: 24px; }
-  .limits .card:nth-child(even) { padding-left: 24px; padding-right: 0; }
-  @media (max-width: 800px) {
-    .limits .card, .limits .card:nth-child(odd), .limits .card:nth-child(even) { border-right: none; padding-left: 0; padding-right: 0; }
-  }
-  .limits .card b { display: block; margin-bottom: 6px; font-weight: 600; letter-spacing: -0.01em; }
-  .limits .card p { margin: 0; color: var(--ink-dim); font-size: 0.9rem; }
-  .limits .card code {
-    font-family: var(--font-mono); font-size: 0.82em;
-    background: var(--paper); border: 1px solid var(--hairline); border-radius: 4px; padding: 1px 5px;
-  }
 
   /* trust list */
   .trust { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -782,25 +741,6 @@ npx -y @switchboard-mcp/docs-mcp).
         <p>the MCP spec revision lands. Rollout will take the ecosystem years.</p>
       </div>
     </div>
-    <div class="vs">
-      <div class="vs-col">
-        <span class="index">without switchboard</span>
-        <pre class="term">your agent's reach = your token's reach
-
-  <span class="r">&rarr;</span> delete_file        <span class="r">&rarr;</span> create_repository
-  <span class="r">&rarr;</span> deploy_prod        <span class="r">&rarr;</span> admin_org_*
-  <span class="c">&rarr;</span> <span class="c">everything else the token can do, all day, no record</span></pre>
-      </div>
-      <div class="vs-col">
-        <span class="index">with switchboard</span>
-        <pre class="term">agent &rarr; delete_file
-<span class="r">SWITCHBOARD · DENIED</span>
-  <span class="c">never reached GitHub</span>
-
-$ switchboard audit verify
-<span class="g">Chain: OK</span></pre>
-      </div>
-    </div>
     <p class="stats-foot">
       Sources: <a href="https://modelcontextprotocol.io/specification">MCP specification</a> (revision dated July 28, 2026);
       OAuth and scoping figures from the <a href="https://nhimg.org">nhimg.org</a> MCP server practitioner survey.
@@ -884,42 +824,12 @@ $ switchboard audit verify
   </div>
 </section>
 
-<section id="limits">
-  <div class="wrap">
-    <div class="limits ticked"><span class="tick-b"></span>
-      <span class="index">[ 04 ] · <b>control</b></span>
-      <h2>The pass is the perimeter.</h2>
-      <p style="color:var(--ink-dim); max-width:60ch; margin:6px 0 0;">
-        Everything routed through Switchboard obeys it. Full boundaries in the <a href="/docs/security-threat-model">threat model</a>.
-      </p>
-      <div class="cards">
-        <div class="card">
-          <b>Denied before it leaves the machine.</b>
-          <p>Out-of-scope calls die inside Switchboard; the provider never sees them. Routes that go around the pass, like raw shell or a direct MCP entry, are exactly what <code>switchboard scan</code> finds and reports.</p>
-        </div>
-        <div class="card">
-          <b>Risky calls wait for a human.</b>
-          <p>Approval gates hold a call until you decide, in your client or from the CLI. Provider templates ship sane gates for GitHub, Vercel, Stripe, and Supabase.</p>
-        </div>
-        <div class="card">
-          <b>Access that ends itself.</b>
-          <p>Passes expire on their own; revoke ends access at the next routed call. With no pass active, nothing is governed: <code>switchboard status</code> always tells you which state you are in. Default-deny is on the roadmap.</p>
-        </div>
-        <div class="card">
-          <b>Alpha, with stable contracts.</b>
-          <p>Local-first and moving fast. Passes and audit entries are versioned JSON, so scripts and harnesses can build on them today.</p>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
 <section id="trust">
   <div class="wrap">
-    <div class="head">
-      <span class="index">[ 05 ] · <b>security</b></span>
-      <h2>The security work is written down</h2>
-      <p>Threat model, audit log design, and secrets handling, documented with code references.</p>
+    <div class="head" style="max-width:none;">
+      <span class="index">[ 04 ] · <b>security</b></span>
+      <h2>Honest about its edges, and written down.</h2>
+      <p style="max-width:64ch;">Switchboard governs the routed paths and says so. Raw shell, provider CLIs, and direct MCP routes bypass it, and <code style="font-family:var(--font-mono);font-size:0.9em">scan</code> reports them. With no pass active, nothing is governed; <code style="font-family:var(--font-mono);font-size:0.9em">status</code> tells you which. It is alpha, with versioned pass and audit contracts you can build on today. All of it is documented with code references:</p>
     </div>
     <div class="trust">
       <div class="item">
@@ -957,7 +867,7 @@ $ switchboard audit verify
 <section id="agents" class="agents">
   <div class="wrap">
     <div class="head">
-      <span class="index">[ 06 ] · <b>for agents</b></span>
+      <span class="index">[ 05 ] · <b>for agents</b></span>
       <h2>Installable by the agent reading this</h2>
       <p>The docs ship as an MCP server, and llms.txt is kept current. An agent can evaluate Switchboard, read the threat model, and set it up without leaving its own tools.</p>
     </div>
@@ -976,7 +886,7 @@ $ npx -y @switchboard-mcp/cli@latest scan</pre>
   <div class="wrap">
     <div class="inner">
       <div>
-        <span class="index">[ 07 ] · <b>teams</b></span>
+        <span class="index">[ 06 ] · <b>teams</b></span>
         <h2>Working with a team?</h2>
         <p>
           Switchboard is free, local, and MIT licensed, and it stays that way.
