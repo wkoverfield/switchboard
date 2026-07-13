@@ -557,9 +557,14 @@ npx -y @switchboard-mcp/docs-mcp).
             <stop offset="100%" stop-color="#166b41" stop-opacity="0"/>
           </radialGradient>
           <linearGradient id="cardSheen" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#23201b"/>
-            <stop offset="55%" stop-color="#14120f"/>
-            <stop offset="100%" stop-color="#191612"/>
+            <stop offset="0%" stop-color="#26221c"/>
+            <stop offset="45%" stop-color="#16130f"/>
+            <stop offset="100%" stop-color="#1b1712"/>
+          </linearGradient>
+          <linearGradient id="holo" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#3fd68f" stop-opacity="0.35"/>
+            <stop offset="45%" stop-color="#57c8d8" stop-opacity="0.22"/>
+            <stop offset="100%" stop-color="#3fd68f" stop-opacity="0.05"/>
           </linearGradient>
         </defs>
 
@@ -615,15 +620,31 @@ npx -y @switchboard-mcp/docs-mcp).
 
         <!-- the pass card -->
         <g filter="url(#cardShadow)">
-          <rect x="380" y="110" width="200" height="180" rx="16" fill="url(#cardSheen)"/>
-          <rect x="380" y="110" width="200" height="180" rx="16" fill="none" stroke="#3a352d" stroke-width="1"/>
-          <rect x="396" y="124" width="168" height="2" rx="1" fill="var(--term-green)" opacity="0.9"/>
-          <text x="396" y="154" font-size="14" letter-spacing="2" fill="var(--term-green)" font-weight="500">SWITCHBOARD</text>
-          <text x="396" y="176" font-size="10" letter-spacing="1.5" fill="var(--term-dim)">PASS Nº 0047 · ACME-APP</text>
-          <text x="396" y="204" font-size="11" fill="var(--term-ink)">scope   github_ci_*</text>
-          <text x="396" y="222" font-size="11" fill="var(--term-ink)">expires <tspan fill="var(--term-yellow)">in 4h · on its own</tspan></text>
-          <text x="396" y="240" font-size="10" fill="var(--term-dim)">everything else denied</text>
-          <g fill="var(--term-ink)" opacity="0.55">
+          <rect x="380" y="103" width="200" height="194" rx="16" fill="url(#cardSheen)"/>
+          <rect x="380.5" y="103.5" width="199" height="193" rx="15.5" fill="none" stroke="#3f3930" stroke-width="1"/>
+          <rect x="384.5" y="107.5" width="191" height="185" rx="12" fill="none" stroke="#2b2620" stroke-width="0.75"/>
+          <!-- lanyard slot -->
+          <rect x="452" y="113" width="56" height="8" rx="4" fill="#0a0908"/>
+          <rect x="452.5" y="113.5" width="55" height="7" rx="3.5" fill="none" stroke="#3f3930" stroke-width="0.75"/>
+          <!-- holo security strip -->
+          <rect x="566" y="140" width="3" height="120" rx="1.5" fill="url(#holo)"/>
+          <!-- header -->
+          <text x="396" y="150" font-size="13.5" letter-spacing="3" fill="var(--term-green)" font-weight="500">SWITCHBOARD</text>
+          <text x="396" y="167" font-size="8.5" letter-spacing="2" fill="var(--term-dim)">PASS Nº 0047</text>
+          <line x1="396" y1="178" x2="556" y2="178" stroke="#2b2620" stroke-width="1"/>
+          <!-- fields -->
+          <g font-size="8" letter-spacing="1.5" fill="var(--term-dim)">
+            <text x="396" y="196">HOLDER</text>
+            <text x="396" y="216">SCOPE</text>
+            <text x="396" y="236">EXPIRES</text>
+          </g>
+          <g font-size="11">
+            <text x="452" y="197" fill="var(--term-ink)">acme-app · fix/ci</text>
+            <text x="452" y="217" fill="var(--term-green)">github_ci_*</text>
+            <text x="452" y="237" fill="var(--term-yellow)">in 4h</text>
+          </g>
+          <text x="396" y="251" font-size="7.5" letter-spacing="2" fill="var(--term-dim)">EVERYTHING ELSE DENIED</text>
+          <g fill="var(--term-ink)" opacity="0.5">
             <rect x="396" y="258" width="2" height="16"/>
             <rect x="401" y="258" width="1" height="16"/>
             <rect x="405" y="258" width="3" height="16"/>
