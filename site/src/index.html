@@ -186,11 +186,6 @@
   .prompt-pill:hover { border-color: var(--ink); }
   .prompt-pill:focus-visible { outline: 2px solid var(--grant); outline-offset: 3px; }
   .prompt-pill .glyph { color: var(--grant); }
-  .prompt-pill .hint {
-    font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase;
-    color: var(--ink-dim);
-    border-left: 1px solid var(--hairline); padding-left: 10px;
-  }
   .prompt-pill.copied { border-color: var(--grant); }
   .prompt-pill.copied .label { color: var(--grant); }
   .prompt-pop {
@@ -544,7 +539,6 @@
         <button class="prompt-pill" type="button" aria-describedby="setup-prompt">
           <span class="glyph">⧉</span>
           <span class="label">copy the setup prompt</span>
-          <span class="hint">hover to preview</span>
         </button>
         <div class="prompt-pop" role="tooltip">
           <div class="prompt-head">paste this into claude code, codex, or cursor</div>
