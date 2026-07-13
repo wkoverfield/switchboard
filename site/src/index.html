@@ -421,10 +421,6 @@
     outline: 2px solid var(--grant); outline-offset: 2px; border-color: var(--grant);
   }
   .waitlist-form .gotcha { position: absolute; left: -9999px; height: 0; width: 0; border: 0; padding: 0; }
-  .waitlist-fine {
-    font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.08em;
-    text-transform: uppercase; color: var(--ink-dim); margin-top: 12px;
-  }
   .waitlist-done {
     font-family: var(--font-mono); font-size: 0.85rem;
     color: var(--grant); margin-top: 4px;
@@ -874,7 +870,6 @@ $ npx -y @switchboard-mcp/cli@latest scan</pre>
           <input type="hidden" name="context" value="team-tier-waitlist">
           <button class="btn primary" type="submit">Join the waitlist</button>
         </form>
-        <p class="waitlist-fine">One email when the team tier opens. Nothing else.</p>
         <p class="waitlist-done" hidden>You're on the list. We'll be in touch.</p>
       </div>
     </div>
@@ -940,7 +935,6 @@ $ npx -y @switchboard-mcp/cli@latest scan</pre>
         });
         if (!response.ok) throw new Error("submit failed");
         waitlistForm.hidden = true;
-        document.querySelector(".waitlist-fine").hidden = true;
         document.querySelector(".waitlist-done").hidden = false;
       } catch {
         button.disabled = false;
