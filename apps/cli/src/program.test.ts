@@ -2014,6 +2014,43 @@ describe("switchboard CLI program", () => {
     ]);
   });
 
+  it("reports a controlled single-client setup as ready", async () => {
+    const root = makeTempProject();
+    writeStdioConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({ writeOut: (message) => output.push(message) });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "install",
+        "claude",
+        "--write",
+        "--command",
+        process.execPath,
+        "--json"
+      ],
+      { from: "user" }
+    );
+    await program.parseAsync(["--cwd", root, "doctor", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[1] ?? "{}") as {
+      ok: boolean;
+      status: string;
+      authorityStatus: { status: string };
+      nextSteps: string[];
+    };
+    expect(parsed).toMatchObject({
+      ok: true,
+      status: "ok",
+      authorityStatus: { status: "controlled" }
+    });
+    expect(parsed.nextSteps).toContain("switchboard install codex --write");
+  });
+
   it("prints provider template next steps for a ready GitHub profile", async () => {
     const root = makeTempProject();
     writeFileSync(join(root, ".gitignore"), ".switchboard.local.yaml\n");

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import {
   chmod,
   mkdir,
@@ -616,11 +617,13 @@ export async function listMandates(
 ): Promise<MandateWithStatus[]> {
   const now = options.now?.() ?? new Date();
   const store = await readMandateStore(options.path ? { path: options.path } : {});
-  const repoPath = options.repoPath ? resolve(options.repoPath) : undefined;
+  const repoPath = options.repoPath ? canonicalPath(options.repoPath) : undefined;
   const id = options.id ? normalizeMandateId(options.id) : undefined;
 
   return store.mandates
-    .filter((mandate) => (repoPath ? mandate.repoPath === repoPath : true))
+    .filter((mandate) =>
+      repoPath ? canonicalPath(mandate.repoPath) === repoPath : true
+    )
     .filter((mandate) => (id ? mandate.id === id : true))
     .map((mandate) => withRuntimeStatus(mandate, now));
 }
@@ -796,7 +799,10 @@ function findLatestMandateIndex(
 ): number {
   for (let index = mandates.length - 1; index >= 0; index -= 1) {
     const mandate = mandates[index];
-    if (mandate?.id === id && mandate.repoPath === repoPath) {
+    if (
+      mandate?.id === id &&
+      canonicalPath(mandate.repoPath) === canonicalPath(repoPath)
+    ) {
       return index;
     }
   }
@@ -912,13 +918,21 @@ function assertNoActiveDuplicate(
   const activeDuplicate = store.mandates.find(
     (existing) =>
       existing.id === mandate.id &&
-      existing.repoPath === mandate.repoPath &&
+      canonicalPath(existing.repoPath) === canonicalPath(mandate.repoPath) &&
       mandateRuntimeStatus(existing, now) === "active"
   );
   if (activeDuplicate) {
     throw new Error(
       `active mandate "${mandate.id}" already exists for ${mandate.repoPath}; choose a different task name or wait for it to expire`
     );
+  }
+}
+
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
   }
 }
 

@@ -10564,6 +10564,10 @@ function doctorStatus(options: {
     return "setup-incomplete";
   }
 
+  if (options.authorityStatus?.status === "controlled") {
+    return "ok";
+  }
+
   const setupSteps = options.nextSteps.filter(isSetupIncompleteStep);
   return setupSteps.length > 0 ? "setup-incomplete" : "ok";
 }
