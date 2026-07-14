@@ -4445,8 +4445,12 @@ export function createProgram(io: ProgramIo = {}): Command {
       }
 
       try {
+        const globalOptions = program.opts<{ cwd?: string }>();
+        const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
         const dashboard = await startDashboard({
           port,
+          enforcement: loaded.config.enforcement,
+          enforcementRepoPath: installTargetCwd(globalOptions.cwd),
           ...(io.auditLogPath ? { auditLogPath: io.auditLogPath } : {}),
           ...(io.mandateStorePath
             ? { mandateStorePath: io.mandateStorePath }

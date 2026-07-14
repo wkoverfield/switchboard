@@ -1,4 +1,6 @@
 import { createServer, type Server } from "node:http";
+import { isIP } from "node:net";
+import { basename } from "node:path";
 import {
   listApprovalRequests,
   listMandates,
@@ -8,12 +10,15 @@ import {
   resolveMandateStorePath,
   type AuditLogEntry
 } from "@switchboard-mcp/core";
+import { dashboardHtml } from "./dashboard-page.js";
 
-export const dashboardStateSchemaVersion = "switchboard.dashboard-state.v1";
+export const dashboardStateSchemaVersion = "switchboard.dashboard-state.v2";
 
 export interface DashboardOptions {
   port?: number;
   host?: string;
+  enforcement?: "default" | "strict";
+  enforcementRepoPath?: string;
   auditLogPath?: string;
   mandateStorePath?: string;
   approvalStorePath?: string;
@@ -31,20 +36,52 @@ interface DashboardPass {
   id: string;
   branch: string;
   repoPath: string;
+  repoName: string;
   agentRole: string;
   profiles: string[];
   runtimeStatus: string;
+  createdAt: string;
+  leaseStartedAt: string;
   expiresAt: string;
   lease: string;
   allowedTools: string[];
   deniedTools: string[];
   approvalGateCount: number;
+  approvalGates: Array<{
+    id: string;
+    toolPattern: string;
+    reason?: string | undefined;
+    risk?: string | undefined;
+  }>;
 }
+
+type DashboardAuditOutcome =
+  | "allowed"
+  | "gated"
+  | "denied"
+  | "cancelled"
+  | "error";
+
+interface DashboardAuditEntry extends AuditLogEntry {
+  dashboardOutcome: DashboardAuditOutcome;
+}
+
+type DashboardSourceHealth = "ok" | "error";
+type DashboardMode = "live" | "idle" | "degraded";
 
 interface DashboardState {
   ok: true;
   schemaVersion: typeof dashboardStateSchemaVersion;
   generatedAt: string;
+  repoEnforcement: "default" | "strict";
+  enforcementRepoPath: string | null;
+  enforcementRepoName: string | null;
+  mode: DashboardMode;
+  sourceHealth: {
+    mandates: DashboardSourceHealth;
+    approvals: DashboardSourceHealth;
+    audit: DashboardSourceHealth;
+  };
   passes: DashboardPass[];
   pendingApprovals: Array<{
     id: string;
@@ -52,13 +89,17 @@ interface DashboardState {
     mandateId: string;
     repoPath: string;
     createdAt: string;
+    approvalGateId: string;
+    approvalGatePattern: string;
   }>;
-  audit: AuditLogEntry[];
+  audit: DashboardAuditEntry[];
   counts: {
     activePasses: number;
     pendingApprovals: number;
     allowedCalls: number;
+    gatedCalls: number;
     deniedCalls: number;
+    errorCalls: number;
   };
 }
 
@@ -70,30 +111,53 @@ export async function collectDashboardState(
   const approvalStorePath =
     options.approvalStorePath ?? resolveApprovalRequestStorePath();
   const auditLimit = options.auditLimit ?? 200;
+  const repoEnforcement = options.enforcement ?? "default";
+  const enforcementRepoPath = options.enforcementRepoPath ?? null;
 
-  const [mandates, approvals, audit] = await Promise.all([
-    listMandates({ path: mandateStorePath }).catch(() => []),
-    listApprovalRequests({ path: approvalStorePath }).catch(() => []),
-    readAuditLogEntries({ path: auditLogPath, limit: auditLimit }).catch(
-      () => [] as AuditLogEntry[]
-    )
-  ]);
+  const [mandatesResult, approvalsResult, auditResult] =
+    await Promise.allSettled([
+      listMandates({ path: mandateStorePath }),
+      listApprovalRequests({ path: approvalStorePath }),
+      readAuditLogEntries({ path: auditLogPath, limit: auditLimit })
+    ]);
+  const mandates =
+    mandatesResult.status === "fulfilled" ? mandatesResult.value : [];
+  const approvals =
+    approvalsResult.status === "fulfilled" ? approvalsResult.value : [];
+  const audit = auditResult.status === "fulfilled" ? auditResult.value : [];
+  const sourceHealth = {
+    mandates: mandatesResult.status === "fulfilled" ? "ok" : "error",
+    approvals: approvalsResult.status === "fulfilled" ? "ok" : "error",
+    audit: auditResult.status === "fulfilled" ? "ok" : "error"
+  } as const;
 
   const passes: DashboardPass[] = mandates
     .filter((mandate) => mandate.runtimeStatus === "active")
-    .map((mandate) => ({
-      id: mandate.id,
-      branch: mandate.branch,
-      repoPath: mandate.repoPath,
-      agentRole: mandate.agentRole,
-      profiles: mandate.profiles,
-      runtimeStatus: mandate.runtimeStatus,
-      expiresAt: mandate.expiresAt,
-      lease: mandate.lease,
-      allowedTools: mandate.allowedTools,
-      deniedTools: mandate.deniedTools,
-      approvalGateCount: mandate.approvalGates?.length ?? 0
-    }));
+    .map((mandate) => {
+      const latestLeaseEvent = mandate.leaseEvents?.at(-1);
+      return {
+        id: mandate.id,
+        branch: mandate.branch,
+        repoPath: mandate.repoPath,
+        repoName: basename(mandate.repoPath),
+        agentRole: mandate.agentRole,
+        profiles: mandate.profiles,
+        runtimeStatus: mandate.runtimeStatus,
+        createdAt: mandate.createdAt,
+        leaseStartedAt: latestLeaseEvent?.at ?? mandate.createdAt,
+        expiresAt: mandate.expiresAt,
+        lease: mandate.lease,
+        allowedTools: mandate.allowedTools,
+        deniedTools: mandate.deniedTools,
+        approvalGateCount: mandate.approvalGates?.length ?? 0,
+        approvalGates: (mandate.approvalGates ?? []).map((gate) => ({
+          id: gate.id,
+          toolPattern: gate.toolPattern,
+          ...(gate.reason ? { reason: gate.reason } : {}),
+          ...(gate.risk ? { risk: gate.risk } : {})
+        }))
+      };
+    });
 
   const pendingApprovals = approvals
     .filter((request) => request.runtimeStatus === "pending")
@@ -102,23 +166,56 @@ export async function collectDashboardState(
       toolName: request.toolName,
       mandateId: request.mandateId,
       repoPath: request.repoPath,
-      createdAt: request.createdAt
+      createdAt: request.createdAt,
+      approvalGateId: request.approvalGateId,
+      approvalGatePattern: request.approvalGatePattern
     }));
 
-  const toolCalls = audit.filter((entry) => entry.action === "tool_call");
+  const dashboardAudit = [...audit].reverse().map((entry) => ({
+    ...entry,
+    dashboardOutcome: dashboardAuditOutcome(entry)
+  }));
+  const toolCalls = dashboardAudit.filter(
+    (entry) => entry.action === "tool_call"
+  );
+  const degraded = Object.values(sourceHealth).some(
+    (status) => status === "error"
+  );
+  const mode: DashboardMode = degraded
+    ? "degraded"
+    : passes.length > 0
+      ? "live"
+      : "idle";
 
   return {
     ok: true,
     schemaVersion: dashboardStateSchemaVersion,
     generatedAt: new Date().toISOString(),
+    repoEnforcement,
+    enforcementRepoPath,
+    enforcementRepoName: enforcementRepoPath
+      ? basename(enforcementRepoPath)
+      : null,
+    mode,
+    sourceHealth,
     passes,
     pendingApprovals,
-    audit: [...audit].reverse(),
+    audit: dashboardAudit,
     counts: {
       activePasses: passes.length,
       pendingApprovals: pendingApprovals.length,
-      allowedCalls: toolCalls.filter((entry) => entry.status === "ok").length,
-      deniedCalls: toolCalls.filter((entry) => entry.status === "error").length
+      allowedCalls: toolCalls.filter(
+        (entry) => entry.dashboardOutcome === "allowed"
+      ).length,
+      gatedCalls: toolCalls.filter(
+        (entry) => entry.dashboardOutcome === "gated"
+      ).length,
+      deniedCalls: toolCalls.filter(
+        (entry) => entry.dashboardOutcome === "denied"
+      ).length,
+      errorCalls: toolCalls.filter(
+        (entry) => entry.dashboardOutcome === "error"
+      ).length
     }
   };
 }
@@ -131,23 +228,42 @@ export async function startDashboard(
   const host = options.host ?? "127.0.0.1";
   const requestedPort = options.port ?? 7878;
 
+  if (!isLoopbackHost(host)) {
+    throw new Error(
+      `dashboard host must be loopback-only (received ${JSON.stringify(host)})`
+    );
+  }
+
   const server = createServer((request, response) => {
+    if (!isLoopbackRequestHost(request.headers.host)) {
+      response.writeHead(403, {
+        ...dashboardSecurityHeaders,
+        "content-type": "text/plain; charset=utf-8"
+      });
+      response.end("forbidden");
+      return;
+    }
+
     const url = new URL(
       request.url ?? "/",
-      `http://${request.headers.host ?? "localhost"}`
+      `http://${request.headers.host}`
     );
 
     if (url.pathname === "/api/state") {
       void collectDashboardState(options)
         .then((state) => {
           response.writeHead(200, {
+            ...dashboardSecurityHeaders,
             "content-type": "application/json",
             "cache-control": "no-store"
           });
           response.end(JSON.stringify(state));
         })
         .catch((error: unknown) => {
-          response.writeHead(500, { "content-type": "application/json" });
+          response.writeHead(500, {
+            ...dashboardSecurityHeaders,
+            "content-type": "application/json"
+          });
           response.end(
             JSON.stringify({
               ok: false,
@@ -160,6 +276,7 @@ export async function startDashboard(
 
     if (url.pathname === "/") {
       response.writeHead(200, {
+        ...dashboardSecurityHeaders,
         "content-type": "text/html; charset=utf-8",
         "cache-control": "no-store"
       });
@@ -167,7 +284,10 @@ export async function startDashboard(
       return;
     }
 
-    response.writeHead(404, { "content-type": "text/plain" });
+    response.writeHead(404, {
+      ...dashboardSecurityHeaders,
+      "content-type": "text/plain; charset=utf-8"
+    });
     response.end("not found");
   });
 
@@ -188,7 +308,7 @@ export async function startDashboard(
   return {
     server,
     port,
-    url: `http://${host}:${port}`,
+    url: `http://${host.includes(":") ? `[${host}]` : host}:${port}`,
     close: () =>
       new Promise<void>((resolveClose, rejectClose) => {
         server.close((error) => (error ? rejectClose(error) : resolveClose()));
@@ -196,246 +316,79 @@ export async function startDashboard(
   };
 }
 
-function dashboardHtml(): string {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Switchboard</title>
-<style>
-  :root {
-    --bg: #0b0e12;
-    --panel: #11161d;
-    --line: #1e2630;
-    --text: #d7dee8;
-    --dim: #7d8a99;
-    --green: #3fd68f;
-    --red: #ff5f6d;
-    --yellow: #f2c94c;
-    font-size: 15px;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  }
-  header {
-    display: flex;
-    align-items: baseline;
-    gap: 14px;
-    padding: 18px 22px 10px;
-    border-bottom: 1px solid var(--line);
-    flex-wrap: wrap;
-  }
-  header h1 { font-size: 1.05rem; margin: 0; letter-spacing: 0.04em; }
-  header .sub { color: var(--dim); font-size: 0.8rem; }
-  .pills { margin-left: auto; display: flex; gap: 10px; }
-  .pill {
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    padding: 3px 12px;
-    font-size: 0.78rem;
-    color: var(--dim);
-  }
-  .pill b { color: var(--text); font-weight: 600; }
-  .pill.denied b { color: var(--red); }
-  .pill.allowed b { color: var(--green); }
-  .pill.pending b { color: var(--yellow); }
-  main {
-    display: grid;
-    grid-template-columns: minmax(300px, 380px) 1fr;
-    gap: 16px;
-    padding: 16px 22px 30px;
-    align-items: start;
-  }
-  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-  section {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    overflow: hidden;
-  }
-  section h2 {
-    margin: 0;
-    padding: 10px 14px;
-    font-size: 0.72rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--dim);
-    border-bottom: 1px solid var(--line);
-  }
-  .empty { padding: 16px 14px; color: var(--dim); font-size: 0.82rem; }
-  .pass { padding: 12px 14px; border-bottom: 1px solid var(--line); }
-  .pass:last-child { border-bottom: none; }
-  .pass .id { color: var(--green); font-weight: 600; }
-  .pass .meta { color: var(--dim); font-size: 0.78rem; margin-top: 3px; }
-  .pass .scope { font-size: 0.78rem; margin-top: 6px; }
-  .allow { color: var(--green); }
-  .deny { color: var(--red); }
-  .approval { padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 0.82rem; }
-  .approval:last-child { border-bottom: none; }
-  .approval .tool { color: var(--yellow); }
-  .approval .hint { color: var(--dim); font-size: 0.75rem; margin-top: 2px; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-  td {
-    padding: 6px 10px;
-    border-bottom: 1px solid var(--line);
-    vertical-align: top;
-    white-space: nowrap;
-  }
-  td.what { white-space: normal; word-break: break-word; }
-  tr:last-child td { border-bottom: none; }
-  .t { color: var(--dim); font-size: 0.72rem; }
-  .ok { color: var(--green); }
-  .err { color: var(--red); }
-  .gate { color: var(--yellow); }
-  .reason { color: var(--dim); }
-  .stack { display: flex; flex-direction: column; gap: 16px; }
-  footer { padding: 0 22px 20px; color: var(--dim); font-size: 0.72rem; }
-</style>
-</head>
-<body>
-<header>
-  <h1>SWITCHBOARD</h1>
-  <span class="sub">local dashboard &middot; read-only &middot; 127.0.0.1</span>
-  <div class="pills">
-    <span class="pill">passes <b id="c-passes">&ndash;</b></span>
-    <span class="pill pending">pending approvals <b id="c-pending">&ndash;</b></span>
-    <span class="pill allowed">allowed <b id="c-allowed">&ndash;</b></span>
-    <span class="pill denied">denied <b id="c-denied">&ndash;</b></span>
-  </div>
-</header>
-<main>
-  <div class="stack">
-    <section>
-      <h2>Live passes</h2>
-      <div id="passes"><div class="empty">loading&hellip;</div></div>
-    </section>
-    <section>
-      <h2>Pending approvals</h2>
-      <div id="approvals"><div class="empty">loading&hellip;</div></div>
-    </section>
-  </div>
-  <section>
-    <h2>Audit stream <span id="stream-note"></span></h2>
-    <div id="audit"><div class="empty">loading&hellip;</div></div>
-  </section>
-</main>
-<footer>
-  Reads local Switchboard state only. Nothing here leaves your machine.
-  Verify the log chain with <code>switchboard audit verify</code>.
-</footer>
-<script>
-  // All rendering uses document.createElement/textContent, never markup
-  // strings, so log/store contents can never execute in this page.
-  const el = (tag, className, text) => {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    if (text !== undefined) node.textContent = text;
-    return node;
-  };
+const dashboardSecurityHeaders = {
+  "content-security-policy":
+    "default-src 'self'; connect-src 'self'; img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'",
+  "cross-origin-resource-policy": "same-origin",
+  "referrer-policy": "no-referrer",
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY"
+} as const;
 
-  const replaceChildrenOf = (id, ...nodes) => {
-    document.getElementById(id).replaceChildren(...nodes);
-  };
-
-  const emptyNote = (text) => el("div", "empty", text);
-
-  const timeOf = (iso) => {
-    const d = new Date(iso);
-    return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleTimeString();
-  };
-
-  const expiresIn = (iso) => {
-    const ms = new Date(iso).getTime() - Date.now();
-    if (Number.isNaN(ms)) return "";
-    if (ms <= 0) return "expired";
-    const m = Math.round(ms / 60000);
-    return m >= 90 ? "expires in " + (m / 60).toFixed(1) + "h" : "expires in " + m + "m";
-  };
-
-  function passNode(p) {
-    const node = el("div", "pass");
-    const title = el("div");
-    title.append(el("span", "id", p.id), " · " + p.branch);
-    node.append(title);
-    node.append(el("div", "meta",
-      "acting as " + p.agentRole + " · " + p.profiles.join(", ") +
-      " · " + expiresIn(p.expiresAt)));
-    const scope = el("div", "scope");
-    scope.append(el("span", "allow", "allow "),
-      p.allowedTools.length ? p.allowedTools.join(", ") : "everything in scope");
-    if (p.deniedTools.length) {
-      scope.append(el("br"), el("span", "deny", "deny "), p.deniedTools.join(", "));
-    }
-    if (p.approvalGateCount) {
-      scope.append(el("br"), el("span", "gate", p.approvalGateCount + " approval gate(s)"));
-    }
-    node.append(scope);
-    return node;
+function dashboardAuditOutcome(entry: AuditLogEntry): DashboardAuditOutcome {
+  if (
+    entry.approvalDecision === "denied" ||
+    entry.approvalDecision === "declined"
+  ) {
+    return "denied";
+  }
+  if (entry.approvalDecision === "cancelled") {
+    return "cancelled";
+  }
+  if (entry.approvalDecision === "failed") {
+    return "error";
+  }
+  if (entry.status === "ok") {
+    return "allowed";
   }
 
-  function approvalNode(a) {
-    const node = el("div", "approval");
-    node.append(el("span", "tool", a.toolName), " · pass " + a.mandateId);
-    node.append(el("div", "hint", "decide with: switchboard approve " + a.id));
-    return node;
+  const reason = String(entry.error ?? "").toLowerCase();
+  if (
+    /approval request .* (?:was |is )?denied/.test(reason)
+  ) {
+    return "denied";
   }
-
-  function auditRow(e) {
-    const row = el("tr");
-    row.append(el("td", "t", timeOf(e.timestamp)));
-    const denied = e.status !== "ok";
-    const gated = denied && e.approvalGateId;
-    row.append(el("td", gated ? "gate" : denied ? "err" : "ok",
-      gated ? "gated" : denied ? "denied" : "ok"));
-    row.append(el("td", "t", e.action));
-    const what = el("td", "what");
-    what.append(String(e.toolName || e.command || e.profileName || e.action));
-    if (e.mandateId) what.append(" ", el("span", "t", "pass:" + e.mandateId));
-    if (denied && e.error) what.append(el("div", "reason", e.error));
-    row.append(what);
-    return row;
+  if (entry.approvalGateId) {
+    return "gated";
   }
-
-  async function tick() {
-    try {
-      const res = await fetch("/api/state");
-      const state = await res.json();
-      for (const [id, value] of [
-        ["c-passes", state.counts.activePasses],
-        ["c-pending", state.counts.pendingApprovals],
-        ["c-allowed", state.counts.allowedCalls],
-        ["c-denied", state.counts.deniedCalls]
-      ]) {
-        document.getElementById(id).textContent = String(value);
-      }
-      replaceChildrenOf("passes", ...(state.passes.length
-        ? state.passes.map(passNode)
-        : [emptyNote("No live passes. Give one out with: switchboard grant")]));
-      replaceChildrenOf("approvals", ...(state.pendingApprovals.length
-        ? state.pendingApprovals.map(approvalNode)
-        : [emptyNote("Nothing waiting on you.")]));
-      if (state.audit.length) {
-        const table = el("table");
-        state.audit.slice(0, 80).forEach((entry) => table.append(auditRow(entry)));
-        replaceChildrenOf("audit", table);
-      } else {
-        replaceChildrenOf("audit", emptyNote("No audit entries yet."));
-      }
-      document.getElementById("stream-note").textContent =
-        " · " + state.audit.length + " recent entries";
-    } catch {
-      document.getElementById("stream-note").textContent = " · disconnected";
-    }
+  if (
+    reason.includes("denied by pass policy") ||
+    reason.includes("denied by mandate policy") ||
+    /^tool .+ is denied (?:for|by) /.test(reason) ||
+    reason.includes("not allowed by pass policy") ||
+    reason.includes("not allowed by mandate policy") ||
+    reason.includes("no active pass") ||
+    reason.includes("out of scope") ||
+    reason.includes("branch mismatch") ||
+    reason.includes(" is expired")
+  ) {
+    return "denied";
   }
+  return "error";
+}
 
-  tick();
-  setInterval(tick, 2000);
-</script>
-</body>
-</html>`;
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  const ipVersion = isIP(normalized);
+  return (
+    normalized === "localhost" ||
+    normalized === "::1" ||
+    (ipVersion === 4 && normalized.startsWith("127."))
+  );
+}
+
+function isLoopbackRequestHost(hostHeader: string | undefined): boolean {
+  if (!hostHeader) {
+    return false;
+  }
+  try {
+    const hostname = new URL(`http://${hostHeader}`).hostname;
+    const unwrapped =
+      hostname.startsWith("[") && hostname.endsWith("]")
+        ? hostname.slice(1, -1)
+        : hostname;
+    return isLoopbackHost(unwrapped);
+  } catch {
+    return false;
+  }
 }

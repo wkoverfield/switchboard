@@ -32,8 +32,9 @@ const docsManifest = [
 rmSync(distDir, { recursive: true, force: true });
 mkdirSync(join(distDir, "docs"), { recursive: true });
 
-// Landing page and llms files.
+// Shared site shell, landing page, and agent-readable docs files.
 copyFileSync(join(siteDir, "src", "index.html"), join(distDir, "index.html"));
+copyFileSync(join(siteDir, "src", "styles.css"), join(distDir, "styles.css"));
 for (const name of ["llms.txt", "llms-full.txt"]) {
   const source = join(repoRoot, name);
   if (existsSync(source)) {
@@ -131,12 +132,12 @@ function docShell({ title, body, active, entries }) {
     .map((section) => {
       const items = entries
         .filter((entry) => entry.section === section)
-        .map(
-          (entry) =>
-            `<a class="${entry.slug === active ? "active" : ""}" href="/docs/${entry.slug}">${escapeHtml(entry.title)}</a>`
-        )
+        .map((entry) => {
+          const current = entry.slug === active;
+          return `<a class="${current ? "active" : ""}" href="/docs/${entry.slug}"${current ? ' aria-current="page"' : ""}>${escapeHtml(entry.title)}</a>`;
+        })
         .join("\n");
-      return `<div class="nav-section"><span>${escapeHtml(section)}</span>\n${items}</div>`;
+      return `<div class="docs-nav-section"><span>${escapeHtml(section)}</span>\n${items}</div>`;
     })
     .join("\n");
 
@@ -146,102 +147,27 @@ function docShell({ title, body, active, entries }) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)} · Switchboard Docs</title>
-<link rel="preconnect" href="https://api.fontshare.com">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23171c22'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-family='monospace' font-size='38' font-weight='700' fill='%2378a892'%3Es%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600&display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<style>
-  :root {
-    /* credential-paper tokens, mirrored from the landing page */
-    --paper: #f7f5f0; --paper-raised: #fdfcfa;
-    --hairline: #e6e2d9; --hairline-dark: #d8d3c8;
-    --ink: #1c1a17; --ink-dim: #6b665e;
-    --grant: #166b41; --stamp: #b02a2a;
-    --term-bg: #14120f; --term-ink: #d8d4cc;
-    --font-sans: "General Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--paper); color: var(--ink);
-    font-family: var(--font-sans);
-    line-height: 1.65;
-    -webkit-font-smoothing: antialiased;
-  }
-  code, pre { font-family: var(--font-mono); }
-  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--hairline-dark); text-underline-offset: 3px; }
-  a:hover { text-decoration-color: var(--ink); }
-  /* nav: identical to the landing page nav */
-  nav.top {
-    border-bottom: 1px solid var(--hairline);
-    background: var(--paper);
-    position: sticky; top: 0; z-index: 10;
-  }
-  nav.top .wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px; }
-  nav.top .row { display: flex; align-items: center; gap: 22px; padding: 15px 0; }
-  .wordmark {
-    display: inline-flex; align-items: center; gap: 9px;
-    font-family: var(--font-mono); font-weight: 500; font-size: 0.95rem;
-    letter-spacing: 0.02em; color: var(--ink); text-decoration: none;
-  }
-  .wordmark .mark { display: block; border-radius: 5px; }
-  .wordmark b { color: var(--grant); font-weight: 500; }
-  nav.top .links { margin-left: auto; display: flex; gap: 20px; font-size: 0.88rem; }
-  nav.top .links a { color: var(--ink-dim); text-decoration: none; }
-  nav.top .links a:hover { color: var(--ink); }
-  nav.top .links a.gh { display: inline-flex; align-items: center; }
-  .layout { display: grid; grid-template-columns: 240px 1fr; max-width: 1140px; margin: 0 auto; }
-  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } aside { display: none; } }
-  aside {
-    border-right: 1px solid var(--hairline); padding: 28px 18px; font-size: 0.88rem;
-    position: sticky; top: 53px; align-self: start; height: calc(100vh - 53px); overflow-y: auto;
-  }
-  .nav-section { margin-bottom: 22px; display: flex; flex-direction: column; gap: 3px; }
-  .nav-section span {
-    color: var(--ink-dim); font-family: var(--font-mono);
-    font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.14em;
-    margin-bottom: 6px;
-  }
-  .nav-section a { color: var(--ink); padding: 3px 8px; border-radius: 6px; text-decoration: none; }
-  .nav-section a:hover { background: var(--paper-raised); }
-  .nav-section a.active { background: var(--paper-raised); color: var(--grant); box-shadow: inset 2px 0 0 var(--grant); }
-  main { padding: 34px 38px 90px; min-width: 0; }
-  main h1 { letter-spacing: -0.02em; line-height: 1.15; font-weight: 600; }
-  main h1, main h2, main h3 { scroll-margin-top: 70px; }
-  main h2 { margin-top: 2.2em; border-bottom: 1px solid var(--hairline); padding-bottom: 6px; font-weight: 600; letter-spacing: -0.01em; }
-  main h3 { font-weight: 600; }
-  main pre {
-    background: var(--term-bg); color: var(--term-ink);
-    border-radius: 8px;
-    padding: 14px 16px; overflow-x: auto; font-size: 0.84rem; line-height: 1.55;
-  }
-  main code { background: var(--paper-raised); border: 1px solid var(--hairline); border-radius: 4px; padding: 1px 5px; font-size: 0.86em; }
-  main pre code { background: none; border: none; padding: 0; color: inherit; }
-  main table { border-collapse: collapse; width: 100%; font-size: 0.92rem; display: block; overflow-x: auto; }
-  main th, main td { border: 1px solid var(--hairline-dark); padding: 8px 10px; text-align: left; vertical-align: top; }
-  main th { background: var(--paper-raised); }
-  main blockquote { border-left: 3px solid var(--hairline-dark); margin: 0; padding: 2px 18px; color: var(--ink-dim); }
-  main img { max-width: 100%; }
-</style>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
 </head>
-<body>
-<nav class="top">
-  <div class="wrap">
-    <div class="row">
-      <a href="/" class="wordmark"><svg class="mark" viewBox="0 0 32 32" width="20" height="20" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#3fd68f"/><rect x="9" y="8.5" width="3.4" height="15" rx="1.7" fill="#0d1712"/><rect x="19.6" y="8.5" width="3.4" height="15" rx="1.7" fill="#0d1712"/><circle cx="16" cy="16" r="2.9" fill="#0d1712"/></svg>switchboard</a>
-      <div class="links">
-    <a href="/docs/">Docs</a>
-    <a class="gh" href="https://github.com/wkoverfield/switchboard" aria-label="Switchboard on GitHub"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12c0 5.303 3.438 9.8 8.205 11.385c.6.113.82-.258.82-.577c0-.285-.01-1.04-.015-2.04c-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729c1.205.084 1.838 1.236 1.838 1.236c1.07 1.835 2.809 1.305 3.495.998c.108-.776.417-1.305.76-1.605c-2.665-.3-5.466-1.332-5.466-5.93c0-1.31.465-2.38 1.235-3.22c-.135-.303-.54-1.523.105-3.176c0 0 1.005-.322 3.3 1.23c.96-.267 1.98-.399 3-.405c1.02.006 2.04.138 3 .405c2.28-1.552 3.285-1.23 3.285-1.23c.645 1.653.24 2.873.12 3.176c.765.84 1.23 1.91 1.23 3.22c0 4.61-2.805 5.625-5.475 5.92c.42.36.81 1.096.81 2.22c0 1.606-.015 2.896-.015 3.286c0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg></a>
-      </div>
+<body class="docs-body">
+<nav class="site-nav" aria-label="Primary navigation">
+  <div class="wrap site-nav-row">
+    <a href="/" class="wordmark">switchboard</a>
+    <div class="site-nav-links">
+      <a class="nav-link" href="/docs/">Docs</a>
+      <a class="nav-link" href="https://github.com/wkoverfield/switchboard">GitHub</a>
     </div>
   </div>
 </nav>
-<div class="layout">
-  <aside>
+<div class="docs-layout">
+  <aside class="docs-sidebar" aria-label="Documentation navigation">
 ${nav}
   </aside>
-  <main>
+  <main class="docs-main">
 ${body}
   </main>
 </div>
