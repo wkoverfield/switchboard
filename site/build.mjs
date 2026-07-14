@@ -150,6 +150,21 @@ function docShell({ title, body, active, entries }) {
       return `<div class="docs-nav-section"><span>${escapeHtml(section)}</span>\n${items}</div>`;
     })
     .join("\n");
+  const pages = [
+    { slug: "index", href: "/docs/", section: "Overview", title: "Docs" },
+    ...entries.map((entry) => ({
+      ...entry,
+      href: `/docs/${entry.slug}`
+    }))
+  ];
+  const currentIndex = pages.findIndex((page) => page.slug === active);
+  const previousPage = currentIndex > 0 ? pages[currentIndex - 1] : null;
+  const nextPage = currentIndex < pages.length - 1 ? pages[currentIndex + 1] : null;
+  const pageNavigation = `
+    <nav class="docs-page-nav" aria-label="Previous and next documentation pages">
+      ${previousPage ? docsPageLink(previousPage, "previous") : "<span></span>"}
+      ${nextPage ? docsPageLink(nextPage, "next") : ""}
+    </nav>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -185,11 +200,22 @@ ${nav}
   </aside>
   <main class="docs-main">
 ${body}
+${pageNavigation}
   </main>
 </div>
 </body>
 </html>
 `;
+}
+
+function docsPageLink(page, direction) {
+  const isNext = direction === "next";
+  const directionLabel = isNext ? "Next" : "Previous";
+  const arrow = isNext ? "→" : "←";
+  return `<a class="docs-page-link docs-page-link-${direction}" href="${page.href}" aria-label="${directionLabel}: ${escapeHtml(page.title)}">
+        <span class="docs-page-direction">${isNext ? `${escapeHtml(page.section)} · ${directionLabel} ${arrow}` : `${arrow} ${directionLabel} · ${escapeHtml(page.section)}`}</span>
+        <strong>${escapeHtml(page.title)}</strong>
+      </a>`;
 }
 
 function escapeHtml(value) {
