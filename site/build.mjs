@@ -10,6 +10,11 @@ import { marked } from "marked";
 const siteDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(siteDir, "..");
 const distDir = join(siteDir, "dist");
+const navigationTransitions = readFileSync(
+  join(siteDir, "src", "navigation-transitions.js"),
+  "utf8"
+);
+const navigationTransitionsTag = `<script>\n${navigationTransitions}\n</script>`;
 
 // slug becomes /docs/<slug>; source is repo-relative markdown.
 const docsManifest = [
@@ -33,7 +38,15 @@ rmSync(distDir, { recursive: true, force: true });
 mkdirSync(join(distDir, "docs"), { recursive: true });
 
 // Shared site shell, landing page, and agent-readable docs files.
-copyFileSync(join(siteDir, "src", "index.html"), join(distDir, "index.html"));
+const landingTemplate = readFileSync(join(siteDir, "src", "index.html"), "utf8");
+const navigationTransitionsMarker = "<!-- navigation-transitions -->";
+if (!landingTemplate.includes(navigationTransitionsMarker)) {
+  throw new Error("site build: landing page is missing the navigation transitions marker");
+}
+writeFileSync(
+  join(distDir, "index.html"),
+  landingTemplate.replace(navigationTransitionsMarker, navigationTransitionsTag)
+);
 copyFileSync(join(siteDir, "src", "styles.css"), join(distDir, "styles.css"));
 for (const name of ["llms.txt", "llms-full.txt"]) {
   const source = join(repoRoot, name);
@@ -151,6 +164,7 @@ function docShell({ title, body, active, entries }) {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+${navigationTransitionsTag}
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body class="docs-body">
