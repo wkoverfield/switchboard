@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -166,9 +166,14 @@ describe("audit log", () => {
 
     const verification = await verifyAuditLog({ path });
     expect(verification.ok).toBe(false);
-    expect(verification.failures).toMatchObject([
-      { lineNumber: 2, reason: expect.stringContaining("previous entry") }
-    ]);
+    expect(verification.failures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          lineNumber: 2,
+          reason: expect.stringContaining("previous entry")
+        })
+      ])
+    );
   });
 
   it("fails verification when chained entries are reordered", async () => {
@@ -206,25 +211,101 @@ describe("audit log", () => {
 
     const verification = await verifyAuditLog({ path });
     expect(verification.ok).toBe(false);
-    expect(verification.failures).toMatchObject([
-      { lineNumber: 2, reason: expect.stringContaining("not valid JSON") },
-      { lineNumber: 3, reason: expect.stringContaining("unchained entry") }
-    ]);
+    expect(verification.failures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          lineNumber: 2,
+          reason: expect.stringContaining("not valid JSON")
+        }),
+        expect.objectContaining({
+          lineNumber: 3,
+          reason: expect.stringContaining("unchained entry")
+        })
+      ])
+    );
   });
 
-  it("verification accepts truncation to a valid prefix (documented limit)", async () => {
+  it("detects tail-truncation to a valid prefix via the head marker", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-audit-"));
+    const path = join(root, "switchboard.jsonl");
+    const logger = createJsonlAuditLogger({ path });
+    await logger.log({ action: "profile_test", status: "ok", profileName: "one" });
+    await logger.log({ action: "profile_test", status: "ok", profileName: "two" });
+    await logger.log({ action: "profile_test", status: "ok", profileName: "three" });
+
+    // Drop the last two entries. The remaining prefix is a perfectly valid
+    // chain, so only the out-of-band head marker reveals the truncation.
+    const lines = (await readFile(path, "utf8")).split("\n").filter(Boolean);
+    await writeFile(path, `${lines[0]}\n`);
+
+    const verification = await verifyAuditLog({ path });
+    expect(verification.ok).toBe(false);
+    expect(verification.expectedEntries).toBe(3);
+    expect(verification.failures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: expect.stringContaining("truncated from the end")
+        })
+      ])
+    );
+  });
+
+  it("detects whole-log deletion when the head marker survives", async () => {
     const root = await mkdtemp(join(tmpdir(), "switchboard-audit-"));
     const path = join(root, "switchboard.jsonl");
     const logger = createJsonlAuditLogger({ path });
     await logger.log({ action: "profile_test", status: "ok", profileName: "one" });
     await logger.log({ action: "profile_test", status: "ok", profileName: "two" });
 
-    const lines = (await readFile(path, "utf8")).split("\n").filter(Boolean);
-    await writeFile(path, `${lines[0]}\n`);
+    await writeFile(path, "");
 
     const verification = await verifyAuditLog({ path });
-    expect(verification.ok).toBe(true);
-    expect(verification.chainedEntries).toBe(1);
+    expect(verification.ok).toBe(false);
+    expect(verification.failures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: expect.stringContaining("truncated from the end")
+        })
+      ])
+    );
+  });
+
+  it("flags a removed head marker when the log carries sequenced entries", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-audit-"));
+    const path = join(root, "switchboard.jsonl");
+    const logger = createJsonlAuditLogger({ path });
+    await logger.log({ action: "profile_test", status: "ok", profileName: "one" });
+
+    // Delete the head marker but leave the log intact.
+    await rm(`${path}.head`);
+
+    const verification = await verifyAuditLog({ path });
+    expect(verification.ok).toBe(false);
+    expect(verification.headMarker).toBeNull();
+    expect(verification.failures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: expect.stringContaining("head marker is missing")
+        })
+      ])
+    );
+  });
+
+  it("verifies an intact head-marked chain as ok", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-audit-"));
+    const path = join(root, "switchboard.jsonl");
+    const logger = createJsonlAuditLogger({ path });
+    await logger.log({ action: "profile_test", status: "ok", profileName: "one" });
+    await logger.log({ action: "profile_test", status: "ok", profileName: "two" });
+
+    const verification = await verifyAuditLog({ path });
+    expect(verification).toMatchObject({
+      ok: true,
+      totalLines: 2,
+      expectedEntries: 2,
+      headMarker: { seq: 1 },
+      failures: []
+    });
   });
 
   it("verifies an empty or missing log as ok", async () => {
@@ -315,7 +396,7 @@ describe("audit log", () => {
     ]);
   });
 
-  it("safe audit logging swallows logger failures", async () => {
+  it("safe audit logging routes failures to onError when provided", async () => {
     const errors: unknown[] = [];
 
     await expect(
@@ -331,5 +412,35 @@ describe("audit log", () => {
     ).resolves.toBeUndefined();
 
     expect(errors[0]).toBeInstanceOf(Error);
+  });
+
+  it("safe audit logging warns loudly on stderr when no onError is given", async () => {
+    const writes: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    (process.stderr as unknown as { write: (chunk: string) => boolean }).write =
+      (chunk: string) => {
+        writes.push(chunk);
+        return true;
+      };
+
+    try {
+      // A failed write must not throw (the routed call still completes), but it
+      // must be loud: the whole point is no silent unlogged actions.
+      await expect(
+        safeAuditLog(
+          {
+            async log() {
+              throw new Error("disk is full");
+            }
+          },
+          { action: "profile_test", status: "ok" }
+        )
+      ).resolves.toBeUndefined();
+    } finally {
+      (process.stderr as unknown as { write: typeof original }).write = original;
+    }
+
+    expect(writes.join("")).toContain("audit log write failed");
+    expect(writes.join("")).toContain("disk is full");
   });
 });

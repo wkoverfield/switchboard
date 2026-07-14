@@ -9510,7 +9510,8 @@ describe("switchboard CLI program", () => {
       counts: {
         totalLines: 2,
         chainedEntries: 2,
-        legacyEntries: 0
+        legacyEntries: 0,
+        expectedEntries: 2
       },
       failures: []
     });
