@@ -201,6 +201,23 @@ pre {
   font-size: 0.72rem;
 }
 
+.github-stars {
+  display: inline-flex;
+  min-width: 34px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line-strong);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.github-stars > span:first-child {
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+}
+
 .hero {
   overflow: hidden;
   border-bottom: 1px solid var(--line);
