@@ -1,25 +1,39 @@
 #!/usr/bin/env node
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import process from "node:process";
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const versionOf = (dir) =>
+  JSON.parse(readFileSync(join(repoRoot, dir, "package.json"), "utf8")).version;
+const coreVersion = versionOf("packages/core");
+const runtimeVersion = versionOf("packages/mcp-runtime");
+const cliVersion = versionOf("apps/cli");
+const docsMcpVersion = versionOf("packages/docs-mcp");
 
 const packages = [
   {
     filter: "@switchboard-mcp/core",
     name: "@switchboard-mcp/core",
-    tarball: "switchboard-mcp-core-0.1.6.tgz"
+    tarball: `switchboard-mcp-core-${coreVersion}.tgz`
   },
   {
     filter: "@switchboard-mcp/mcp-runtime",
     name: "@switchboard-mcp/mcp-runtime",
-    tarball: "switchboard-mcp-mcp-runtime-0.1.6.tgz"
+    tarball: `switchboard-mcp-mcp-runtime-${runtimeVersion}.tgz`
   },
   {
     filter: "@switchboard-mcp/cli",
     name: "@switchboard-mcp/cli",
-    tarball: "switchboard-mcp-cli-0.1.6.tgz"
+    tarball: `switchboard-mcp-cli-${cliVersion}.tgz`
+  },
+  {
+    filter: "@switchboard-mcp/docs-mcp",
+    name: "@switchboard-mcp/docs-mcp",
+    tarball: `switchboard-mcp-docs-mcp-${docsMcpVersion}.tgz`
   }
 ];
 
