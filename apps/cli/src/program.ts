@@ -1118,6 +1118,7 @@ export function createProgram(io: ProgramIo = {}): Command {
         repoConfigPath: repoPaths.repoConfigPath ?? null,
         repoLocalConfigPath: repoPaths.repoLocalConfigPath ?? null,
         sources: loaded.sources,
+        enforcement: loaded.config.enforcement,
         profileCount: Object.keys(loaded.config.profiles).length,
         workspaceCount: Object.keys(loaded.config.workspaces).length,
         namespaces: namespacesForProfiles(loaded.config.profiles),
@@ -4670,6 +4671,7 @@ function formatStatus(status: {
   globalConfigPath: string;
   repoConfigPath: string | null;
   repoLocalConfigPath: string | null;
+  enforcement: "default" | "strict";
   profileCount: number;
   workspaceCount: number;
   namespaces: Array<{ profile: string; namespace: string; generated: boolean }>;
@@ -4702,6 +4704,12 @@ function formatStatus(status: {
       );
     }
   }
+
+  lines.push(
+    status.enforcement === "strict"
+      ? "Enforcement: strict (no pass means no routing)"
+      : "Enforcement: default (no pass means configured profiles are served ungoverned)"
+  );
 
   lines.push(
     "",
