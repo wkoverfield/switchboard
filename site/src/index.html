@@ -3,956 +3,400 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Switchboard: a firewall and password manager for your AI coding agents</title>
-<meta name="description" content="Put your coding agents on a scoped, expiring pass instead of your keys. Local-first. Denied by policy, gated by humans, recorded in a hash-chained audit log.">
-<meta property="og:title" content="Switchboard">
-<meta property="og:description" content="A firewall and password manager for your AI coding agents. Passes, not keys.">
+<title>Switchboard: local authority for AI coding agents</title>
+<meta name="description" content="Put AI coding agents on scoped, expiring passes for routed MCP tools. Keep configured secrets in the OS keychain and every decision in a tamper-evident local audit log.">
 <meta property="og:type" content="website">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233fd68f'/%3E%3Crect x='9' y='8.5' width='3.4' height='15' rx='1.7' fill='%230d1712'/%3E%3Crect x='19.6' y='8.5' width='3.4' height='15' rx='1.7' fill='%230d1712'/%3E%3Ccircle cx='16' cy='16' r='2.9' fill='%230d1712'/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://api.fontshare.com">
+<meta property="og:title" content="Switchboard: a pass for your agents, not your keys">
+<meta property="og:description" content="Local authority and routing for AI coding agents. Scoped passes, keychain-backed secrets, approval gates, and a tamper-evident local audit log.">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Switchboard: a pass for your agents, not your keys">
+<meta name="twitter:description" content="Local authority and routing for AI coding agents. Scoped passes, keychain-backed secrets, approval gates, and a tamper-evident local audit log.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23171c22'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-family='monospace' font-size='38' font-weight='700' fill='%2378a892'%3Es%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600&display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<style>
-  :root {
-    /* credential-paper tokens: locked in DIRECT/TOKENIZE, do not hardcode offshoots */
-    --paper: #f7f5f0;
-    --paper-raised: #fdfcfa;
-    --hairline: #e6e2d9;
-    --hairline-dark: #d8d3c8;
-    --ink: #1c1a17;
-    --ink-dim: #6b665e;
-    --stamp: #b02a2a;          /* DENIED only */
-    --grant: #166b41;          /* granted / allowed, text-safe on paper */
-    --gate: #8a6d1a;          /* approval-gated, text-safe on paper */
-    --term-bg: #14120f;
-    --term-ink: #d8d4cc;
-    --term-dim: #8d887e;
-    --term-green: #3fd68f;
-    --term-red: #ff5f6d;
-    --term-yellow: #f2c94c;
-    --max: 1060px;
-    --font-sans: "General Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-    --ease: cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body {
-    margin: 0;
-    background: var(--paper);
-    color: var(--ink);
-    font-family: var(--font-sans);
-    font-size: 16px;
-    line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
-  }
-  main, header.hero, nav.top, footer, section { position: relative; z-index: 1; }
-  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--hairline-dark); text-underline-offset: 3px; }
-  a:hover { text-decoration-color: var(--ink); }
-  .mono { font-family: var(--font-mono); }
-  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 24px; }
-
-  /* microlabel: the signature index device */
-  .index {
-    font-family: var(--font-mono);
-    font-size: 0.72rem;
-    letter-spacing: 0.14em;
-    color: var(--ink-dim);
-    text-transform: uppercase;
-    display: block;
-    margin-bottom: 14px;
-  }
-  .index b { color: var(--ink); font-weight: 500; }
-
-  /* corner ticks */
-  .ticked { position: relative; }
-  .ticked::before, .ticked::after,
-  .ticked > .tick-b::before, .ticked > .tick-b::after {
-    content: ""; position: absolute; width: 10px; height: 10px;
-    border-color: var(--ink-dim); border-style: solid;
-  }
-  .ticked::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
-  .ticked::after { top: -1px; right: -1px; border-width: 1px 1px 0 0; }
-  .ticked > .tick-b::before { bottom: -1px; left: -1px; border-width: 0 0 1px 1px; }
-  .ticked > .tick-b::after { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
-
-  /* nav */
-  nav.top {
-    border-bottom: 1px solid var(--hairline);
-    background: var(--paper);
-    position: sticky; top: 0; z-index: 10;
-  }
-  nav.top .row { display: flex; align-items: center; gap: 22px; padding: 15px 0; }
-  .wordmark {
-    display: inline-flex; align-items: center; gap: 9px;
-    font-family: var(--font-mono); font-weight: 500; font-size: 0.95rem;
-    letter-spacing: 0.02em; text-decoration: none;
-  }
-  .wordmark .mark { display: block; border-radius: 5px; }
-  .wordmark b { color: var(--grant); font-weight: 500; }
-  nav.top .links { margin-left: auto; display: flex; gap: 20px; font-size: 0.88rem; }
-  nav.top .links a { color: var(--ink-dim); text-decoration: none; }
-  nav.top .links a:hover { color: var(--ink); }
-  nav.top .links a.gh { display: inline-flex; align-items: center; }
-
-  /* hero */
-  .hero { padding: 88px 0 36px; text-align: center; }
-  .hero h1 {
-    font-size: clamp(2.3rem, 5.4vw, 3.6rem);
-    font-weight: 600;
-    line-height: 1.06;
-    letter-spacing: -0.03em;
-    margin: 0 auto 20px;
-    max-width: 22ch;
-    text-wrap: balance;
-  }
-  .hero h1 .pass-word {
-    color: var(--grant);
-    text-decoration: underline;
-    text-decoration-thickness: 3px;
-    text-decoration-color: color-mix(in srgb, var(--grant) 35%, transparent);
-    text-underline-offset: 6px;
-  }
-  .hero p.sub {
-    font-size: 1.06rem; color: var(--ink-dim); max-width: 56ch;
-    margin: 0 auto 30px;
-  }
-  .cta-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; align-items: center; }
-  .btn {
-    display: inline-block; padding: 11px 20px; border-radius: 8px;
-    font-weight: 500; font-size: 0.93rem; text-decoration: none;
-    border: 1px solid var(--ink);
-    transition: transform 160ms var(--ease), background 160ms var(--ease), color 160ms var(--ease);
-  }
-  .btn:active { transform: translateY(1px); }
-  .btn.primary { background: var(--ink); color: var(--paper); }
-  .btn.primary:hover { background: #000; }
-  .btn.ghost { color: var(--ink); border-color: var(--hairline-dark); background: var(--paper-raised); }
-  .btn.ghost:hover { border-color: var(--ink); }
-  .install-area { margin-top: 18px; position: relative; z-index: 5; }
-  .mode {
-    display: inline-flex; align-items: center; gap: 12px;
-    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em;
-    text-transform: uppercase; margin-bottom: 10px;
-  }
-  .mode .sep { color: var(--hairline-dark); }
-  .mode input { position: absolute; opacity: 0; pointer-events: none; }
-  .mode label { color: var(--ink-dim); cursor: pointer; padding: 2px 2px; }
-  .mode label:hover { color: var(--ink); }
-  .mode input:checked + label {
-    color: var(--ink);
-    box-shadow: 0 2px 0 var(--grant);
-  }
-  .mode input:focus-visible + label { outline: 2px solid var(--grant); outline-offset: 3px; }
-  .install {
-    display: flex; align-items: center; width: fit-content; margin: 0 auto;
-    height: 46px;
-    font-family: var(--font-mono); font-size: 0.85rem;
-    color: var(--ink);
-    background: var(--paper-raised);
-    border: 1px solid var(--hairline-dark); border-radius: 8px;
-    padding: 0 16px;
-    user-select: all;
-  }
-  .install .p { margin-right: 8px; }
-  .install .p { color: var(--grant); user-select: none; }
-  /* the copy-paste setup prompt for agents */
-  .prompt-wrap { position: relative; display: block; width: fit-content; margin: 0 auto; }
-  .prompt-pill {
-    display: inline-flex; align-items: center; gap: 10px;
-    height: 46px;
-    font-family: var(--font-mono); font-size: 0.85rem;
-    color: var(--ink);
-    background: var(--paper-raised);
-    border: 1px solid var(--hairline-dark); border-radius: 8px;
-    padding: 0 16px;
-    cursor: pointer;
-    transition: border-color 160ms var(--ease);
-  }
-  .prompt-pill:hover { border-color: var(--ink); }
-  .prompt-pill:focus-visible { outline: 2px solid var(--grant); outline-offset: 3px; }
-  .prompt-pill .glyph { color: var(--grant); }
-  .prompt-pill.copied { border-color: var(--grant); }
-  .prompt-pill.copied .label { color: var(--grant); }
-  /* CSS-only toggle; if :has is unsupported both variants show, which is fine */
-  .install-area:has(#mode-human:checked) .prompt-wrap { display: none; }
-  .install-area:has(#mode-agent:checked) .install.human { display: none; }
-
-  /* topology: what a pass decides, in one glance */
-  .topology { max-width: 880px; margin: 56px auto 0; position: relative; }
-  .topology svg { display: block; width: 100%; height: auto; }
-  .topology-caption {
-    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em;
-    text-transform: uppercase; color: var(--ink-dim); margin: 14px 0 0;
-  }
-  .topology-caption a { color: var(--ink-dim); }
-  .topology-caption a:hover { color: var(--ink); }
-  .topology .edge-in { fill: none; stroke: var(--hairline-dark); stroke-width: 1.5; }
-  .topology .edge-allow-base { fill: none; stroke: var(--grant); stroke-width: 2; opacity: 0.25; }
-  .topology .edge-allow-flow {
-    fill: none; stroke: var(--grant); stroke-width: 2;
-    stroke-dasharray: 7 9; stroke-linecap: round;
-    animation: edge-flow 1.4s linear infinite;
-  }
-  .topology .edge-gate { fill: none; stroke: var(--gate); stroke-width: 1.6; stroke-dasharray: 3 5; }
-  .topology .edge-deny { fill: none; stroke: var(--stamp); stroke-width: 2; }
-  @keyframes edge-flow { to { stroke-dashoffset: -16; } }
-  @media (prefers-reduced-motion: reduce) {
-    .topology .edge-allow-flow { animation: none; }
-  }
-  .hero .fine {
-    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em;
-    text-transform: uppercase; color: var(--ink-dim); margin-top: 18px;
-  }
-  .hero .fine span + span::before { content: "·"; margin: 0 8px; color: var(--hairline-dark); }
-
-  /* the stamp: inked across the "everything else" chip */
-  .stamp {
-    position: absolute; bottom: 21%; right: 16px;
-    font-family: var(--font-mono); font-weight: 500;
-    font-size: 0.78rem; letter-spacing: 0.14em;
-    color: var(--stamp);
-    border: 2px solid var(--stamp); border-radius: 4px;
-    padding: 7px 12px;
-    background: var(--paper);
-    box-shadow: 0 1px 0 rgba(28, 26, 23, 0.06);
-  }
-  @media (max-width: 1000px) { .stamp { right: 8px; } }
-
-  /* sections */
-  section { padding: 84px 0 0; }
-  section .head { max-width: 640px; margin-bottom: 40px; }
-  section h2 {
-    font-size: clamp(1.5rem, 3vw, 1.9rem); font-weight: 600;
-    letter-spacing: -0.02em; line-height: 1.15; margin: 0 0 10px;
-  }
-  section .head p { color: var(--ink-dim); margin: 0; }
-
-  /* stat band */
-  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-  @media (max-width: 800px) { .stats { grid-template-columns: 1fr; } }
-  .stat {
-    position: relative;
-    background: var(--paper-raised);
-    border: 1px solid var(--hairline-dark);
-    padding: 22px 22px 18px;
-  }
-  .stat:focus-visible { outline: 2px solid var(--grant); outline-offset: 3px; }
-  .stat .big {
-    font-size: clamp(2.6rem, 5vw, 3.4rem); font-weight: 600;
-    letter-spacing: -0.03em; line-height: 1; margin: 18px 0 10px;
-  }
-  .stat p { color: var(--ink-dim); font-size: 0.9rem; margin: 0; max-width: 32ch; }
-  .source-pop {
-    position: fixed; left: -999px; top: -999px;
-    width: min(320px, calc(100vw - 24px));
-    z-index: 20; padding: 12px 14px;
-    background: var(--ink); color: var(--paper);
-    border: 1px solid var(--ink); border-radius: 7px;
-    box-shadow: 0 12px 30px rgba(28, 26, 23, 0.2);
-    font-size: 0.78rem; line-height: 1.45;
-    opacity: 0; pointer-events: none; transform: translateY(4px);
-    transition: opacity 160ms var(--ease), transform 160ms var(--ease);
-  }
-  .source-pop a { color: var(--term-green); text-underline-offset: 2px; }
-  .source-pop.is-visible {
-    opacity: 1; pointer-events: auto; transform: translateY(0);
-  }
-
-  /* product shot: the dashboard, framed like the credential artifacts */
-  .product-shot {
-    margin: 44px 0 0; position: relative;
-    background: var(--paper-raised);
-    border: 1px solid var(--hairline-dark);
-    padding: 10px;
-  }
-  .product-shot .frame-label {
-    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.12em;
-    text-transform: uppercase; color: var(--ink-dim);
-    padding: 2px 4px 10px;
-  }
-  .product-shot .screen { background: var(--term-bg); border-radius: 6px; overflow: hidden; }
-  .product-shot img { display: block; width: 100%; height: auto; }
-  .product-shot figcaption {
-    font-size: 0.85rem; color: var(--ink-dim); padding: 12px 4px 2px;
-  }
-  .product-shot figcaption code {
-    font-family: var(--font-mono); font-size: 0.85em;
-    background: var(--paper); border: 1px solid var(--hairline); border-radius: 4px; padding: 1px 5px;
-  }
-
-  /* secrets: the plaintext token becomes a keychain reference */
-  .secrets-flow {
-    display: grid; grid-template-columns: 1fr auto 1fr; gap: 18px;
-    align-items: center;
-  }
-  @media (max-width: 820px) { .secrets-flow { grid-template-columns: 1fr; } }
-  .file-card {
-    background: var(--term-bg); border-radius: 10px; overflow: hidden; margin: 0;
-    border: 1px solid transparent;
-  }
-  .file-card.before { border-color: color-mix(in srgb, var(--stamp) 45%, transparent); }
-  .file-card.after { border-color: color-mix(in srgb, var(--term-green) 40%, transparent); }
-  .file-head {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    padding: 9px 14px; border-bottom: 1px solid rgba(255,255,255,0.06);
-    font-family: var(--font-mono); font-size: 0.72rem;
-  }
-  .file-head .fname { color: var(--term-ink); }
-  .file-head .tag {
-    font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase;
-    padding: 3px 8px; border-radius: 999px; border: 1px solid currentColor;
-  }
-  .file-head .tag.red { color: var(--term-red); }
-  .file-head .tag.green { color: var(--term-green); }
-  .file-card pre {
-    margin: 0; padding: 16px 16px; color: var(--term-ink);
-    font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.7; overflow-x: auto;
-  }
-  .file-card pre .r { color: var(--term-red); }
-  .file-card pre .g { color: var(--term-green); }
-  .file-card pre .c { color: var(--term-dim); }
-  .secrets-arrow {
-    display: flex; flex-direction: column; align-items: center; gap: 8px;
-    color: var(--ink-dim);
-  }
-  .secrets-arrow .cmd {
-    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.1em;
-    text-transform: uppercase; white-space: nowrap;
-  }
-  .secrets-arrow svg { display: block; }
-  @media (max-width: 820px) { .secrets-arrow svg { transform: rotate(90deg); } }
-  .vault {
-    display: flex; align-items: flex-start; gap: 14px;
-    margin-top: 18px; padding: 16px 20px;
-    background: var(--paper-raised); border: 1px solid var(--hairline-dark);
-    border-radius: 10px;
-  }
-  .vault .lock {
-    flex: 0 0 auto; color: var(--grant); margin-top: 1px;
-  }
-  .vault p { margin: 0; color: var(--ink-dim); font-size: 0.92rem; }
-  .vault p b { color: var(--ink); font-weight: 600; }
-  .vault code {
-    font-family: var(--font-mono); font-size: 0.85em;
-    background: var(--paper); border: 1px solid var(--hairline); border-radius: 4px; padding: 1px 5px;
-  }
-
-  /* steps */
-  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-  @media (max-width: 900px) { .steps { grid-template-columns: 1fr; } }
-  .step { position: relative; }
-  .step .n {
-    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.14em;
-    color: var(--ink-dim); text-transform: uppercase;
-  }
-  .step h3 { font-size: 1.02rem; font-weight: 600; margin: 8px 0 12px; letter-spacing: -0.01em; }
-  .step pre {
-    background: var(--term-bg); color: var(--term-ink);
-    border-radius: 8px; padding: 14px 16px; margin: 0 0 12px;
-    font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.6;
-    overflow-x: auto;
-  }
-  .step pre .c { color: var(--term-dim); }
-  .step pre .g { color: var(--term-green); }
-  .step pre .r { color: var(--term-red); }
-  .step pre .y { color: var(--term-yellow); }
-  .step p { color: var(--ink-dim); font-size: 0.88rem; margin: 0; }
-
-  /* trust list */
-  .trust { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  @media (max-width: 800px) { .trust { grid-template-columns: 1fr; } }
-  .trust .item {
-    border: 1px solid var(--hairline-dark); background: var(--paper-raised);
-    padding: 20px 22px;
-  }
-  .trust .item b { display: block; font-weight: 600; letter-spacing: -0.01em; margin: 10px 0 6px; }
-  .trust .item span.body { color: var(--ink-dim); font-size: 0.9rem; }
-  .trust .item .index { margin-bottom: 0; }
-
-  /* agents */
-  .agents pre {
-    background: var(--term-bg); color: var(--term-ink);
-    border-radius: 8px; padding: 18px 20px;
-    font-family: var(--font-mono); font-size: 0.84rem; line-height: 1.7;
-    overflow-x: auto; max-width: 680px; margin: 0 0 14px;
-  }
-  .agents pre .c { color: var(--term-dim); }
-  .agents .also { font-size: 0.85rem; color: var(--ink-dim); }
-
-  /* waitlist */
-  .waitlist { padding-bottom: 20px; }
-  .waitlist .inner {
-    border-top: 1px solid var(--ink);
-    padding-top: 36px;
-    display: grid; grid-template-columns: 1fr 1fr; gap: 30px;
-  }
-  @media (max-width: 800px) { .waitlist .inner { grid-template-columns: 1fr; } }
-  .waitlist p { color: var(--ink-dim); margin: 0; }
-  .waitlist .inner > div > p { margin-top: 10px; }
-  .waitlist-side { align-self: center; }
-  .waitlist-form { display: flex; gap: 10px; flex-wrap: wrap; }
-  .waitlist-form input[type="email"] {
-    flex: 1 1 220px;
-    height: 46px;
-    font-family: var(--font-mono); font-size: 0.85rem;
-    color: var(--ink);
-    background: var(--paper-raised);
-    border: 1px solid var(--hairline-dark); border-radius: 8px;
-    padding: 0 16px;
-  }
-  .waitlist-form input[type="email"]::placeholder { color: var(--ink-dim); }
-  .waitlist-form input[type="email"]:focus-visible {
-    outline: 2px solid var(--grant); outline-offset: 2px; border-color: var(--grant);
-  }
-  .waitlist-form .gotcha { position: absolute; left: -9999px; height: 0; width: 0; border: 0; padding: 0; }
-  .waitlist-done {
-    font-family: var(--font-mono); font-size: 0.85rem;
-    color: var(--grant); margin-top: 4px;
-  }
-  .arc { margin: 18px 0 0; display: grid; gap: 8px; }
-  .arc div { display: flex; gap: 14px; align-items: baseline; }
-  .arc dt {
-    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.14em;
-    text-transform: uppercase; color: var(--ink-dim);
-    flex: 0 0 52px;
-  }
-  .arc div:first-child dt { color: var(--grant); }
-  .arc dd { margin: 0; color: var(--ink-dim); font-size: 0.9rem; }
-
-  /* closer */
-  .closer { text-align: center; padding: 110px 0 30px; }
-  .closer h2 {
-    font-size: clamp(1.9rem, 4vw, 2.6rem); font-weight: 600;
-    letter-spacing: -0.03em; margin: 0 0 24px;
-  }
-  .closer h2 .pass-word {
-    color: var(--grant);
-    text-decoration: underline;
-    text-decoration-thickness: 3px;
-    text-decoration-color: color-mix(in srgb, var(--grant) 35%, transparent);
-    text-underline-offset: 6px;
-  }
-
-  footer {
-    margin-top: 84px; border-top: 1px solid var(--hairline);
-    padding: 26px 0 44px;
-    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.08em;
-    text-transform: uppercase; color: var(--ink-dim);
-  }
-  footer .wrap { display: flex; gap: 18px; flex-wrap: wrap; }
-  footer a { color: var(--ink-dim); text-decoration: none; }
-  footer a:hover { color: var(--ink); }
-  footer .spacer { margin-left: auto; }
-
-  /* motion: load entrances only, pure CSS, hero + demo */
-  @keyframes rise {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: none; }
-  }
-  .rise { animation: rise 560ms var(--ease) both; }
-  .rise.d1 { animation-delay: 70ms; }
-  .rise.d2 { animation-delay: 140ms; }
-  .rise.d3 { animation-delay: 210ms; }
-  .rise.d4 { animation-delay: 280ms; }
-  .rise.d5 { animation-delay: 350ms; }
-  .rise.d6 { animation-delay: 430ms; }
-  @keyframes stamp-in {
-    from { opacity: 0; transform: rotate(6deg) scale(1.16); }
-    to { opacity: 1; transform: rotate(6deg) scale(1); }
-  }
-  .stamp { transform: rotate(6deg); animation: stamp-in 380ms var(--ease) 720ms both; }
-  @media (prefers-reduced-motion: reduce) {
-    .rise, .stamp { animation: none; }
-    html { scroll-behavior: auto; }
-  }
-</style>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-
-<nav class="top">
-  <div class="wrap">
-    <div class="row">
-      <a class="wordmark" href="/"><svg class="mark" viewBox="0 0 32 32" width="20" height="20" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#3fd68f"/><rect x="9" y="8.5" width="3.4" height="15" rx="1.7" fill="#0d1712"/><rect x="19.6" y="8.5" width="3.4" height="15" rx="1.7" fill="#0d1712"/><circle cx="16" cy="16" r="2.9" fill="#0d1712"/></svg>switchboard</a>
-      <div class="links">
-        <a href="/docs/">Docs</a>
-        <a class="gh" href="https://github.com/wkoverfield/switchboard" aria-label="Switchboard on GitHub">
-          <svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12c0 5.303 3.438 9.8 8.205 11.385c.6.113.82-.258.82-.577c0-.285-.01-1.04-.015-2.04c-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729c1.205.084 1.838 1.236 1.838 1.236c1.07 1.835 2.809 1.305 3.495.998c.108-.776.417-1.305.76-1.605c-2.665-.3-5.466-1.332-5.466-5.93c0-1.31.465-2.38 1.235-3.22c-.135-.303-.54-1.523.105-3.176c0 0 1.005-.322 3.3 1.23c.96-.267 1.98-.399 3-.405c1.02.006 2.04.138 3 .405c2.28-1.552 3.285-1.23 3.285-1.23c.645 1.653.24 2.873.12 3.176c.765.84 1.23 1.91 1.23 3.22c0 4.61-2.805 5.625-5.475 5.92c.42.36.81 1.096.81 2.22c0 1.606-.015 2.896-.015 3.286c0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
-        </a>
-      </div>
+<nav class="site-nav" aria-label="Primary navigation">
+  <div class="wrap site-nav-row">
+    <a class="wordmark" href="#top" aria-label="Switchboard home">switchboard</a>
+    <div class="site-nav-links">
+      <a class="nav-link" href="/docs/">Docs</a>
+      <a class="nav-link nav-github" href="https://github.com/wkoverfield/switchboard">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.386-1.335-1.755-1.335-1.755-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297 24 5.67 18.627.297 12 .297Z"/></svg>
+        GitHub
+      </a>
+      <a class="button button-accent button-small" href="/docs/install-quickstart">Install</a>
     </div>
   </div>
 </nav>
 
-<header class="hero">
-  <div class="wrap">
-    <h1 class="rise d1">Give your coding agents a <span class="pass-word">pass</span>, not your keys.</h1>
-    <p class="sub rise d2">
-      A firewall and password manager for your AI coding agents. Tokens stay
-      in your keychain; out of scope gets denied before it ever leaves your
-      machine.
-    </p>
-    <div class="cta-row rise d3">
-      <a class="btn primary" href="/docs/install-quickstart">Start in 5 minutes</a>
-      <a class="btn ghost" href="/docs/">View docs</a>
-    </div>
-    <div class="install-area rise d4">
-      <div class="mode" role="group" aria-label="Install instructions for">
-        <input type="radio" id="mode-human" name="install-mode" checked>
-        <label for="mode-human">for humans</label>
-        <span class="sep">|</span>
-        <input type="radio" id="mode-agent" name="install-mode">
-        <label for="mode-agent">for agents</label>
+<main>
+  <header id="top" class="hero">
+    <div class="wrap hero-inner">
+      <h1 class="rise delay-1">A <strong>pass</strong> for your agents. Not your keys.</h1>
+      <p class="hero-copy rise delay-2">
+        Switchboard is a local authority and routing layer for AI coding agents. It checks routed MCP calls against a scoped pass, keeps configured secrets in your OS keychain, and records every decision locally.
+      </p>
+      <div class="hero-actions rise delay-3">
+        <a class="button button-accent" href="/docs/install-quickstart">Start in 5 minutes</a>
+        <a class="button button-ghost" href="/docs/">Read the docs</a>
       </div>
-      <code class="install human"><span class="p">$</span> npm install -g @switchboard-mcp/cli</code>
-      <div class="prompt-wrap">
-        <button class="prompt-pill" type="button">
-          <span class="glyph">⧉</span>
-          <span class="label">copy the setup prompt</span>
-        </button>
-        <pre id="setup-prompt" hidden>Set up Switchboard in this repo. It puts you, the agent, on a scoped
-expiring pass instead of raw keys. Reference: llms.txt at
-https://github.com/wkoverfield/switchboard (or add the docs MCP server:
-npx -y @switchboard-mcp/docs-mcp).
+      <div class="install-command rise delay-4" aria-label="Install command">
+        <span aria-hidden="true">$</span>
+        <code>npm install -g @switchboard-mcp/cli</code>
+        <button id="copy-install" type="button" aria-label="Copy install command"><span aria-live="polite">copy</span></button>
+      </div>
+
+      <div class="client-strip">
+        <p class="label client-strip-title">Direct installers for Claude Code and Codex, with a local MCP route for the rest</p>
+        <div class="client-list" aria-label="Compatible coding agent ecosystem">
+          <span class="client">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>
+            Claude Code
+          </span>
+          <span class="client">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729Zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944Zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464ZM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872Zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667Zm2.0107-3.0231-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66ZM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813Zm1.0976-2.3654 2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>
+            Codex
+          </span>
+          <span class="client">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/></svg>
+            Cursor
+          </span>
+          <span class="client">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.85 0a4.16 4.16 0 0 0-2.95 1.217L1.456 10.66a.835.835 0 0 0 0 1.18.835.835 0 0 0 1.18 0l9.442-9.442a2.49 2.49 0 0 1 3.541 0 2.49 2.49 0 0 1 0 3.541L8.59 12.97l-.1.1a.835.835 0 0 0 0 1.18.835.835 0 0 0 1.18 0l.1-.098 7.03-7.034a2.49 2.49 0 0 1 3.542 0l.049.05a2.49 2.49 0 0 1 0 3.54l-8.54 8.54a1.96 1.96 0 0 0 0 2.755l1.753 1.753a.835.835 0 0 0 1.18 0 .835.835 0 0 0 0-1.18l-1.753-1.753a.266.266 0 0 1 0-.394l8.54-8.54a4.185 4.185 0 0 0 0-5.9l-.05-.05a4.16 4.16 0 0 0-2.95-1.218c-.2 0-.401.02-.6.048a4.17 4.17 0 0 0-1.17-3.552A4.16 4.16 0 0 0 13.85 0m0 3.333a.84.84 0 0 0-.59.245L6.275 10.56a4.186 4.186 0 0 0 0 5.902 4.186 4.186 0 0 0 5.902 0L19.16 9.48a.835.835 0 0 0 0-1.18.835.835 0 0 0-1.18 0l-6.985 6.984a2.49 2.49 0 0 1-3.54 0 2.49 2.49 0 0 1 0-3.54l6.983-6.985a.835.835 0 0 0 0-1.18.84.84 0 0 0-.59-.245"/></svg>
+            MCP
+          </span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section id="loop" class="wrap section loop" aria-labelledby="loop-heading">
+    <div class="section-heading">
+      <span class="label section-count">01 / 04</span>
+      <span class="label">the loop</span>
+      <button class="loop-toggle" id="loop-toggle" type="button">Pause tour</button>
+    </div>
+    <div class="loop-layout">
+      <div>
+        <h2 id="loop-heading">Four checkpoints between intent and infrastructure.</h2>
+        <p class="section-intro loop-copy">Start in the repo where your agents already work. Switchboard finds current routes, writes value-free secret references, closes supported bypasses, grants a bounded pass, and keeps the result inspectable.</p>
+        <div class="loop-steps" role="tablist" aria-label="Switchboard workflow" aria-orientation="vertical">
+          <button class="loop-step" id="loop-tab-scan" type="button" role="tab" aria-selected="true" aria-controls="loop-panel-scan" data-step="scan">
+            <span class="loop-step-number">01</span><span class="loop-step-label">Scan and import</span><span class="loop-step-command">scan</span><span class="loop-progress" aria-hidden="true"></span>
+          </button>
+          <button class="loop-step" id="loop-tab-grant" type="button" role="tab" aria-selected="false" aria-controls="loop-panel-grant" data-step="grant" tabindex="-1">
+            <span class="loop-step-number">02</span><span class="loop-step-label">Grant a pass</span><span class="loop-step-command">grant</span><span class="loop-progress" aria-hidden="true"></span>
+          </button>
+          <button class="loop-step" id="loop-tab-deny" type="button" role="tab" aria-selected="false" aria-controls="loop-panel-deny" data-step="deny" tabindex="-1">
+            <span class="loop-step-number">03</span><span class="loop-step-label">Watch it hold</span><span class="loop-step-command">runtime</span><span class="loop-progress" aria-hidden="true"></span>
+          </button>
+          <button class="loop-step" id="loop-tab-audit" type="button" role="tab" aria-selected="false" aria-controls="loop-panel-audit" data-step="audit" tabindex="-1">
+            <span class="loop-step-number">04</span><span class="loop-step-label">Verify the log</span><span class="loop-step-command">audit verify</span><span class="loop-progress" aria-hidden="true"></span>
+          </button>
+        </div>
+      </div>
+      <div class="card terminal">
+        <div class="terminal-bar" aria-hidden="true">
+          <span class="terminal-dot terminal-dot-red"></span><span class="terminal-dot terminal-dot-yellow"></span><span class="terminal-dot terminal-dot-green"></span>
+          <span id="terminal-title" class="terminal-title">zsh · acme-app · switchboard scan</span>
+        </div>
+        <pre class="terminal-panel" id="loop-panel-scan" role="tabpanel" aria-labelledby="loop-tab-scan"><span class="term-dim">$ </span>switchboard scan
+<span class="term-deny">high </span><span class="term-dim">claude:github · token in plaintext</span>
+<span class="term-gate">med  </span><span class="term-dim">claude:linear · direct route</span>
+<span class="term-dim">$ </span>switchboard import --write --cleanup-client
+<span class="term-allow">✓ </span>routes consolidated · backups written
+<span class="term-dim">next: switchboard secrets set github/acme_app/dev/token
+next: switchboard install claude --write</span></pre>
+        <pre class="terminal-panel" id="loop-panel-grant" role="tabpanel" aria-labelledby="loop-tab-grant" hidden><span class="term-dim">$ </span>switchboard secrets set github/acme_app/dev/token
+<span class="term-allow">✓ </span>stored in OS keychain
+<span class="term-dim">$ </span>switchboard install claude --write
+<span class="term-allow">✓ </span>project route installed
+<span class="term-dim">$ </span>switchboard grant --profiles github_acme_app --for 4h
+<span class="term-allow">✓ PASS GRANTED </span><span class="term-dim">fix-ci</span>
+  github_acme_app_* <span class="term-allow">allowed</span>
+  linear_* <span class="term-deny">denied</span>
+  <span class="term-dim">everything else denied · expires in 4h</span></pre>
+        <pre class="terminal-panel" id="loop-panel-deny" role="tabpanel" aria-labelledby="loop-tab-deny" hidden>claude → linear_create_issue
+<span class="term-deny">✕ DENIED </span><span class="term-dim">out of scope</span>
+  <span class="term-dim">routed call stopped before the provider</span>
+  <span class="term-dim">decision appended to the audit chain</span></pre>
+        <pre class="terminal-panel" id="loop-panel-audit" role="tabpanel" aria-labelledby="loop-tab-audit" hidden><span class="term-dim">$ </span>switchboard audit verify
+<span class="term-dim">scanning 1,204 entries...</span>
+<span class="term-allow">✓ Chain: OK</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap features" aria-labelledby="features-heading">
+    <span class="label features-kicker">What the pass carries</span>
+    <h2 id="features-heading" class="sr-only">Switchboard capabilities</h2>
+    <div class="feature-grid">
+      <article class="card feature-card">
+        <code>grant --for 4h</code>
+        <h3>Scoped, expiring passes</h3>
+        <p>Name the routed tools an agent can reach. Everything else is denied, and the lease expires on its own.</p>
+      </article>
+      <article class="card feature-card">
+        <code>approval gate</code>
+        <h3>Human gates where they matter</h3>
+        <p>Hold selected calls for a human decision without widening the rest of the pass.</p>
+      </article>
+      <article class="card feature-card">
+        <code>audit verify</code>
+        <h3>Tamper-evident local audit</h3>
+        <p>Every routed call, denial, and approval is hash-chained JSONL that you can verify offline.</p>
+      </article>
+    </div>
+    <div class="card agent-kit">
+      <div class="agent-kit-copy">
+        <span class="label">for agents</span>
+        <h3>Give the setup to the agent already in the repo.</h3>
+        <p>Copy the guarded setup prompt, or mount the packaged docs MCP so an agent can inspect the product before it changes anything.</p>
+        <div class="agent-kit-links">
+          <a href="/llms.txt">llms.txt</a>
+          <a href="/llms-full.txt">llms-full.txt</a>
+          <a href="https://github.com/wkoverfield/switchboard/blob/main/server.json">Registry manifest</a>
+        </div>
+      </div>
+      <div class="agent-kit-actions">
+        <button class="button button-accent" id="copy-agent-setup" type="button"><span aria-live="polite">Copy agent setup</span></button>
+        <code>claude mcp add switchboard-docs -- npx -y @switchboard-mcp/docs-mcp</code>
+      </div>
+      <pre id="agent-setup-prompt" hidden>Set up Switchboard in this repo. It puts the agent on a scoped, expiring pass instead of raw keys. Reference https://github.com/wkoverfield/switchboard/blob/main/llms.txt or mount the docs MCP with npx -y @switchboard-mcp/docs-mcp.
 
 1. Install the CLI: npm install -g @switchboard-mcp/cli
-2. Run `switchboard scan` and show me what agents can already reach here.
-3. Run `switchboard import --dry-run`, walk me through the plan, then run
-   `switchboard import --write --cleanup-client`.
-4. If import moved tokens, give me the exact `switchboard secrets set &lt;ref&gt;`
-   command to run myself. Never read or handle the token value.
-5. Route this client through Switchboard: `switchboard install claude --write`
-   (or codex).
-6. Ask me how long the pass should last, then `switchboard grant --for &lt;duration&gt;`.
-7. Verify with `switchboard status` and `switchboard doctor`, and report what
-   is now allowed, approval-gated, and denied.</pre>
-      </div>
+2. Run `switchboard scan` and show me what Claude Code and Codex can already reach here.
+3. Run `switchboard import --dry-run`, walk me through the plan, then run `switchboard import --write --cleanup-client`.
+4. For each secretRef that import prints, give me the exact `switchboard secrets set &lt;ref&gt;` command to run myself. Never read or handle the token value.
+5. Route every cleaned client that should remain usable through Switchboard. Run `switchboard install claude --write` for Claude Code and `switchboard install codex --write` for Codex, as applicable.
+6. Ask how long the pass should last, then run `switchboard grant --for &lt;duration&gt;`.
+7. Verify with `switchboard status` and `switchboard doctor`, then report what is allowed, approval-gated, and denied.</pre>
     </div>
-    <div class="fine rise d5"><span>No account</span><span>No server</span><span>No telemetry</span><span>MIT</span></div>
+  </section>
 
-    <div class="topology rise d6">
-      <svg viewBox="0 0 960 400" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace" role="img" aria-label="Three coding agents route through a Switchboard pass. GitHub CI tools are allowed, a Stripe refund waits for a human, and everything else is denied and never leaves the machine.">
-        <defs>
-          <filter id="chipShadow" x="-20%" y="-20%" width="140%" height="150%">
-            <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#1c1a17" flood-opacity="0.10"/>
-          </filter>
-          <filter id="cardShadow" x="-30%" y="-30%" width="160%" height="180%">
-            <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#1c1a17" flood-opacity="0.28"/>
-          </filter>
-          <radialGradient id="wash" cx="50%" cy="46%" r="55%">
-            <stop offset="0%" stop-color="#166b41" stop-opacity="0.06"/>
-            <stop offset="55%" stop-color="#166b41" stop-opacity="0.02"/>
-            <stop offset="100%" stop-color="#166b41" stop-opacity="0"/>
-          </radialGradient>
-          <linearGradient id="cardSheen" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#26221c"/>
-            <stop offset="45%" stop-color="#16130f"/>
-            <stop offset="100%" stop-color="#1b1712"/>
-          </linearGradient>
-          <linearGradient id="markTile" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#4fe39c"/>
-            <stop offset="100%" stop-color="#2fb877"/>
-          </linearGradient>
-          <!-- Switchboard mark: a gate (two posts) with a credential passing
-               through it. Firewall + pass, one glyph. -->
-          <symbol id="sb-mark" viewBox="0 0 32 32">
-            <rect width="32" height="32" rx="8" fill="url(#markTile)"/>
-            <rect x="9" y="8.5" width="3.4" height="15" rx="1.7" fill="#0d1712"/>
-            <rect x="19.6" y="8.5" width="3.4" height="15" rx="1.7" fill="#0d1712"/>
-            <circle cx="16" cy="16" r="2.9" fill="#0d1712"/>
-          </symbol>
-        </defs>
-
-        <rect x="0" y="0" width="960" height="400" fill="url(#wash)"/>
-
-        <!-- edges under everything -->
-        <!-- agents into the pass -->
-        <path d="M220 80 C 300 80, 310 150, 380 165" class="edge-in"/>
-        <path d="M220 200 L 380 200" class="edge-in"/>
-        <path d="M220 320 C 300 320, 310 250, 380 235" class="edge-in"/>
-
-        <!-- allowed: solid green base + flowing dashes -->
-        <path d="M580 165 C 660 150, 660 90, 740 80" class="edge-allow-base"/>
-        <path d="M580 165 C 660 150, 660 90, 740 80" class="edge-allow-flow"/>
-        <!-- gated: dashed, pauses at the human -->
-        <path d="M580 200 L 655 200 M 685 200 L 740 200" class="edge-gate"/>
-        <!-- denied: stops dead. never reaches the right column -->
-        <path d="M580 235 C 630 250, 660 285, 700 302" class="edge-deny"/>
-
-        <!-- edge labels: paper halo so the text clears the line under it -->
-        <rect x="636" y="99" width="64" height="15" rx="4" fill="var(--paper)"/>
-        <text x="668" y="110" text-anchor="middle" font-size="10.5" letter-spacing="1.5" fill="var(--grant)">ALLOWED</text>
-        <g fill="var(--gate)">
-          <rect x="664" y="192" width="3" height="16" rx="1.5"/>
-          <rect x="671" y="192" width="3" height="16" rx="1.5"/>
-        </g>
-        <rect x="607" y="171" width="124" height="15" rx="4" fill="var(--paper)"/>
-        <text x="669" y="182" text-anchor="middle" font-size="10.5" letter-spacing="1.5" fill="var(--gate)">A HUMAN DECIDES</text>
-
-        <!-- agent chips -->
-        <rect x="30" y="52" width="190" height="56" rx="12" fill="var(--paper-raised)" stroke="var(--hairline-dark)" filter="url(#chipShadow)"/>
-        <rect x="42" y="66" width="28" height="28" rx="7" fill="var(--paper)" stroke="var(--hairline)"/>
-        <g transform="translate(46,70) scale(0.833)" fill="var(--ink)" opacity="0.92"><path d="m4.714 15.956l4.718-2.648l.079-.23l-.08-.128h-.23l-.79-.048l-2.695-.073l-2.337-.097l-2.265-.122l-.57-.121l-.535-.704l.055-.353l.48-.321l.685.06l1.518.104l2.277.157l1.651.098l2.447.255h.389l.054-.158l-.133-.097l-.103-.098l-2.356-1.596l-2.55-1.688l-1.336-.972l-.722-.491L2 6.223l-.158-1.008l.656-.722l.88.06l.224.061l.893.686l1.906 1.476l2.49 1.833l.364.304l.146-.104l.018-.072l-.164-.274l-1.354-2.446l-1.445-2.49l-.644-1.032l-.17-.619a3 3 0 0 1-.103-.729L6.287.133L6.7 0l.995.134l.42.364l.619 1.415L9.735 4.14l1.555 3.03l.455.898l.243.832l.09.255h.159V9.01l.127-1.706l.237-2.095l.23-2.695l.08-.76l.376-.91l.747-.492l.583.28l.48.685l-.067.444l-.286 1.851l-.558 2.903l-.365 1.942h.213l.243-.242l.983-1.306l1.652-2.064l.728-.82l.85-.904l.547-.431h1.032l.759 1.129l-.34 1.166l-1.063 1.347l-.88 1.142l-1.263 1.7l-.79 1.36l.074.11l.188-.02l2.853-.606l1.542-.28l1.84-.315l.832.388l.09.395l-.327.807l-1.967.486l-2.307.462l-3.436.813l-.043.03l.049.061l1.548.146l.662.036h1.62l3.018.225l.79.522l.473.638l-.08.485l-1.213.62l-1.64-.389l-3.825-.91l-1.31-.329h-.183v.11l1.093 1.068l2.003 1.81l2.508 2.33l.127.578l-.321.455l-.34-.049l-2.204-1.657l-.85-.747l-1.925-1.62h-.127v.17l.443.649l2.343 3.521l.122 1.08l-.17.353l-.607.213l-.668-.122l-1.372-1.924l-1.415-2.168l-1.141-1.943l-.14.08l-.674 7.254l-.316.37l-.728.28l-.607-.461l-.322-.747l.322-1.476l.388-1.924l.316-1.53l.285-1.9l.17-.632l-.012-.042l-.14.018l-1.432 1.967l-2.18 2.945l-1.724 1.845l-.413.164l-.716-.37l.066-.662l.401-.589l2.386-3.036l1.439-1.882l.929-1.086l-.006-.158h-.055L4.138 18.56l-1.13.146l-.485-.456l.06-.746l.231-.243l1.907-1.312Z"/></g>
-        <text x="82" y="86" font-size="13.5" fill="var(--ink)">Claude Code</text>
-        <rect x="30" y="172" width="190" height="56" rx="12" fill="var(--paper-raised)" stroke="var(--hairline-dark)" filter="url(#chipShadow)"/>
-        <rect x="42" y="186" width="28" height="28" rx="7" fill="var(--paper)" stroke="var(--hairline)"/>
-        <g transform="translate(46,190) scale(0.833)" fill="var(--ink)" opacity="0.92"><path d="M22.282 9.821a6 6 0 0 0-.516-4.91a6.05 6.05 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a6 6 0 0 0-3.998 2.9a6.05 6.05 0 0 0 .743 7.097a5.98 5.98 0 0 0 .51 4.911a6.05 6.05 0 0 0 6.515 2.9A6 6 0 0 0 13.26 24a6.06 6.06 0 0 0 5.772-4.206a6 6 0 0 0 3.997-2.9a6.06 6.06 0 0 0-.747-7.073M13.26 22.43a4.48 4.48 0 0 1-2.876-1.04l.141-.081l4.779-2.758a.8.8 0 0 0 .392-.681v-6.737l2.02 1.168a.07.07 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494M3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085l4.783 2.759a.77.77 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646M2.34 7.896a4.5 4.5 0 0 1 2.366-1.973V11.6a.77.77 0 0 0 .388.677l5.815 3.354l-2.02 1.168a.08.08 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.08.08 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667m2.01-3.023l-.141-.085l-4.774-2.782a.78.78 0 0 0-.785 0L9.409 9.23V6.897a.07.07 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.8.8 0 0 0-.393.681zm1.097-2.365l2.602-1.5l2.607 1.5v2.999l-2.597 1.5l-2.607-1.5Z"/></g>
-        <text x="82" y="206" font-size="13.5" fill="var(--ink)">Codex</text>
-        <rect x="30" y="292" width="190" height="56" rx="12" fill="var(--paper-raised)" stroke="var(--hairline-dark)" filter="url(#chipShadow)"/>
-        <rect x="42" y="306" width="28" height="28" rx="7" fill="var(--paper)" stroke="var(--hairline)"/>
-        <g transform="translate(46,310) scale(0.833)" fill="var(--ink)" opacity="0.92"><path d="M11.503.131L1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/></g>
-        <text x="82" y="326" font-size="13.5" fill="var(--ink)">Cursor</text>
-
-        <!-- provider chips -->
-        <rect x="740" y="52" width="190" height="56" rx="12" fill="var(--paper-raised)" stroke="var(--grant)" filter="url(#chipShadow)"/>
-        <rect x="752" y="66" width="28" height="28" rx="7" fill="var(--paper)" stroke="var(--hairline)"/>
-        <g transform="translate(756,70) scale(0.833)" fill="var(--ink)" opacity="0.92"><path d="M12 .297c-6.63 0-12 5.373-12 12c0 5.303 3.438 9.8 8.205 11.385c.6.113.82-.258.82-.577c0-.285-.01-1.04-.015-2.04c-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729c1.205.084 1.838 1.236 1.838 1.236c1.07 1.835 2.809 1.305 3.495.998c.108-.776.417-1.305.76-1.605c-2.665-.3-5.466-1.332-5.466-5.93c0-1.31.465-2.38 1.235-3.22c-.135-.303-.54-1.523.105-3.176c0 0 1.005-.322 3.3 1.23c.96-.267 1.98-.399 3-.405c1.02.006 2.04.138 3 .405c2.28-1.552 3.285-1.23 3.285-1.23c.645 1.653.24 2.873.12 3.176c.765.84 1.23 1.91 1.23 3.22c0 4.61-2.805 5.625-5.475 5.92c.42.36.81 1.096.81 2.22c0 1.606-.015 2.896-.015 3.286c0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></g>
-        <text x="792" y="86" font-size="13.5" fill="var(--grant)">github_ci_*</text>
-        <rect x="740" y="172" width="190" height="56" rx="12" fill="var(--paper-raised)" stroke="var(--hairline-dark)" filter="url(#chipShadow)"/>
-        <rect x="752" y="186" width="28" height="28" rx="7" fill="var(--paper)" stroke="var(--hairline)"/>
-        <g transform="translate(756,190) scale(0.833)" fill="var(--ink)" opacity="0.92"><path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409c0-.831.683-1.305 1.901-1.305c2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0C9.667 0 7.589.654 6.104 1.872C4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219c2.585.92 3.445 1.574 3.445 2.583c0 .98-.84 1.545-2.354 1.545c-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813c1.664-1.305 2.525-3.236 2.525-5.732c0-4.128-2.524-5.851-6.594-7.305z"/></g>
-        <text x="792" y="206" font-size="13.5" fill="var(--ink)">stripe_refund</text>
-        <rect x="740" y="292" width="190" height="56" rx="12" fill="var(--paper-raised)" stroke="var(--hairline-dark)" stroke-dasharray="4 4" filter="url(#chipShadow)"/>
-        <text x="758" y="326" font-size="13.5" fill="var(--ink-dim)" text-decoration="line-through">everything else</text>
-
-        <!-- the pass card: read it in one glance -->
-        <g filter="url(#cardShadow)">
-          <rect x="380" y="120" width="200" height="160" rx="16" fill="url(#cardSheen)"/>
-          <rect x="380.5" y="120.5" width="199" height="159" rx="15.5" fill="none" stroke="#3f3930" stroke-width="1"/>
-          <!-- issuer lockup -->
-          <use href="#sb-mark" x="404" y="142" width="26" height="26"/>
-          <text x="438" y="160" font-size="12.5" letter-spacing="1.5" fill="var(--term-green)" font-weight="500">SWITCHBOARD</text>
-          <line x1="404" y1="182" x2="556" y2="182" stroke="#2b2620" stroke-width="1"/>
-          <!-- the one thing that matters: the scope -->
-          <text x="404" y="214" font-size="18" letter-spacing="0.5" fill="var(--term-green)">github_ci_*</text>
-          <text x="404" y="233" font-size="9.5" letter-spacing="0.5" fill="var(--term-dim)">everything else denied</text>
-          <!-- ephemeral -->
-          <text x="404" y="262" font-size="11.5" letter-spacing="0.5" fill="var(--term-yellow)">expires in 4h</text>
-        </g>
-      </svg>
-      <p class="topology-caption">
-        Denied calls never leave the machine.
-        <a href="https://github.com/wkoverfield/switchboard/blob/main/examples/switchboard.gif">Watch it live (30s)</a>.
-      </p>
-      <div class="stamp">DENIED · OUT OF SCOPE</div>
+  <section id="secrets" class="wrap section" aria-labelledby="secrets-heading">
+    <div class="section-heading">
+      <span class="label section-count">02 / 04</span>
+      <span class="label">secrets</span>
     </div>
-  </div>
-</header>
-
-<section id="gap">
-  <div class="wrap">
-    <div class="head">
-      <span class="index">[ 01 ] · <b>the gap</b></span>
-      <h2>Your coding agent acts with your full access.</h2>
-      <p>Whatever your tokens reach, it reaches, and most MCP servers scope nothing of their own. One bad instruction can hit real infrastructure. Switchboard puts the limits on your machine.</p>
-    </div>
-    <div class="stats">
-      <div class="stat ticked" tabindex="0" aria-describedby="source-oauth"><span class="tick-b"></span>
-        <span class="index">&rarr; stat</span>
-        <div class="big">~8.5%</div>
-        <p>of MCP servers implement OAuth at all, per a 2026 practitioner survey.</p>
-        <div class="source-pop" id="source-oauth" role="tooltip">
-          OAuth figure from the <a href="https://nhimg.org/">nhimg.org</a> MCP server practitioner survey.
-        </div>
-      </div>
-      <div class="stat ticked" tabindex="0" aria-describedby="source-scoping"><span class="tick-b"></span>
-        <span class="index">&rarr; stat</span>
-        <div class="big">~18%</div>
-        <p>do any scoping whatsoever. The rest expose everything the token can reach.</p>
-        <div class="source-pop" id="source-scoping" role="tooltip">
-          Scoping figure from the <a href="https://nhimg.org/">nhimg.org</a> MCP server practitioner survey.
-        </div>
-      </div>
-      <div class="stat ticked" tabindex="0" aria-describedby="source-spec"><span class="tick-b"></span>
-        <span class="index">&rarr; date</span>
-        <div class="big">Jul 28</div>
-        <p>the MCP spec revision lands. Rollout will take the ecosystem years.</p>
-        <div class="source-pop" id="source-spec" role="tooltip">
-          <a href="https://modelcontextprotocol.io/specification">MCP specification</a>, revision dated July 28, 2026.
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="how">
-  <div class="wrap">
-    <div class="head">
-      <span class="index">[ 02 ] · <b>the loop</b></span>
-      <h2>Three commands to a governed agent</h2>
-      <p>Start in a repo where your agents already work. Switchboard meets your existing MCP config where it is.</p>
-    </div>
-    <div class="steps">
-      <div class="step">
-        <span class="n">01 / see it</span>
-        <h3>scan, then import</h3>
-        <pre>$ switchboard scan
-<span class="r">high</span> claude:github
-  <span class="c">token in plaintext .mcp.json</span>
-$ switchboard import --write
-  <span class="g">token &rarr; OS keychain</span>
-  <span class="c">backup + exact rollback kept</span></pre>
-        <p>Every server and token your agents can already touch, including the routes that bypass everything.</p>
-      </div>
-      <div class="step">
-        <span class="n">02 / scope it</span>
-        <h3>grant a pass</h3>
-        <pre>$ switchboard grant --for 4h
-<span class="g">SWITCHBOARD · PASS GRANTED</span>
-  <span class="g">&rarr;</span> github_ci_*
-  <span class="c">everything else denied</span>
-  <span class="y">expires in 4h</span></pre>
-        <p>Named tools reachable, everything else denied, gone on its own. Revoke early any time.</p>
-      </div>
-      <div class="step">
-        <span class="n">03 / watch it hold</span>
-        <h3>denied, on the record</h3>
-        <pre>agent &rarr; delete_file
-<span class="r">SWITCHBOARD · DENIED</span>
-  <span class="c">never reached the provider</span>
-$ switchboard audit verify
-<span class="g">Chain: OK</span></pre>
-        <p>Denials, approvals, and every routed call land in a hash-chained local audit log you can verify.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="secrets">
-  <div class="wrap">
-    <div class="head">
-      <span class="index">[ 03 ] · <b>secrets</b></span>
-      <h2>Your tokens move to the keychain. Your config keeps a name.</h2>
-      <p>A provider token is probably sitting in plaintext in an <code style="font-family:var(--font-mono);font-size:0.9em">.mcp.json</code> on your disk right now. Import lifts it out and hands your config a reference instead of a secret.</p>
-    </div>
+    <h2 id="secrets-heading">Token values leave config. Your config keeps a name.</h2>
+    <p class="section-intro">Import rewrites supported client routes around a value-free <code>secretRef</code> without reading the token. You store the value separately with the exact <code>switchboard secrets set</code> command it prints.</p>
     <div class="secrets-flow">
-      <figure class="file-card before">
-        <figcaption class="file-head"><span class="fname">.mcp.json</span><span class="tag red">plaintext · in git</span></figcaption>
+      <article class="card code-card before">
+        <header class="code-card-header"><span>.mcp.json</span><span class="label">plaintext</span></header>
         <pre>"env": {
-  "GITHUB_PERSONAL_ACCESS_TOKEN":
-    <span class="r">"ghp_R8xK2pLm4Uf9tQ1v...live"</span>
+  "GITHUB_TOKEN":
+    <span class="secret-value">"ghp_R8xK2pLm4Uf9...live"</span>
 }</pre>
-      </figure>
+      </article>
       <div class="secrets-arrow" aria-hidden="true">
-        <span class="cmd">switchboard import</span>
-        <svg viewBox="0 0 40 16" width="40" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8h34" stroke-dasharray="3 3"/><path d="M31 3l6 5-6 5"/></svg>
+        <span class="label">import + set</span>
+        <svg viewBox="0 0 44 16" width="40" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8h36" stroke-dasharray="3 3"/><path d="M33 3l7 5-7 5"/></svg>
       </div>
-      <figure class="file-card after">
-        <figcaption class="file-head"><span class="fname">.switchboard.yaml</span><span class="tag green">safe to commit</span></figcaption>
+      <article class="card code-card after">
+        <header class="code-card-header"><span>.switchboard.yaml</span><span class="label">safe to commit</span></header>
         <pre>env:
-  GITHUB_PERSONAL_ACCESS_TOKEN:
-    <span class="g">secretRef: github/ci/token</span></pre>
-      </figure>
+  GITHUB_TOKEN:
+    <span class="secret-ref">secretRef: github/acme_app/dev/token</span></pre>
+      </article>
     </div>
-    <div class="vault">
-      <svg class="lock" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-      <p>The value now lives only in your <b>OS keychain</b> (macOS Keychain, Windows Credential Manager, or libsecret) and is resolved into the one server that declared it, at launch. It never enters config, logs, or an agent's prompt. Set one with <code>switchboard secrets set</code>.</p>
+    <div class="card keychain-note">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <p>After <code>secrets set</code>, the configured value lives in your <strong>OS keychain</strong> and is resolved into the server that declared it at launch. Exact rollback backups preserve the client config that existed before import, including any plaintext already present.</p>
     </div>
-  </div>
-</section>
+  </section>
 
-<section id="trust">
-  <div class="wrap">
-    <div class="head" style="max-width:none;">
-      <span class="index">[ 04 ] · <b>security</b></span>
-      <h2>Honest about its edges, and written down.</h2>
-      <p style="max-width:64ch;">Switchboard governs the routed paths and says so. Raw shell, provider CLIs, and direct MCP routes bypass it, and <code style="font-family:var(--font-mono);font-size:0.9em">scan</code> reports them. Run in strict mode and no pass means nothing routes; <code style="font-family:var(--font-mono);font-size:0.9em">status</code> always tells you which mode you are in. It is alpha, with versioned pass and audit contracts you can build on today. All of it is documented with code references:</p>
+  <section id="security" class="wrap section" aria-labelledby="security-heading">
+    <div class="section-heading">
+      <span class="label section-count">03 / 04</span>
+      <span class="label">security</span>
     </div>
-    <div class="trust">
-      <div class="item">
-        <span class="index">threat-model.md</span>
-        <b>Threat model</b>
-        <span class="body">STRIDE analysis of every surface: what enforcement binds, what it cannot, revocation semantics, and the accepted risks. <a href="/docs/security-threat-model">Read it</a>.</span>
-      </div>
-      <div class="item">
-        <span class="index">audit verify</span>
-        <b>Tamper-evident audit log</b>
-        <span class="body">Every routed call, denial, and approval decision is hash-chained JSONL on your machine. <code style="font-family:var(--font-mono);font-size:0.85em">switchboard audit verify</code> catches tampering and truncation, and names the entry where the chain breaks. <a href="/docs/security-audit-logs">How it works</a>.</span>
-      </div>
-      <div class="item">
-        <span class="index">secretRef</span>
-        <b>Injected at launch, redacted everywhere</b>
-        <span class="body">Beyond the keychain: a value-free ref index, weaker backends gated behind an explicit unsafe opt-in, and secret-shaped strings scrubbed from output, logs, and audit entries. <a href="/docs/security-secrets">How secrets are handled</a>.</span>
-      </div>
-      <div class="item">
-        <span class="index">child &sube; parent</span>
-        <b>Delegation that cannot widen</b>
-        <span class="body">A lead agent can hand narrower passes to subagents; children are validated as strict subsets of the parent, and parent deny lists are inherited.</span>
-      </div>
+    <h2 id="security-heading">Honest about its edges, and written down.</h2>
+    <p class="section-intro">Switchboard governs paths routed through it. Raw shell, provider CLIs, and direct MCP routes can bypass it, and <code>scan</code> reports those paths. Strict mode makes an unbound routed connection deny by default.</p>
+    <div class="trust-grid">
+      <article class="card trust-card">
+        <span class="label">threat-model.md</span>
+        <h3><a href="/docs/security-threat-model">Threat model</a></h3>
+        <p>A STRIDE analysis of every surface: what enforcement binds, what it cannot, revocation semantics, and accepted risks.</p>
+      </article>
+      <article class="card trust-card">
+        <span class="label">child ⊆ parent</span>
+        <h3>Delegation that cannot widen</h3>
+        <p>A lead agent can hand narrower passes to subagents. Children are validated as strict subsets of their parent.</p>
+      </article>
+      <article class="card trust-card">
+        <span class="label">audit verify</span>
+        <h3><a href="/docs/security-audit-logs">A chain you can inspect</a></h3>
+        <p>Per-entry hashes, sequence numbers, and an out-of-band head marker make edits and tail truncation loud.</p>
+      </article>
+      <article class="card trust-card">
+        <span class="label">127.0.0.1</span>
+        <h3>Local read-only dashboard</h3>
+        <p>Live passes, pending approvals, and the recent audit stream stay on the machine where Switchboard runs.</p>
+      </article>
     </div>
-    <figure class="product-shot ticked"><span class="tick-b"></span>
-      <div class="frame-label"><span>switchboard dashboard · 127.0.0.1 · read-only</span></div>
-      <div class="screen">
-        <img src="/assets/dashboard.png" width="1360" height="428" loading="lazy"
-             alt="The Switchboard dashboard: one live pass with its allow and deny lists, counts of allowed and denied calls, and an audit stream showing ok, gated, and denied tool calls.">
-      </div>
-      <figcaption>Live passes, denials, and the audit stream. <code>switchboard dashboard</code> ships today and never leaves your machine.</figcaption>
-    </figure>
-  </div>
-</section>
+  </section>
 
-<section id="agents" class="agents">
-  <div class="wrap">
-    <div class="head">
-      <span class="index">[ 05 ] · <b>for agents</b></span>
-      <h2>Installable by the agent reading this</h2>
-      <p>The docs ship as an MCP server, and llms.txt is kept current. An agent can evaluate Switchboard, read the threat model, and set it up without leaving its own tools.</p>
+  <section id="next" class="wrap section" aria-labelledby="next-heading">
+    <div class="section-heading">
+      <span class="label section-count">04 / 04</span>
+      <span class="label">what's next</span>
     </div>
-    <pre class="">$ claude mcp add switchboard-docs -- npx -y @switchboard-mcp/docs-mcp
-<span class="c"># tools: list_docs · read_doc · search_docs</span>
-
-$ npx -y @switchboard-mcp/cli@latest scan</pre>
-    <p class="also">
-      Also: <a href="/llms.txt">llms.txt</a> · <a href="/llms-full.txt">llms-full.txt</a> ·
-      <a href="https://github.com/wkoverfield/switchboard/blob/main/server.json">MCP registry manifest</a>
-    </p>
-  </div>
-</section>
-
-<section id="team" class="waitlist">
-  <div class="wrap">
-    <div class="inner">
+    <div class="roadmap-layout">
       <div>
-        <span class="index">[ 06 ] · <b>teams</b></span>
-        <h2>Working with a team?</h2>
-        <p>
-          Switchboard is free, local, and MIT licensed, and it stays that way.
-          Waitlist members get the team tier first, and we build it against
-          your workflow.
-        </p>
-        <dl class="arc">
-          <div><dt>today</dt><dd>local passes, expiry, revocation, hash-chained audit, one machine</dd></div>
-          <div><dt>teams</dt><dd>shared policy, multi-user identity, central visibility, SIEM export (<a href="/docs/roadmap">roadmap</a>)</dd></div>
-        </dl>
+        <h2 id="next-heading">Single-machine today. Team controls later.</h2>
+        <p class="section-intro">The local product stays free and useful without an account. The org model and enterprise surface remain roadmap work after the single-developer path is proven.</p>
+        <div class="roadmap-chips" aria-label="Later roadmap areas">
+          <span class="roadmap-chip">Shared policy</span>
+          <span class="roadmap-chip">Multi-user identity</span>
+          <span class="roadmap-chip">SIEM export</span>
+          <span class="roadmap-chip">External audit anchoring</span>
+        </div>
       </div>
-      <div class="waitlist-side">
-        <!-- TODO(wilson): create a form at formspree.io and replace
-             YOUR_FORM_ID below with the real id (e.g. mqkrbvzo). -->
-        <form class="waitlist-form" action="https://formspree.io/f/YOUR_FORM_ID" method="POST">
-          <input type="email" name="email" required placeholder="you@company.com"
-                 autocomplete="email" aria-label="Work email">
-          <input type="text" name="_gotcha" tabindex="-1" autocomplete="off" aria-hidden="true" class="gotcha">
-          <input type="hidden" name="context" value="team-tier-waitlist">
-          <button class="btn primary" type="submit">Join the waitlist</button>
-        </form>
-        <p class="waitlist-done" hidden>You're on the list. We'll be in touch.</p>
+      <aside class="card waitlist-card" aria-labelledby="waitlist-heading">
+        <span class="label">teams and enterprise</span>
+        <h3 id="waitlist-heading">Follow the team roadmap</h3>
+        <p>Team controls are later roadmap work. Follow the public plan and shipped releases without handing an address to a placeholder form.</p>
+        <div class="waitlist-actions">
+          <a class="button button-accent" href="/docs/roadmap">Read the roadmap</a>
+          <a class="button button-ghost" href="https://github.com/wkoverfield/switchboard/releases">View releases</a>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="cta-band" aria-labelledby="cta-heading">
+    <div class="wrap cta-band-inner">
+      <h2 id="cta-heading">Give the agent a <strong>pass</strong>. Keep your keys.</h2>
+      <div class="cta-actions">
+        <a class="button button-accent" href="/docs/install-quickstart">Start in 5 minutes</a>
+        <a class="button button-ghost" href="https://github.com/wkoverfield/switchboard">Star on GitHub</a>
       </div>
     </div>
-  </div>
-</section>
+  </section>
+</main>
 
-<section class="closer">
-  <div class="wrap">
-    <h2>Put your agents on a <span class="pass-word">pass</span>.</h2>
-    <div class="cta-row">
-      <a class="btn primary" href="/docs/install-quickstart">Start in 5 minutes</a>
-      <a class="btn ghost" href="https://github.com/wkoverfield/switchboard">Star on GitHub</a>
-    </div>
-  </div>
-</section>
-
-<footer>
-  <div class="wrap">
-    <span>MIT</span>
-    <span class="spacer"></span>
-    <a href="https://github.com/wkoverfield/switchboard">GitHub</a>
-    <a href="/docs/">Docs</a>
-    <a href="https://github.com/wkoverfield/switchboard/blob/main/SECURITY.md">Security</a>
+<footer class="site-footer">
+  <div class="wrap site-footer-row">
+    <span class="footer-meta">switchboard <span>· MIT</span></span>
+    <a class="footer-link" href="/docs/security-threat-model">Threat model</a>
+    <a class="footer-link footer-push" href="/docs/">Docs</a>
+    <a class="footer-link" href="https://github.com/wkoverfield/switchboard">GitHub</a>
   </div>
 </footer>
 
 <script>
-  // Click-to-copy on the prompt pill.
-  const pill = document.querySelector(".prompt-pill");
-  const pillLabel = document.querySelector(".prompt-pill .label");
-  const promptText = document.getElementById("setup-prompt");
-  if (pill && pillLabel && promptText && navigator.clipboard) {
-    pill.addEventListener("click", async () => {
+  const copyButton = document.getElementById("copy-install");
+  const installCommand = "npm install -g @switchboard-mcp/cli";
+
+  function wireCopyButton(button, text, idleLabel, successLabel) {
+    button?.addEventListener("click", async () => {
+      const label = button.querySelector("span");
       try {
-        await navigator.clipboard.writeText(promptText.textContent.trim());
-        pillLabel.textContent = "copied. paste it into your agent";
-        pill.classList.add("copied");
-        setTimeout(() => {
-          pillLabel.textContent = "copy the setup prompt";
-          pill.classList.remove("copied");
-        }, 2000);
+        await navigator.clipboard.writeText(text);
+        label.textContent = successLabel;
+        window.setTimeout(() => { label.textContent = idleLabel; }, 1600);
       } catch {
-        pillLabel.textContent = "copy failed. try again";
+        label.textContent = "Copy failed";
       }
     });
   }
 
-  // Keep source notes close to the pointer instead of anchoring them to the
-  // much larger stat cards. Focused cards use their center as a fallback.
-  document.querySelectorAll(".stat").forEach((stat) => {
-    const pop = stat.querySelector(".source-pop");
-    if (!pop) return;
+  wireCopyButton(copyButton, installCommand, "copy", "copied");
+  const agentSetupButton = document.getElementById("copy-agent-setup");
+  const agentSetupPrompt = document.getElementById("agent-setup-prompt");
+  wireCopyButton(agentSetupButton, agentSetupPrompt?.textContent.trim() || "", "Copy agent setup", "Copied for your agent");
 
-    let hideTimer;
-    const hide = () => {
-      clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => pop.classList.remove("is-visible"), 100);
-    };
-    const show = () => {
-      clearTimeout(hideTimer);
-      pop.classList.add("is-visible");
-    };
-    const place = (x, y) => {
-      show();
-      const gap = 14;
-      const edge = 12;
-      const width = pop.offsetWidth;
-      const height = pop.offsetHeight;
-      const left = Math.max(edge, Math.min(x + gap, window.innerWidth - width - edge));
-      const below = y + gap;
-      const top = below + height <= window.innerHeight - edge
-        ? below
-        : Math.max(edge, y - height - gap);
-      pop.style.left = `${left}px`;
-      pop.style.top = `${top}px`;
-    };
+  const loop = document.querySelector(".loop");
+  const loopPlayback = document.querySelector(".loop-layout");
+  const loopToggle = document.getElementById("loop-toggle");
+  const loopTabs = Array.from(document.querySelectorAll(".loop-step"));
+  const loopPanels = Array.from(document.querySelectorAll(".terminal-panel"));
+  const terminalTitle = document.getElementById("terminal-title");
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const terminalCommands = {
+    scan: "switchboard scan",
+    grant: "switchboard grant",
+    deny: "runtime",
+    audit: "switchboard audit"
+  };
 
-    stat.addEventListener("pointermove", (event) => place(event.clientX, event.clientY));
-    stat.addEventListener("pointerleave", hide);
-    pop.addEventListener("pointerenter", show);
-    pop.addEventListener("pointerleave", hide);
-    stat.addEventListener("focusin", () => {
-      const rect = stat.getBoundingClientRect();
-      place(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  function selectLoopStep(index, focus = false) {
+    const nextIndex = (index + loopTabs.length) % loopTabs.length;
+    loopTabs.forEach((tab, tabIndex) => {
+      const selected = tabIndex === nextIndex;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      if (selected) {
+        const progress = tab.querySelector(".loop-progress");
+        progress.style.animation = "none";
+        void progress.offsetWidth;
+        progress.style.removeProperty("animation");
+      }
     });
-    stat.addEventListener("focusout", (event) => {
-      if (!pop.contains(event.relatedTarget)) hide();
+    loopPanels.forEach((panel, panelIndex) => { panel.hidden = panelIndex !== nextIndex; });
+    terminalTitle.textContent = "zsh · acme-app · " + terminalCommands[loopTabs[nextIndex].dataset.step];
+    if (focus) loopTabs[nextIndex].focus();
+  }
+
+  loopTabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => selectLoopStep(index));
+    tab.addEventListener("keydown", (event) => {
+      const previous = event.key === "ArrowLeft" || event.key === "ArrowUp";
+      const next = event.key === "ArrowRight" || event.key === "ArrowDown";
+      if (!previous && !next) return;
+      event.preventDefault();
+      selectLoopStep(index + (next ? 1 : -1), true);
+    });
+    tab.querySelector(".loop-progress")?.addEventListener("animationend", () => {
+      if (!loop.classList.contains("is-paused") && tab.getAttribute("aria-selected") === "true") {
+        selectLoopStep(index + 1);
+      }
     });
   });
 
-  // Waitlist: AJAX submit keeps the visitor on the page; without JS the
-  // form still POSTs to Formspree and lands on their confirmation page.
-  const waitlistForm = document.querySelector(".waitlist-form");
-  if (waitlistForm && window.fetch) {
-    waitlistForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const button = waitlistForm.querySelector("button");
-      button.disabled = true;
-      button.textContent = "joining…";
-      try {
-        const response = await fetch(waitlistForm.action, {
-          method: "POST",
-          body: new FormData(waitlistForm),
-          headers: { Accept: "application/json" }
-        });
-        if (!response.ok) throw new Error("submit failed");
-        waitlistForm.hidden = true;
-        document.querySelector(".waitlist-done").hidden = false;
-      } catch {
-        button.disabled = false;
-        button.textContent = "Join the waitlist";
-        waitlistForm.submit();
-      }
-    });
-  }
-</script>
+  let userPaused = reduceMotion.matches;
+  let pointerPaused = false;
+  let focusPaused = false;
 
+  function syncLoopPlayback() {
+    const paused = userPaused || pointerPaused || focusPaused || document.hidden || reduceMotion.matches;
+    loop?.classList.toggle("is-paused", paused);
+    loopToggle.disabled = reduceMotion.matches;
+    loopToggle.textContent = reduceMotion.matches ? "Tour paused" : userPaused ? "Play tour" : "Pause tour";
+  }
+
+  loopToggle?.addEventListener("click", () => {
+    userPaused = !userPaused;
+    syncLoopPlayback();
+  });
+  loopPlayback?.addEventListener("mouseenter", () => {
+    pointerPaused = true;
+    syncLoopPlayback();
+  });
+  loopPlayback?.addEventListener("mouseleave", () => {
+    pointerPaused = false;
+    syncLoopPlayback();
+  });
+  loopPlayback?.addEventListener("focusin", () => {
+    focusPaused = true;
+    syncLoopPlayback();
+  });
+  loopPlayback?.addEventListener("focusout", (event) => {
+    if (!loopPlayback.contains(event.relatedTarget)) {
+      focusPaused = false;
+      syncLoopPlayback();
+    }
+  });
+  document.addEventListener("visibilitychange", syncLoopPlayback);
+  reduceMotion.addEventListener?.("change", () => {
+    userPaused = reduceMotion.matches;
+    syncLoopPlayback();
+  });
+  syncLoopPlayback();
+</script>
 </body>
 </html>
