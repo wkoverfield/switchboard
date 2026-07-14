@@ -245,13 +245,9 @@
     letter-spacing: -0.03em; line-height: 1; margin: 18px 0 10px;
   }
   .stat p { color: var(--ink-dim); font-size: 0.9rem; margin: 0; max-width: 32ch; }
-  .source-hint {
-    display: block; margin-top: 16px;
-    font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.1em;
-    text-transform: uppercase; color: var(--ink-dim);
-  }
   .source-pop {
-    position: absolute; left: 18px; right: 18px; bottom: calc(100% + 10px);
+    position: fixed; left: -999px; top: -999px;
+    width: min(320px, calc(100vw - 24px));
     z-index: 20; padding: 12px 14px;
     background: var(--ink); color: var(--paper);
     border: 1px solid var(--ink); border-radius: 7px;
@@ -260,13 +256,8 @@
     opacity: 0; pointer-events: none; transform: translateY(4px);
     transition: opacity 160ms var(--ease), transform 160ms var(--ease);
   }
-  .source-pop::after {
-    content: ""; position: absolute; top: 100%; left: 24px;
-    border: 6px solid transparent; border-top-color: var(--ink);
-  }
   .source-pop a { color: var(--term-green); text-underline-offset: 2px; }
-  .stat:hover .source-pop,
-  .stat:focus-within .source-pop {
+  .source-pop.is-visible {
     opacity: 1; pointer-events: auto; transform: translateY(0);
   }
 
@@ -662,7 +653,6 @@ npx -y @switchboard-mcp/docs-mcp).
         <span class="index">&rarr; stat</span>
         <div class="big">~8.5%</div>
         <p>of MCP servers implement OAuth at all, per a 2026 practitioner survey.</p>
-        <span class="source-hint">source</span>
         <div class="source-pop" id="source-oauth" role="tooltip">
           OAuth figure from the <a href="https://nhimg.org/">nhimg.org</a> MCP server practitioner survey.
         </div>
@@ -671,7 +661,6 @@ npx -y @switchboard-mcp/docs-mcp).
         <span class="index">&rarr; stat</span>
         <div class="big">~18%</div>
         <p>do any scoping whatsoever. The rest expose everything the token can reach.</p>
-        <span class="source-hint">source</span>
         <div class="source-pop" id="source-scoping" role="tooltip">
           Scoping figure from the <a href="https://nhimg.org/">nhimg.org</a> MCP server practitioner survey.
         </div>
@@ -680,7 +669,6 @@ npx -y @switchboard-mcp/docs-mcp).
         <span class="index">&rarr; date</span>
         <div class="big">Jul 28</div>
         <p>the MCP spec revision lands. Rollout will take the ecosystem years.</p>
-        <span class="source-hint">source</span>
         <div class="source-pop" id="source-spec" role="tooltip">
           <a href="https://modelcontextprotocol.io/specification">MCP specification</a>, revision dated July 28, 2026.
         </div>
@@ -895,6 +883,49 @@ $ npx -y @switchboard-mcp/cli@latest scan</pre>
       }
     });
   }
+
+  // Keep source notes close to the pointer instead of anchoring them to the
+  // much larger stat cards. Focused cards use their center as a fallback.
+  document.querySelectorAll(".stat").forEach((stat) => {
+    const pop = stat.querySelector(".source-pop");
+    if (!pop) return;
+
+    let hideTimer;
+    const hide = () => {
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => pop.classList.remove("is-visible"), 100);
+    };
+    const show = () => {
+      clearTimeout(hideTimer);
+      pop.classList.add("is-visible");
+    };
+    const place = (x, y) => {
+      show();
+      const gap = 14;
+      const edge = 12;
+      const width = pop.offsetWidth;
+      const height = pop.offsetHeight;
+      const left = Math.max(edge, Math.min(x + gap, window.innerWidth - width - edge));
+      const below = y + gap;
+      const top = below + height <= window.innerHeight - edge
+        ? below
+        : Math.max(edge, y - height - gap);
+      pop.style.left = `${left}px`;
+      pop.style.top = `${top}px`;
+    };
+
+    stat.addEventListener("pointermove", (event) => place(event.clientX, event.clientY));
+    stat.addEventListener("pointerleave", hide);
+    pop.addEventListener("pointerenter", show);
+    pop.addEventListener("pointerleave", hide);
+    stat.addEventListener("focusin", () => {
+      const rect = stat.getBoundingClientRect();
+      place(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    });
+    stat.addEventListener("focusout", (event) => {
+      if (!pop.contains(event.relatedTarget)) hide();
+    });
+  });
 
   // Waitlist: AJAX submit keeps the visitor on the page; without JS the
   // form still POSTs to Formspree and lands on their confirmation page.
