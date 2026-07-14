@@ -35,6 +35,10 @@ mkdirSync(join(distDir, "docs"), { recursive: true });
 // Shared site shell, landing page, and agent-readable docs files.
 copyFileSync(join(siteDir, "src", "index.html"), join(distDir, "index.html"));
 copyFileSync(join(siteDir, "src", "styles.css"), join(distDir, "styles.css"));
+copyFileSync(
+  join(siteDir, "src", "docs-navigation.js"),
+  join(distDir, "docs-navigation.js")
+);
 for (const name of ["llms.txt", "llms-full.txt"]) {
   const source = join(repoRoot, name);
   if (existsSync(source)) {
@@ -159,6 +163,7 @@ function docShell({ title, body, active, entries }) {
 <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
 ${prefetchLinks}
 <link rel="stylesheet" href="/styles.css">
+<script src="/docs-navigation.js" defer></script>
 </head>
 <body class="docs-body">
 <nav class="site-nav" aria-label="Primary navigation">
