@@ -13,6 +13,7 @@ coverage/
 packages/docs-mcp/docs-bundle/
 site/dist/
 .vercel
-.codex/config.toml
+.claude/
+.codex/
 .mcp.json
 .mcp.json.switchboard-backup-*

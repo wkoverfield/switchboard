@@ -1,8 +1,7 @@
 # Switchboard Roadmap
 
-The public version of where Switchboard is going. The internal working
-roadmap ([roadmap.md](roadmap.md)) has the full milestone history; this page
-is the honest shipped / next / later split, kept deliberately short.
+Where Switchboard is going: the honest shipped / next / later split, kept
+deliberately short.
 
 A standing rule shapes all of it: Switchboard does not claim enforcement it
 cannot provide. Anything listed under "later" is a promise of direction, not
