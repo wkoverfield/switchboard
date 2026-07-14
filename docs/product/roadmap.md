@@ -1678,23 +1678,23 @@ Acceptance:
 - no provider OAuth
 - no cloud secret broker
 
-### Current Slice: Mandate-Scoped Secret Readiness V0
+### Current Slice: Blind Human Golden Path V0
 
-Goal: close the gap between "profiles can use secretRefs" and "mandates can be
-trusted as the local authority context for secret-backed profiles."
+Goal: validate that a non-Wilson developer can install the published package,
+understand the routed-path boundary, clean up direct MCP access, and create a
+bounded pass without private coaching.
 
 Acceptance:
 
-- mandate-scoped tool/profile surfaces report missing secretRefs only for
-  profiles mounted by the active mandate
-- mandate report/escalation surfaces include non-secret readiness blockers for
-  missing secretRefs when they block a scoped run
-- audit entries for secret-backed profile runs remain value-redacted and include
-  mandate context when active
-- docs explain that mandates bind profile access, not raw secret values
-- no provider presets
-- no provider OAuth
-- no cloud secret broker
+- one non-Wilson developer starts from `@switchboard-mcp/cli@latest`
+- `scan` and `import --dry-run` make the direct-route risk legible
+- cleanup and client installation remain backup-protected and value-free
+- the developer creates a pass, observes an allowed or denied routed call, and
+  can explain what Switchboard governs and what can bypass it
+- the run records comprehension and friction findings separately from
+  deterministic smoke-test results
+- P0/P1 findings block the July 28 launch. P2 findings become follow-up issues
+- no new provider integration, remote service, or orchestration scope is added
 
 ## Rules For Future Agents
 
