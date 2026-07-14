@@ -20,7 +20,7 @@
 <body>
 <nav class="site-nav" aria-label="Primary navigation">
   <div class="wrap site-nav-row">
-    <a class="wordmark" href="#top" aria-label="Switchboard home">switchboard</a>
+    <a class="wordmark" href="/" aria-label="Switchboard home">switchboard</a>
     <div class="site-nav-links">
       <a class="nav-link" href="/docs/">Docs</a>
       <a class="nav-link nav-github" href="https://github.com/wkoverfield/switchboard">
@@ -77,7 +77,6 @@
     <div class="section-heading">
       <span class="label section-count">01 / 04</span>
       <span class="label">the loop</span>
-      <button class="loop-toggle" id="loop-toggle" type="button">Pause tour</button>
     </div>
     <div class="loop-layout">
       <div>
@@ -312,7 +311,6 @@ next: switchboard install claude --write</span></pre>
 
   const loop = document.querySelector(".loop");
   const loopPlayback = document.querySelector(".loop-layout");
-  const loopToggle = document.getElementById("loop-toggle");
   const loopTabs = Array.from(document.querySelectorAll(".loop-step"));
   const loopPanels = Array.from(document.querySelectorAll(".terminal-panel"));
   const terminalTitle = document.getElementById("terminal-title");
@@ -358,30 +356,15 @@ next: switchboard install claude --write</span></pre>
     });
   });
 
-  let userPaused = reduceMotion.matches;
-  let pointerPaused = false;
   let focusPaused = false;
 
   function syncLoopPlayback() {
-    const paused = userPaused || pointerPaused || focusPaused || document.hidden || reduceMotion.matches;
+    const paused = focusPaused || document.hidden || reduceMotion.matches;
     loop?.classList.toggle("is-paused", paused);
-    loopToggle.disabled = reduceMotion.matches;
-    loopToggle.textContent = reduceMotion.matches ? "Tour paused" : userPaused ? "Play tour" : "Pause tour";
   }
 
-  loopToggle?.addEventListener("click", () => {
-    userPaused = !userPaused;
-    syncLoopPlayback();
-  });
-  loopPlayback?.addEventListener("mouseenter", () => {
-    pointerPaused = true;
-    syncLoopPlayback();
-  });
-  loopPlayback?.addEventListener("mouseleave", () => {
-    pointerPaused = false;
-    syncLoopPlayback();
-  });
-  loopPlayback?.addEventListener("focusin", () => {
+  loopPlayback?.addEventListener("focusin", (event) => {
+    if (!(event.target instanceof HTMLElement) || !event.target.matches(":focus-visible")) return;
     focusPaused = true;
     syncLoopPlayback();
   });
@@ -392,10 +375,7 @@ next: switchboard install claude --write</span></pre>
     }
   });
   document.addEventListener("visibilitychange", syncLoopPlayback);
-  reduceMotion.addEventListener?.("change", () => {
-    userPaused = reduceMotion.matches;
-    syncLoopPlayback();
-  });
+  reduceMotion.addEventListener?.("change", syncLoopPlayback);
   syncLoopPlayback();
 </script>
 </body>
