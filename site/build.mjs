@@ -35,6 +35,11 @@ mkdirSync(join(distDir, "docs"), { recursive: true });
 // Shared site shell, landing page, and agent-readable docs files.
 copyFileSync(join(siteDir, "src", "index.html"), join(distDir, "index.html"));
 copyFileSync(join(siteDir, "src", "styles.css"), join(distDir, "styles.css"));
+copyFileSync(
+  join(siteDir, "src", "docs-navigation.js"),
+  join(distDir, "docs-navigation.js")
+);
+copyFileSync(join(siteDir, "src", "site.js"), join(distDir, "site.js"));
 for (const name of ["llms.txt", "llms-full.txt"]) {
   const source = join(repoRoot, name);
   if (existsSync(source)) {
@@ -128,6 +133,12 @@ function docsIndexBody(entries) {
 
 function docShell({ title, body, active, entries }) {
   const sections = [...new Set(entries.map((entry) => entry.section))];
+  const prefetchLinks = [
+    '<link rel="prefetch" href="/docs/">',
+    ...entries.map(
+      (entry) => `<link rel="prefetch" href="/docs/${entry.slug}">`
+    )
+  ].join("\n");
   const nav = sections
     .map((section) => {
       const items = entries
@@ -140,6 +151,21 @@ function docShell({ title, body, active, entries }) {
       return `<div class="docs-nav-section"><span>${escapeHtml(section)}</span>\n${items}</div>`;
     })
     .join("\n");
+  const pages = [
+    { slug: "index", href: "/docs/", section: "Overview", title: "Docs" },
+    ...entries.map((entry) => ({
+      ...entry,
+      href: `/docs/${entry.slug}`
+    }))
+  ];
+  const currentIndex = pages.findIndex((page) => page.slug === active);
+  const previousPage = currentIndex > 0 ? pages[currentIndex - 1] : null;
+  const nextPage = currentIndex < pages.length - 1 ? pages[currentIndex + 1] : null;
+  const pageNavigation = `
+    <nav class="docs-page-nav" aria-label="Previous and next documentation pages">
+      ${previousPage ? docsPageLink(previousPage, "previous") : "<span></span>"}
+      ${nextPage ? docsPageLink(nextPage, "next") : ""}
+    </nav>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -151,15 +177,23 @@ function docShell({ title, body, active, entries }) {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+${prefetchLinks}
 <link rel="stylesheet" href="/styles.css">
+<script src="/site.js" defer></script>
+<script src="/docs-navigation.js" defer></script>
 </head>
 <body class="docs-body">
 <nav class="site-nav" aria-label="Primary navigation">
   <div class="wrap site-nav-row">
-    <a href="/" class="wordmark">switchboard</a>
+    <a class="wordmark" href="/" aria-label="Switchboard home">switchboard</a>
     <div class="site-nav-links">
-      <a class="nav-link" href="/docs/">Docs</a>
-      <a class="nav-link" href="https://github.com/wkoverfield/switchboard">GitHub</a>
+      <a class="nav-link" href="/docs/" aria-current="page">Docs</a>
+      <a class="nav-link nav-github" href="https://github.com/wkoverfield/switchboard">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.386-1.335-1.755-1.335-1.755-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297 24 5.67 18.627.297 12 .297Z"/></svg>
+        GitHub
+        <span class="github-stars"><span aria-hidden="true">★</span><span data-github-stars aria-label="0 stars" title="0 stars on GitHub">0</span></span>
+      </a>
+      <a class="button button-accent button-small" href="/docs/install-quickstart">Install</a>
     </div>
   </div>
 </nav>
@@ -169,11 +203,22 @@ ${nav}
   </aside>
   <main class="docs-main">
 ${body}
+${pageNavigation}
   </main>
 </div>
 </body>
 </html>
 `;
+}
+
+function docsPageLink(page, direction) {
+  const isNext = direction === "next";
+  const directionLabel = isNext ? "Next" : "Previous";
+  const arrow = isNext ? "→" : "←";
+  return `<a class="docs-page-link docs-page-link-${direction}" href="${page.href}" aria-label="${directionLabel}: ${escapeHtml(page.title)}">
+        <span class="docs-page-direction">${isNext ? `${escapeHtml(page.section)} · ${directionLabel} ${arrow}` : `${arrow} ${directionLabel} · ${escapeHtml(page.section)}`}</span>
+        <strong>${escapeHtml(page.title)}</strong>
+      </a>`;
 }
 
 function escapeHtml(value) {
