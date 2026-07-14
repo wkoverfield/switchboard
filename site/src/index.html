@@ -99,15 +99,6 @@
 
   /* hero */
   .hero { padding: 88px 0 36px; text-align: center; }
-  .pass-chip {
-    display: inline-flex; align-items: center; gap: 10px;
-    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.12em;
-    color: var(--ink-dim); text-transform: uppercase;
-    border: 1px solid var(--hairline-dark); border-radius: 999px;
-    padding: 6px 14px; margin-bottom: 28px;
-    background: var(--paper-raised);
-  }
-  .pass-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--grant); }
   .hero h1 {
     font-size: clamp(2.3rem, 5.4vw, 3.6rem);
     font-weight: 600;
@@ -274,17 +265,40 @@
   .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
   @media (max-width: 800px) { .stats { grid-template-columns: 1fr; } }
   .stat {
+    position: relative;
     background: var(--paper-raised);
     border: 1px solid var(--hairline-dark);
     padding: 22px 22px 18px;
   }
+  .stat:focus-visible { outline: 2px solid var(--grant); outline-offset: 3px; }
   .stat .big {
     font-size: clamp(2.6rem, 5vw, 3.4rem); font-weight: 600;
     letter-spacing: -0.03em; line-height: 1; margin: 18px 0 10px;
   }
   .stat p { color: var(--ink-dim); font-size: 0.9rem; margin: 0; max-width: 32ch; }
-  .stats-foot {
-    font-size: 0.8rem; color: var(--ink-dim); margin-top: 18px; max-width: 74ch;
+  .source-hint {
+    display: block; margin-top: 16px;
+    font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--ink-dim);
+  }
+  .source-pop {
+    position: absolute; left: 18px; right: 18px; bottom: calc(100% + 10px);
+    z-index: 20; padding: 12px 14px;
+    background: var(--ink); color: var(--paper);
+    border: 1px solid var(--ink); border-radius: 7px;
+    box-shadow: 0 12px 30px rgba(28, 26, 23, 0.2);
+    font-size: 0.78rem; line-height: 1.45;
+    opacity: 0; pointer-events: none; transform: translateY(4px);
+    transition: opacity 160ms var(--ease), transform 160ms var(--ease);
+  }
+  .source-pop::after {
+    content: ""; position: absolute; top: 100%; left: 24px;
+    border: 6px solid transparent; border-top-color: var(--ink);
+  }
+  .source-pop a { color: var(--term-green); text-underline-offset: 2px; }
+  .stat:hover .source-pop,
+  .stat:focus-within .source-pop {
+    opacity: 1; pointer-events: auto; transform: translateY(0);
   }
 
   /* product shot: the dashboard, framed like the credential artifacts */
@@ -504,7 +518,6 @@
       <a class="wordmark" href="/"><svg class="mark" viewBox="0 0 32 32" width="20" height="20" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#3fd68f"/><rect x="9" y="8.5" width="3.4" height="15" rx="1.7" fill="#0d1712"/><rect x="19.6" y="8.5" width="3.4" height="15" rx="1.7" fill="#0d1712"/><circle cx="16" cy="16" r="2.9" fill="#0d1712"/></svg>switchboard</a>
       <div class="links">
         <a href="/docs/">Docs</a>
-        <a href="/docs/roadmap">Roadmap</a>
         <a class="gh" href="https://github.com/wkoverfield/switchboard" aria-label="Switchboard on GitHub">
           <svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12c0 5.303 3.438 9.8 8.205 11.385c.6.113.82-.258.82-.577c0-.285-.01-1.04-.015-2.04c-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729c1.205.084 1.838 1.236 1.838 1.236c1.07 1.835 2.809 1.305 3.495.998c.108-.776.417-1.305.76-1.605c-2.665-.3-5.466-1.332-5.466-5.93c0-1.31.465-2.38 1.235-3.22c-.135-.303-.54-1.523.105-3.176c0 0 1.005-.322 3.3 1.23c.96-.267 1.98-.399 3-.405c1.02.006 2.04.138 3 .405c2.28-1.552 3.285-1.23 3.285-1.23c.645 1.653.24 2.873.12 3.176c.765.84 1.23 1.91 1.23 3.22c0 4.61-2.805 5.625-5.475 5.92c.42.36.81 1.096.81 2.22c0 1.606-.015 2.896-.015 3.286c0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
         </a>
@@ -515,7 +528,6 @@
 
 <header class="hero">
   <div class="wrap">
-    <div class="pass-chip rise"><span class="dot"></span> scoped pass · expires on its own · local-first</div>
     <h1 class="rise d1">Give your coding agents a <span class="pass-word">pass</span>, not your keys.</h1>
     <p class="sub rise d2">
       A firewall and password manager for your AI coding agents. Tokens stay
@@ -680,26 +692,34 @@ npx -y @switchboard-mcp/docs-mcp).
       <p>Whatever your tokens reach, it reaches, and most MCP servers scope nothing of their own. One bad instruction can hit real infrastructure. Switchboard puts the limits on your machine.</p>
     </div>
     <div class="stats">
-      <div class="stat ticked"><span class="tick-b"></span>
+      <div class="stat ticked" tabindex="0" aria-describedby="source-oauth"><span class="tick-b"></span>
         <span class="index">&rarr; stat</span>
         <div class="big">~8.5%</div>
         <p>of MCP servers implement OAuth at all, per a 2026 practitioner survey.</p>
+        <span class="source-hint">source</span>
+        <div class="source-pop" id="source-oauth" role="tooltip">
+          OAuth figure from the <a href="https://nhimg.org/">nhimg.org</a> MCP server practitioner survey.
+        </div>
       </div>
-      <div class="stat ticked"><span class="tick-b"></span>
+      <div class="stat ticked" tabindex="0" aria-describedby="source-scoping"><span class="tick-b"></span>
         <span class="index">&rarr; stat</span>
         <div class="big">~18%</div>
         <p>do any scoping whatsoever. The rest expose everything the token can reach.</p>
+        <span class="source-hint">source</span>
+        <div class="source-pop" id="source-scoping" role="tooltip">
+          Scoping figure from the <a href="https://nhimg.org/">nhimg.org</a> MCP server practitioner survey.
+        </div>
       </div>
-      <div class="stat ticked"><span class="tick-b"></span>
+      <div class="stat ticked" tabindex="0" aria-describedby="source-spec"><span class="tick-b"></span>
         <span class="index">&rarr; date</span>
         <div class="big">Jul 28</div>
         <p>the MCP spec revision lands. Rollout will take the ecosystem years.</p>
+        <span class="source-hint">source</span>
+        <div class="source-pop" id="source-spec" role="tooltip">
+          <a href="https://modelcontextprotocol.io/specification">MCP specification</a>, revision dated July 28, 2026.
+        </div>
       </div>
     </div>
-    <p class="stats-foot">
-      Sources: <a href="https://modelcontextprotocol.io/specification">MCP specification</a> (revision dated July 28, 2026);
-      OAuth and scoping figures from the <a href="https://nhimg.org">nhimg.org</a> MCP server practitioner survey.
-    </p>
   </div>
 </section>
 
