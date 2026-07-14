@@ -1,7 +1,7 @@
 {
   "name": "@switchboard-mcp/cli",
   "mcpName": "io.github.wkoverfield/switchboard",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "type": "module",
   "description": "Local-first MCP profile router for multiple accounts, projects, environments, and AI coding agents.",
   "license": "MIT",

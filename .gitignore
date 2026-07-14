@@ -12,3 +12,4 @@ coverage/
 .switchboard-live-dogfood/
 packages/docs-mcp/docs-bundle/
 site/dist/
+.vercel

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - Hardened the audit log against truncation: each entry now carries a monotonic `seq` (its absolute line position), and every write updates an atomically-replaced head marker (`switchboard.jsonl.head`) recording the tip `{seq, hash}`. `switchboard audit verify` compares the log against the marker and reports tail-truncation ("ends at N entries but the head marker records M") instead of accepting a truncated prefix as "Chain: OK". A removed marker alongside sequenced entries is flagged too. The head marker raises the bar to tampering with two files consistently; it is not an external anchor (deleting both still evades detection), which stays roadmap.
 - Made audit-write failures loud instead of silent: `safeAuditLog` with no error handler now prints a `WARNING audit log write failed` line to stderr. Writes remain fail-open (logging never blocks a tool call), but a dropped entry is no longer invisible.

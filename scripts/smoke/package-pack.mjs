@@ -13,6 +13,7 @@ const versionOf = (dir) =>
 const coreVersion = versionOf("packages/core");
 const runtimeVersion = versionOf("packages/mcp-runtime");
 const cliVersion = versionOf("apps/cli");
+const docsMcpVersion = versionOf("packages/docs-mcp");
 
 const packages = [
   {
@@ -32,6 +33,12 @@ const packages = [
     expectedName: "@switchboard-mcp/cli",
     version: cliVersion,
     expectedTarball: `switchboard-mcp-cli-${cliVersion}.tgz`
+  },
+  {
+    filter: "@switchboard-mcp/docs-mcp",
+    expectedName: "@switchboard-mcp/docs-mcp",
+    version: docsMcpVersion,
+    expectedTarball: `switchboard-mcp-docs-mcp-${docsMcpVersion}.tgz`
   }
 ];
 

@@ -1,6 +1,6 @@
 {
   "name": "@switchboard-mcp/docs-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Official MCP server for the Switchboard docs: list, read, and search them from any agent.",
   "license": "MIT",
