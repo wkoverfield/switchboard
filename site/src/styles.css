@@ -23,66 +23,6 @@
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
-@view-transition {
-  navigation: auto;
-}
-
-::view-transition-old(root) {
-  animation: page-leave 55ms var(--ease-out) both;
-  mix-blend-mode: normal;
-}
-
-::view-transition-new(root) {
-  animation: page-enter 140ms var(--ease-out) 20ms both;
-  mix-blend-mode: normal;
-}
-
-::view-transition-group(root) {
-  animation-duration: 160ms;
-  animation-timing-function: var(--ease-out);
-}
-
-::view-transition-group(site-nav),
-::view-transition-group(docs-sidebar),
-::view-transition-old(site-nav),
-::view-transition-new(site-nav),
-::view-transition-old(docs-sidebar),
-::view-transition-new(docs-sidebar) {
-  animation: none;
-}
-
-:root:active-view-transition-type(enter-docs)::view-transition-group(root) {
-  animation-duration: 180ms;
-}
-
-:root:active-view-transition-type(enter-docs)::view-transition-old(root) {
-  animation: page-leave 55ms var(--ease-out) both;
-}
-
-:root:active-view-transition-type(enter-docs)::view-transition-new(root) {
-  animation: page-enter 160ms var(--ease-out) 20ms both;
-}
-
-:root:active-view-transition-type(enter-docs)::view-transition-new(docs-sidebar) {
-  animation: docs-sidebar-enter 120ms var(--ease-out) 20ms both;
-}
-
-:root:active-view-transition-type(exit-docs)::view-transition-old(docs-sidebar) {
-  animation: docs-sidebar-leave 70ms var(--ease-out) both;
-}
-
-:root:active-view-transition-type(docs-to-docs)::view-transition-group(root) {
-  animation-duration: 120ms;
-}
-
-:root:active-view-transition-type(docs-to-docs)::view-transition-old(root) {
-  animation: docs-page-leave 45ms var(--ease-out) both;
-}
-
-:root:active-view-transition-type(docs-to-docs)::view-transition-new(root) {
-  animation: docs-page-enter 110ms var(--ease-out) both;
-}
-
 * {
   box-sizing: border-box;
 }
@@ -233,7 +173,6 @@ pre {
   background: rgb(10 12 16 / 86%);
   -webkit-backdrop-filter: blur(12px) saturate(150%);
   backdrop-filter: blur(12px) saturate(150%);
-  view-transition-name: site-nav;
 }
 
 .site-nav-row {
@@ -898,60 +837,6 @@ pre {
   }
 }
 
-@keyframes page-leave {
-  to {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-}
-
-@keyframes page-enter {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-}
-
-@keyframes docs-page-leave {
-  to {
-    opacity: 0;
-    transform: translateY(-2px);
-  }
-}
-
-@keyframes docs-page-enter {
-  from {
-    opacity: 0.82;
-    transform: translateY(2px);
-  }
-}
-
-@keyframes docs-sidebar-enter {
-  from {
-    opacity: 0;
-    transform: translateX(-4px);
-  }
-}
-
-@keyframes docs-sidebar-leave {
-  to {
-    opacity: 0;
-    transform: translateX(-4px);
-  }
-}
-
-@keyframes page-fade-leave {
-  to {
-    opacity: 0;
-  }
-}
-
-@keyframes page-fade-enter {
-  from {
-    opacity: 0;
-  }
-}
-
 .rise {
   animation: rise 640ms var(--ease-out) both;
 }
@@ -982,7 +867,6 @@ pre {
   padding: 30px 20px;
   border-right: 1px solid var(--line);
   background: rgb(14 17 20 / 76%);
-  view-transition-name: docs-sidebar;
 }
 
 .docs-nav-section {
@@ -1298,32 +1182,6 @@ pre {
 
   .rise,
   .loop-progress {
-    animation: none !important;
-  }
-
-  ::view-transition-old(root),
-  ::view-transition-new(root) {
-    mix-blend-mode: normal;
-  }
-
-  ::view-transition-group(root) {
-    animation-duration: 80ms !important;
-  }
-
-  ::view-transition-old(root) {
-    animation: page-fade-leave 50ms var(--ease-out) both !important;
-  }
-
-  ::view-transition-new(root) {
-    animation: page-fade-enter 80ms var(--ease-out) both !important;
-  }
-
-  ::view-transition-group(site-nav),
-  ::view-transition-group(docs-sidebar),
-  ::view-transition-old(site-nav),
-  ::view-transition-new(site-nav),
-  ::view-transition-old(docs-sidebar),
-  ::view-transition-new(docs-sidebar) {
     animation: none !important;
   }
 
