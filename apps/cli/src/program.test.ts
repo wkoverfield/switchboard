@@ -5683,6 +5683,32 @@ describe("switchboard CLI program", () => {
     );
   });
 
+  it("status reports the enforcement mode so you know if strict is on", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message)
+    });
+
+    await program.parseAsync(["--cwd", root, "status"], { from: "user" });
+    expect(output[output.length - 1]).toContain("Enforcement: default");
+
+    writeFileSync(
+      join(root, ".switchboard.yaml"),
+      ["version: 1", "enforcement: strict"].join("\n")
+    );
+    await program.parseAsync(["--cwd", root, "status", "--json"], {
+      from: "user"
+    });
+    const parsed = JSON.parse(output[output.length - 1] ?? "{}") as {
+      enforcement: string;
+    };
+    expect(parsed.enforcement).toBe("strict");
+
+    await program.parseAsync(["--cwd", root, "status"], { from: "user" });
+    expect(output[output.length - 1]).toContain("Enforcement: strict");
+  });
+
   it("status says unknown, not none, when the mandate store is corrupt", async () => {
     const root = makeTempProject();
     writeMandateConfig(root);
