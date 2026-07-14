@@ -131,8 +131,6 @@
   .btn.primary:hover { background: #000; }
   .btn.ghost { color: var(--ink); border-color: var(--hairline-dark); background: var(--paper-raised); }
   .btn.ghost:hover { border-color: var(--ink); }
-  /* explicit z-index: sibling entrance animations create stacking contexts
-     that would otherwise paint over the prompt preview popover */
   .install-area { margin-top: 18px; position: relative; z-index: 5; }
   .mode {
     display: inline-flex; align-items: center; gap: 12px;
@@ -160,8 +158,7 @@
   }
   .install .p { margin-right: 8px; }
   .install .p { color: var(--grant); user-select: none; }
-  /* the copy-paste setup prompt for agents: a pill the same size as the
-     install command, full prompt on hover/focus, click to copy */
+  /* the copy-paste setup prompt for agents */
   .prompt-wrap { position: relative; display: block; width: fit-content; margin: 0 auto; }
   .prompt-pill {
     display: inline-flex; align-items: center; gap: 10px;
@@ -179,34 +176,6 @@
   .prompt-pill .glyph { color: var(--grant); }
   .prompt-pill.copied { border-color: var(--grant); }
   .prompt-pill.copied .label { color: var(--grant); }
-  .prompt-pop {
-    position: absolute; top: calc(100% + 10px); left: 50%;
-    transform: translateX(-50%);
-    width: min(640px, 92vw);
-    text-align: left;
-    background: var(--paper-raised);
-    border: 1px solid var(--hairline-dark); border-radius: 10px;
-    box-shadow: 0 14px 34px rgba(28, 26, 23, 0.16);
-    overflow: hidden;
-    z-index: 30;
-    opacity: 0; pointer-events: none; translate: 0 -4px;
-    transition: opacity 180ms var(--ease), translate 180ms var(--ease);
-  }
-  .prompt-wrap:hover .prompt-pop,
-  .prompt-wrap:focus-within .prompt-pop { opacity: 1; pointer-events: auto; translate: 0 0; }
-  .prompt-head {
-    padding: 8px 14px;
-    border-bottom: 1px solid var(--hairline);
-    font-family: var(--font-mono); font-size: 0.68rem;
-    letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-dim);
-  }
-  .prompt-pop pre {
-    margin: 0; padding: 14px 16px;
-    font-family: var(--font-mono); font-size: 0.74rem; line-height: 1.6;
-    color: var(--ink);
-    overflow-x: auto;
-    user-select: all;
-  }
   /* CSS-only toggle; if :has is unsupported both variants show, which is fine */
   .install-area:has(#mode-human:checked) .prompt-wrap { display: none; }
   .install-area:has(#mode-agent:checked) .install.human { display: none; }
@@ -548,13 +517,11 @@
       </div>
       <code class="install human"><span class="p">$</span> npm install -g @switchboard-mcp/cli</code>
       <div class="prompt-wrap">
-        <button class="prompt-pill" type="button" aria-describedby="setup-prompt">
+        <button class="prompt-pill" type="button">
           <span class="glyph">⧉</span>
           <span class="label">copy the setup prompt</span>
         </button>
-        <div class="prompt-pop" role="tooltip">
-          <div class="prompt-head">paste this into claude code, codex, or cursor</div>
-          <pre id="setup-prompt">Set up Switchboard in this repo. It puts you, the agent, on a scoped
+        <pre id="setup-prompt" hidden>Set up Switchboard in this repo. It puts you, the agent, on a scoped
 expiring pass instead of raw keys. Reference: llms.txt at
 https://github.com/wkoverfield/switchboard (or add the docs MCP server:
 npx -y @switchboard-mcp/docs-mcp).
@@ -570,7 +537,6 @@ npx -y @switchboard-mcp/docs-mcp).
 6. Ask me how long the pass should last, then `switchboard grant --for &lt;duration&gt;`.
 7. Verify with `switchboard status` and `switchboard doctor`, and report what
    is now allowed, approval-gated, and denied.</pre>
-        </div>
       </div>
     </div>
     <div class="fine rise d5"><span>No account</span><span>No server</span><span>No telemetry</span><span>MIT</span></div>
@@ -910,8 +876,7 @@ $ npx -y @switchboard-mcp/cli@latest scan</pre>
 </footer>
 
 <script>
-  // Progressive enhancement: click-to-copy on the prompt pill. Without JS
-  // the hover preview still shows the prompt, select-all copyable.
+  // Click-to-copy on the prompt pill.
   const pill = document.querySelector(".prompt-pill");
   const pillLabel = document.querySelector(".prompt-pill .label");
   const promptText = document.getElementById("setup-prompt");
@@ -926,7 +891,7 @@ $ npx -y @switchboard-mcp/cli@latest scan</pre>
           pill.classList.remove("copied");
         }, 2000);
       } catch {
-        promptText.focus();
+        pillLabel.textContent = "copy failed. try again";
       }
     });
   }
