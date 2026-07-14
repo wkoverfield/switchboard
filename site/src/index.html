@@ -131,8 +131,6 @@
   .btn.primary:hover { background: #000; }
   .btn.ghost { color: var(--ink); border-color: var(--hairline-dark); background: var(--paper-raised); }
   .btn.ghost:hover { border-color: var(--ink); }
-  /* explicit z-index: sibling entrance animations create stacking contexts
-     that would otherwise paint over the prompt preview popover */
   .install-area { margin-top: 18px; position: relative; z-index: 5; }
   .mode {
     display: inline-flex; align-items: center; gap: 12px;
@@ -160,8 +158,7 @@
   }
   .install .p { margin-right: 8px; }
   .install .p { color: var(--grant); user-select: none; }
-  /* the copy-paste setup prompt for agents: a pill the same size as the
-     install command, full prompt on hover/focus, click to copy */
+  /* the copy-paste setup prompt for agents */
   .prompt-wrap { position: relative; display: block; width: fit-content; margin: 0 auto; }
   .prompt-pill {
     display: inline-flex; align-items: center; gap: 10px;
@@ -179,34 +176,6 @@
   .prompt-pill .glyph { color: var(--grant); }
   .prompt-pill.copied { border-color: var(--grant); }
   .prompt-pill.copied .label { color: var(--grant); }
-  .prompt-pop {
-    position: absolute; top: calc(100% + 10px); left: 50%;
-    transform: translateX(-50%);
-    width: min(640px, 92vw);
-    text-align: left;
-    background: var(--paper-raised);
-    border: 1px solid var(--hairline-dark); border-radius: 10px;
-    box-shadow: 0 14px 34px rgba(28, 26, 23, 0.16);
-    overflow: hidden;
-    z-index: 30;
-    opacity: 0; pointer-events: none; translate: 0 -4px;
-    transition: opacity 180ms var(--ease), translate 180ms var(--ease);
-  }
-  .prompt-wrap:hover .prompt-pop,
-  .prompt-wrap:focus-within .prompt-pop { opacity: 1; pointer-events: auto; translate: 0 0; }
-  .prompt-head {
-    padding: 8px 14px;
-    border-bottom: 1px solid var(--hairline);
-    font-family: var(--font-mono); font-size: 0.68rem;
-    letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-dim);
-  }
-  .prompt-pop pre {
-    margin: 0; padding: 14px 16px;
-    font-family: var(--font-mono); font-size: 0.74rem; line-height: 1.6;
-    color: var(--ink);
-    overflow-x: auto;
-    user-select: all;
-  }
   /* CSS-only toggle; if :has is unsupported both variants show, which is fine */
   .install-area:has(#mode-human:checked) .prompt-wrap { display: none; }
   .install-area:has(#mode-agent:checked) .install.human { display: none; }
@@ -276,13 +245,9 @@
     letter-spacing: -0.03em; line-height: 1; margin: 18px 0 10px;
   }
   .stat p { color: var(--ink-dim); font-size: 0.9rem; margin: 0; max-width: 32ch; }
-  .source-hint {
-    display: block; margin-top: 16px;
-    font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.1em;
-    text-transform: uppercase; color: var(--ink-dim);
-  }
   .source-pop {
-    position: absolute; left: 18px; right: 18px; bottom: calc(100% + 10px);
+    position: fixed; left: -999px; top: -999px;
+    width: min(320px, calc(100vw - 24px));
     z-index: 20; padding: 12px 14px;
     background: var(--ink); color: var(--paper);
     border: 1px solid var(--ink); border-radius: 7px;
@@ -291,13 +256,8 @@
     opacity: 0; pointer-events: none; transform: translateY(4px);
     transition: opacity 160ms var(--ease), transform 160ms var(--ease);
   }
-  .source-pop::after {
-    content: ""; position: absolute; top: 100%; left: 24px;
-    border: 6px solid transparent; border-top-color: var(--ink);
-  }
   .source-pop a { color: var(--term-green); text-underline-offset: 2px; }
-  .stat:hover .source-pop,
-  .stat:focus-within .source-pop {
+  .source-pop.is-visible {
     opacity: 1; pointer-events: auto; transform: translateY(0);
   }
 
@@ -548,13 +508,11 @@
       </div>
       <code class="install human"><span class="p">$</span> npm install -g @switchboard-mcp/cli</code>
       <div class="prompt-wrap">
-        <button class="prompt-pill" type="button" aria-describedby="setup-prompt">
+        <button class="prompt-pill" type="button">
           <span class="glyph">⧉</span>
           <span class="label">copy the setup prompt</span>
         </button>
-        <div class="prompt-pop" role="tooltip">
-          <div class="prompt-head">paste this into claude code, codex, or cursor</div>
-          <pre id="setup-prompt">Set up Switchboard in this repo. It puts you, the agent, on a scoped
+        <pre id="setup-prompt" hidden>Set up Switchboard in this repo. It puts you, the agent, on a scoped
 expiring pass instead of raw keys. Reference: llms.txt at
 https://github.com/wkoverfield/switchboard (or add the docs MCP server:
 npx -y @switchboard-mcp/docs-mcp).
@@ -570,7 +528,6 @@ npx -y @switchboard-mcp/docs-mcp).
 6. Ask me how long the pass should last, then `switchboard grant --for &lt;duration&gt;`.
 7. Verify with `switchboard status` and `switchboard doctor`, and report what
    is now allowed, approval-gated, and denied.</pre>
-        </div>
       </div>
     </div>
     <div class="fine rise d5"><span>No account</span><span>No server</span><span>No telemetry</span><span>MIT</span></div>
@@ -696,7 +653,6 @@ npx -y @switchboard-mcp/docs-mcp).
         <span class="index">&rarr; stat</span>
         <div class="big">~8.5%</div>
         <p>of MCP servers implement OAuth at all, per a 2026 practitioner survey.</p>
-        <span class="source-hint">source</span>
         <div class="source-pop" id="source-oauth" role="tooltip">
           OAuth figure from the <a href="https://nhimg.org/">nhimg.org</a> MCP server practitioner survey.
         </div>
@@ -705,7 +661,6 @@ npx -y @switchboard-mcp/docs-mcp).
         <span class="index">&rarr; stat</span>
         <div class="big">~18%</div>
         <p>do any scoping whatsoever. The rest expose everything the token can reach.</p>
-        <span class="source-hint">source</span>
         <div class="source-pop" id="source-scoping" role="tooltip">
           Scoping figure from the <a href="https://nhimg.org/">nhimg.org</a> MCP server practitioner survey.
         </div>
@@ -714,7 +669,6 @@ npx -y @switchboard-mcp/docs-mcp).
         <span class="index">&rarr; date</span>
         <div class="big">Jul 28</div>
         <p>the MCP spec revision lands. Rollout will take the ecosystem years.</p>
-        <span class="source-hint">source</span>
         <div class="source-pop" id="source-spec" role="tooltip">
           <a href="https://modelcontextprotocol.io/specification">MCP specification</a>, revision dated July 28, 2026.
         </div>
@@ -910,8 +864,7 @@ $ npx -y @switchboard-mcp/cli@latest scan</pre>
 </footer>
 
 <script>
-  // Progressive enhancement: click-to-copy on the prompt pill. Without JS
-  // the hover preview still shows the prompt, select-all copyable.
+  // Click-to-copy on the prompt pill.
   const pill = document.querySelector(".prompt-pill");
   const pillLabel = document.querySelector(".prompt-pill .label");
   const promptText = document.getElementById("setup-prompt");
@@ -926,10 +879,53 @@ $ npx -y @switchboard-mcp/cli@latest scan</pre>
           pill.classList.remove("copied");
         }, 2000);
       } catch {
-        promptText.focus();
+        pillLabel.textContent = "copy failed. try again";
       }
     });
   }
+
+  // Keep source notes close to the pointer instead of anchoring them to the
+  // much larger stat cards. Focused cards use their center as a fallback.
+  document.querySelectorAll(".stat").forEach((stat) => {
+    const pop = stat.querySelector(".source-pop");
+    if (!pop) return;
+
+    let hideTimer;
+    const hide = () => {
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => pop.classList.remove("is-visible"), 100);
+    };
+    const show = () => {
+      clearTimeout(hideTimer);
+      pop.classList.add("is-visible");
+    };
+    const place = (x, y) => {
+      show();
+      const gap = 14;
+      const edge = 12;
+      const width = pop.offsetWidth;
+      const height = pop.offsetHeight;
+      const left = Math.max(edge, Math.min(x + gap, window.innerWidth - width - edge));
+      const below = y + gap;
+      const top = below + height <= window.innerHeight - edge
+        ? below
+        : Math.max(edge, y - height - gap);
+      pop.style.left = `${left}px`;
+      pop.style.top = `${top}px`;
+    };
+
+    stat.addEventListener("pointermove", (event) => place(event.clientX, event.clientY));
+    stat.addEventListener("pointerleave", hide);
+    pop.addEventListener("pointerenter", show);
+    pop.addEventListener("pointerleave", hide);
+    stat.addEventListener("focusin", () => {
+      const rect = stat.getBoundingClientRect();
+      place(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    });
+    stat.addEventListener("focusout", (event) => {
+      if (!pop.contains(event.relatedTarget)) hide();
+    });
+  });
 
   // Waitlist: AJAX submit keeps the visitor on the page; without JS the
   // form still POSTs to Formspree and lands on their confirmation page.
