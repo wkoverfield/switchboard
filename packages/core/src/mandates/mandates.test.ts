@@ -1,4 +1,4 @@
-import { mkdtemp, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -35,6 +35,50 @@ describe("mandates", () => {
   it("normalizes task names into stable mandate ids", () => {
     expect(normalizeMandateId(" Fix CI on PR #214 ")).toBe("fix-ci-on-pr-214");
     expect(normalizeMandateId("release_agent")).toBe("release_agent");
+  });
+
+  it("resolves passes through symlink-equivalent repository paths", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-paths-"));
+    const path = join(root, "mandates.json");
+    const repoPath = join(root, "repo");
+    const aliasPath = join(root, "repo-alias");
+    await mkdir(repoPath);
+    await symlink(repoPath, aliasPath);
+
+    await createMandate({
+      path,
+      now: () => new Date("2026-06-19T16:00:00.000Z"),
+      task: "canonical-path",
+      repoPath: aliasPath,
+      worktreePath: aliasPath,
+      branch: "main",
+      agentRole: "tester",
+      profiles: ["local_echo"],
+      lease: "1h"
+    });
+
+    await expect(
+      resolveActiveMandate({
+        path,
+        repoPath,
+        id: "canonical-path",
+        now: () => new Date("2026-06-19T16:30:00.000Z")
+      })
+    ).resolves.toMatchObject({ runtimeStatus: "active" });
+
+    await expect(
+      createMandate({
+        path,
+        now: () => new Date("2026-06-19T16:31:00.000Z"),
+        task: "canonical-path",
+        repoPath,
+        worktreePath: repoPath,
+        branch: "main",
+        agentRole: "tester",
+        profiles: ["local_echo"],
+        lease: "1h"
+      })
+    ).rejects.toThrow('active mandate "canonical-path" already exists');
   });
 
   it("parses positive minute, hour, and day leases", () => {
