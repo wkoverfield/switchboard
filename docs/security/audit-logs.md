@@ -43,15 +43,18 @@ Audit logs are local only. Switchboard does not upload audit logs automatically.
 
 ## Tamper evidence
 
-Audit entries are hash-chained. Each entry carries two extra fields:
+Audit entries are hash-chained. Each entry carries three extra fields:
 
 - `prevHash`: the `hash` of the previous entry, or the literal string
   `genesis` for the first chained entry.
 - `hash`: `sha256:<hex>` over the entry's own JSON with the `hash` field
   removed.
+- `seq`: the entry's absolute line position, part of the hashed content.
 
 Appends take a lockfile next to the log so concurrent writers (the daemon and
-CLI commands) cannot fork the chain. Logs written before this change have no
+CLI commands) cannot fork the chain. Each append also updates a head marker,
+`switchboard.jsonl.head` (`{seq, hash}` of the newest entry), written under the
+same lock and replaced atomically. Logs written before this change have no
 hash fields; they are counted as legacy entries and the chain starts at the
 first chained entry after them.
 
@@ -62,13 +65,20 @@ switchboard audit verify
 switchboard audit verify --json
 ```
 
-Verification reports total, chained, and legacy entry counts, and the exact
-line number and reason for every break. The command exits nonzero on failure.
+Verification reports total, chained, and legacy entry counts, the number of
+entries the head marker expects, and the exact line number and reason for every
+break. The command exits nonzero on failure.
 
-What the chain detects: any in-place edit, insertion, deletion, or reordering
-within the retained portion of the file. What it does not detect: truncating
-the file back to a valid prefix, replacing the whole file and recomputing every
-hash, or entries that were never written (audit writes are fail-open by design
-so logging can never block a tool call). Signing and external anchoring, which
-would close the first two gaps, are on the roadmap. The
+What verification detects: any in-place edit, insertion, deletion, or
+reordering within the retained portion of the file, and, via the head marker,
+truncation of the tail (`ends at N entries but the head marker records M`) or a
+removed marker alongside sequenced entries. A failed audit write is also loud:
+with no error handler it prints `WARNING audit log write failed` to stderr, so
+a dropped entry is visible rather than silent. Writes stay fail-open by design
+(logging never blocks a tool call), but no longer silent.
+
+What it still does not detect: an actor who deletes both the log and its head
+marker, or rewrites the whole file and recomputes every hash plus the marker.
+The head marker makes truncation loud, not impossible; external signing and
+anchoring, which close that last gap, are on the roadmap. The
 [threat model](threat-model.md) covers this surface in full.

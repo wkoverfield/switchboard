@@ -836,7 +836,8 @@ export function createProgram(io: ProgramIo = {}): Command {
               counts: {
                 totalLines: verification.totalLines,
                 chainedEntries: verification.chainedEntries,
-                legacyEntries: verification.legacyEntries
+                legacyEntries: verification.legacyEntries,
+                expectedEntries: verification.expectedEntries
               },
               failures: verification.failures
             },
@@ -9345,7 +9346,10 @@ function formatAuditVerification(
   const lines = [
     "Switchboard audit log verification",
     `Path: ${verification.path}`,
-    `Entries: ${verification.totalLines} total, ${verification.chainedEntries} chained, ${verification.legacyEntries} legacy (pre-chain)`
+    `Entries: ${verification.totalLines} total, ${verification.chainedEntries} chained, ${verification.legacyEntries} legacy (pre-chain)`,
+    ...(verification.expectedEntries !== null
+      ? [`Head marker: expects ${verification.expectedEntries} entries`]
+      : [])
   ];
 
   if (verification.ok) {

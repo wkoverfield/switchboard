@@ -25,9 +25,11 @@ a shipped control.
   and Supabase Dev: recommended allow/deny/approval policy per provider.
 - **Human approvals**: gated calls block until a human decides, via the CLI
   or in-client MCP elicitation.
-- **Tamper-evident audit**: hash-chained local JSONL, `switchboard audit
-  verify`, and a local read-only dashboard for passes, denials, and the
-  audit stream.
+- **Tamper-evident audit**: hash-chained local JSONL with per-entry sequence
+  numbers and an out-of-band head marker, so `switchboard audit verify`
+  catches tail-truncation (not just in-place edits) and audit-write failures
+  are loud, not silent. Plus a local read-only dashboard for passes, denials,
+  and the audit stream. External anchoring/signing stays roadmap (see Later).
 - **Opt-in strict mode**: set `enforcement: strict` in `.switchboard.yaml`
   (or pass `--strict` to `switchboard mcp` / `switchboard serve`) and an
   unbound connection is denied instead of served ungoverned. No pass means an

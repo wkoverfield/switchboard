@@ -338,21 +338,33 @@ its own accounting:
   `0o600`. Every entry passes secret-pattern redaction before write. Audit
   failures never block the underlying call (`safeAuditLog`); availability of
   the action wins over completeness of the log, which is the right tradeoff
-  for a local guardrail and the wrong one for a compliance system. Stated so
-  nobody mistakes which one this is.
+  for a local guardrail and the wrong one for a compliance system. A failed
+  write is not silent, though: with no error handler supplied it prints a loud
+  `WARNING audit log write failed` to stderr, so a dropped entry surfaces
+  rather than passing unnoticed.
 - **Integrity.** Entries are hash-chained: each entry records the previous
-  entry's hash, and `switchboard audit verify` validates the chain and each
-  entry's self-hash. Legacy (pre-chain) entries are reported as unchained
+  entry's hash and a monotonic sequence number (its absolute line position),
+  and `switchboard audit verify` validates the chain, each entry's self-hash,
+  and seq continuity. Legacy (pre-chain) entries are reported as unchained
   rather than failing verification.
+- **Truncation detection.** Each write also updates a head marker
+  (`switchboard.jsonl.head`, `{seq, hash}`) next to the log, replaced
+  atomically under the same lock. `verify` compares the log against it: a log
+  that ends at a lower seq than the marker records is reported as truncated
+  (`ends at N entries but the head marker records M`), and a log with
+  sequenced entries but no marker is reported as an unverifiable-completeness
+  state rather than "OK". This is what makes tail-truncation loud instead of
+  silently passing as a valid prefix.
 - **What the chain proves:** no in-place edit, insertion, deletion, or
   reordering within the retained portion of the file since the entries were
-  written.
-- **What the chain does not prove:** that the file was not truncated back to a
-  valid prefix; that the whole file was not rewritten by an actor who
-  recomputes hashes (A4 again); that entries were not simply never written
-  (audit is fail-open by design, above). Remote anchoring or countersigning
-  would address the first two and is out of scope for 0.1.x; it is on the
-  roadmap alongside export sinks.
+  written, and (via the head marker) no truncation of the tail while the
+  marker is present.
+- **What it still does not prove:** that an actor who deletes *both* the log
+  and its head marker, or rewrites the whole file and recomputes hashes *and*
+  the marker (A4 again), did not do so. The head marker raises the bar to
+  "tamper with two files consistently" but is not an external anchor. Remote
+  anchoring or countersigning is what closes that gap; it is out of scope for
+  0.1.x and on the roadmap alongside export sinks.
 - **Content.** Metadata only: action, status, profile, namespace, tool, pass
   ids, gate ids, duration, truncated redacted snippets for `run`. No prompts,
   no tool arguments or results, no secret values. Logs never leave the machine
@@ -379,8 +391,11 @@ The short list a reviewer should walk away with:
    intentionally not in 0.1.x.
 5. **Revocation is next-call, not in-flight.** An executing call completes.
 6. **Policy hash is recorded, not re-verified at call time.**
-7. **Audit chain does not survive whole-file rewrite or tail truncation**, and
-   audit is fail-open by design. Signing/anchoring is future work.
+7. **Audit tail-truncation is now detected** via the head marker (verify
+   reports "ends at N, marker records M"), and audit-write failures are loud on
+   stderr, not silent. Still open: an actor who deletes both the log and its
+   marker, or rewrites the whole file plus the marker, evades detection.
+   External signing/anchoring is future work.
 8. **Redaction is pattern-based**, not a taint system.
 9. **Approval fatigue** is a human-factors risk the gate design has to keep
    earning.

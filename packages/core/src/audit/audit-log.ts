@@ -5,8 +5,10 @@ import {
   mkdir,
   open,
   readFile,
+  rename,
   rm,
-  stat
+  stat,
+  writeFile
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -46,8 +48,22 @@ export interface AuditLogEntry {
   stderrSnippet?: string;
   durationMs?: number;
   error?: string;
+  // Absolute 0-based line position in the log, part of the hashed content. A
+  // head marker records the latest seq so `verifyAuditLog` can detect
+  // tail-truncation: a truncated log ends at a lower seq than the head records.
+  seq?: number;
   prevHash?: string;
   hash?: string;
+}
+
+// The tip of the chain, recorded outside the append-only log so truncation is
+// detectable. Written next to the log under the same lock, replaced
+// atomically. If an attacker can truncate the log they can also delete this
+// marker, but then verification reports "cannot confirm completeness" instead
+// of a false "chain OK": the marker makes truncation loud, not impossible.
+export interface AuditLogHead {
+  seq: number;
+  hash: string;
 }
 
 export interface AuditLogger {
@@ -84,6 +100,10 @@ export interface AuditLogVerification {
   totalLines: number;
   chainedEntries: number;
   legacyEntries: number;
+  // The head marker as read from disk (null when absent, e.g. a legacy log or
+  // a deleted marker). `expectedEntries` is head.seq + 1 when a marker exists.
+  headMarker: AuditLogHead | null;
+  expectedEntries: number | null;
   failures: AuditLogVerificationFailure[];
 }
 
@@ -125,21 +145,25 @@ export function createJsonlAuditLogger(
       await mkdir(dirname(path), { recursive: true, mode: 0o700 });
       await withAuditLogLock(path, async () => {
         const prevHash = await readChainTipHash(path);
+        const seq = await nextAuditLogSeq(path);
         const unhashedEntry: Omit<AuditLogEntry, "hash"> = {
           version: 1,
           timestamp: now().toISOString(),
           ...redactAuditEntry(entry),
+          seq,
           prevHash
         };
-        const completeEntry: AuditLogEntry = {
-          ...unhashedEntry,
-          hash: computeAuditLogEntryHash(unhashedEntry)
-        };
+        const hash = computeAuditLogEntryHash(unhashedEntry);
+        const completeEntry: AuditLogEntry = { ...unhashedEntry, hash };
 
         await appendFile(path, `${JSON.stringify(completeEntry)}\n`, {
           mode: 0o600
         });
         await chmod(path, 0o600);
+        // Update the head marker last: if this write fails after the append,
+        // verification sees "more entries than the head records" and flags it,
+        // rather than silently accepting a shorter-than-real chain.
+        await writeAuditLogHead(path, { seq, hash });
       });
     }
   };
@@ -159,7 +183,18 @@ export async function safeAuditLog(
   try {
     await logger.log(entry);
   } catch (error) {
-    options.onError?.(error);
+    // A failed audit write must not abort the routed call, but it must not be
+    // silent either: an attacker who can make audit writes fail should not get
+    // unlogged actions for free. Callers can pass onError to route it; the
+    // default is a loud stderr warning (stdout is the MCP protocol channel).
+    if (options.onError) {
+      options.onError(error);
+      return;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(
+      `switchboard: WARNING audit log write failed, action not recorded: ${message}\n`
+    );
   }
 }
 
@@ -192,7 +227,9 @@ export async function verifyAuditLog(
   const failures: AuditLogVerificationFailure[] = [];
   let chainedEntries = 0;
   let legacyEntries = 0;
+  let sequencedEntries = 0;
   let previousHash: string | undefined;
+  let lastHash: string | undefined;
 
   lines.forEach((line, index) => {
     const lineNumber = index + 1;
@@ -249,8 +286,56 @@ export async function verifyAuditLog(
       });
     }
 
+    // seq is the entry's absolute line position. A mismatch means lines were
+    // added or removed ahead of this one (which also shifts every seq after a
+    // middle deletion), independent of the hash-link check above.
+    if (parsed.seq !== undefined) {
+      sequencedEntries += 1;
+      if (parsed.seq !== index) {
+        failures.push({
+          lineNumber,
+          reason: `entry seq ${parsed.seq} does not match its line position ${index} (entries were removed or inserted)`
+        });
+      }
+    }
+
     previousHash = hash;
+    lastHash = hash;
   });
+
+  // Compare the log against the head marker written outside it. This is what
+  // makes tail-truncation detectable: a valid prefix of the chain still passes
+  // every per-line check, but ends at a lower seq than the head records.
+  const headMarker = await readAuditLogHead(path);
+  const expectedEntries = headMarker ? headMarker.seq + 1 : null;
+  if (headMarker) {
+    if (lines.length < headMarker.seq + 1) {
+      failures.push({
+        lineNumber: lines.length,
+        reason: `audit log ends at ${lines.length} ${lines.length === 1 ? "entry" : "entries"} but the head marker records ${headMarker.seq + 1} (entries were truncated from the end)`
+      });
+    } else if (lines.length > headMarker.seq + 1) {
+      failures.push({
+        lineNumber: lines.length,
+        reason: `audit log has ${lines.length} entries but the head marker records only ${headMarker.seq + 1} (the head marker was not updated; possible tampering or an interrupted write)`
+      });
+    } else if (lastHash !== undefined && lastHash !== headMarker.hash) {
+      failures.push({
+        lineNumber: lines.length,
+        reason:
+          "final entry hash does not match the head marker (the last entry was modified or replaced)"
+      });
+    }
+  } else if (sequencedEntries > 0) {
+    // Sequenced entries were written by a version that also writes a head
+    // marker, so a missing marker means it was removed. Report it rather than
+    // silently accepting an unverifiable-completeness log.
+    failures.push({
+      lineNumber: lines.length,
+      reason:
+        "audit head marker is missing but the log contains sequenced entries (removed marker; chain completeness cannot be confirmed)"
+    });
+  }
 
   return {
     ok: failures.length === 0,
@@ -258,6 +343,8 @@ export async function verifyAuditLog(
     totalLines: lines.length,
     chainedEntries,
     legacyEntries,
+    headMarker,
+    expectedEntries,
     failures
   };
 }
@@ -285,6 +372,60 @@ async function readChainTipHash(path: string): Promise<string> {
 
   // Legacy tail (pre-chain entry or unparseable line): start a fresh chain.
   return auditLogChainGenesis;
+}
+
+function auditLogHeadPath(path: string): string {
+  return `${path}.head`;
+}
+
+export async function readAuditLogHead(
+  path: string
+): Promise<AuditLogHead | null> {
+  const raw = await readFile(auditLogHeadPath(path), "utf8").catch(
+    (error: unknown) => {
+      if (isNodeErrorCode(error, "ENOENT")) {
+        return undefined;
+      }
+      throw error;
+    }
+  );
+  if (raw === undefined) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<AuditLogHead>;
+    if (typeof parsed.seq === "number" && typeof parsed.hash === "string") {
+      return { seq: parsed.seq, hash: parsed.hash };
+    }
+  } catch {
+    // A corrupt marker is treated as absent; verification then reports the
+    // marker as missing rather than trusting an unparseable tip.
+  }
+  return null;
+}
+
+async function writeAuditLogHead(
+  path: string,
+  head: AuditLogHead
+): Promise<void> {
+  const headPath = auditLogHeadPath(path);
+  const tempPath = `${headPath}.${process.pid}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(head)}\n`, { mode: 0o600 });
+  // Atomic replace so a reader never sees a half-written marker.
+  await rename(tempPath, headPath);
+}
+
+// The next entry's seq is its absolute line position. The head marker records
+// the last seq, so this is O(1) once a marker exists; only a pre-existing log
+// with no marker (e.g. written before head markers) pays a one-time line count.
+async function nextAuditLogSeq(path: string): Promise<number> {
+  const head = await readAuditLogHead(path);
+  if (head) {
+    return head.seq + 1;
+  }
+  const raw = await readAuditLogFile(path);
+  return raw.split("\n").filter(Boolean).length;
 }
 
 async function readLastAuditLogLine(
