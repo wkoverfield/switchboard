@@ -1,4 +1,4 @@
-/* global document, fetch, localStorage */
+/* global document, fetch, localStorage, window */
 
 (() => {
   const counters = document.querySelectorAll("[data-github-stars]");
@@ -55,4 +55,43 @@
       }
     })
     .catch(() => {});
+})();
+
+(() => {
+  const form = document.querySelector("[data-team-interest]");
+  if (!(form instanceof window.HTMLFormElement)) return;
+
+  const button = form.querySelector("button[type='submit']");
+  const buttonLabel = button?.querySelector("span");
+  const status = form.querySelector("[aria-live]");
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    form.removeAttribute("data-state");
+    if (status) status.textContent = "";
+    if (button) button.disabled = true;
+    if (buttonLabel) buttonLabel.textContent = "Joining...";
+
+    try {
+      const response = await fetch(form.action, {
+        method: "POST",
+        body: new window.FormData(form),
+        headers: { Accept: "application/json" }
+      });
+
+      if (!response.ok) throw new Error("Form submission failed");
+
+      form.reset();
+      form.dataset.state = "success";
+      if (status) {
+        status.textContent = "You’re on the list. We’ll email you when team controls are ready.";
+      }
+    } catch {
+      form.dataset.state = "error";
+      if (status) status.textContent = "Couldn’t join right now. Please try again.";
+    } finally {
+      if (button) button.disabled = false;
+      if (buttonLabel) buttonLabel.textContent = "Join the list";
+    }
+  });
 })();
