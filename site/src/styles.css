@@ -201,15 +201,15 @@ pre {
   font-size: 0.72rem;
 }
 
+.nav-github {
+  gap: 6px;
+}
+
 .github-stars {
   display: inline-flex;
-  min-width: 34px;
   align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-  padding-left: 8px;
-  border-left: 1px solid var(--line-strong);
-  color: var(--ink);
+  gap: 3px;
+  color: inherit;
   font-variant-numeric: tabular-nums;
 }
 
