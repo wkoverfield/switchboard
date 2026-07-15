@@ -779,10 +779,64 @@ pre {
   font-size: 0.92rem;
 }
 
-.waitlist-actions {
-  display: flex;
-  flex-wrap: wrap;
+.waitlist-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
+}
+
+.waitlist-fields input {
+  min-width: 0;
+  height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--sunk);
+  color: var(--ink);
+}
+
+.waitlist-fields input::placeholder {
+  color: var(--ink-faint);
+}
+
+.waitlist-fields input:focus {
+  border-color: var(--accent);
+}
+
+.waitlist-fields .button {
+  padding-inline: 18px;
+}
+
+.waitlist-fields .button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.waitlist-status {
+  min-height: 1.45em;
+  margin: 10px 0 0 !important;
+  color: var(--ink-muted);
+}
+
+.team-interest-form[data-state="success"] .waitlist-fields {
+  display: none;
+}
+
+.team-interest-form[data-state="success"] .waitlist-status {
+  color: var(--allow);
+}
+
+.team-interest-form[data-state="error"] .waitlist-status {
+  color: var(--deny);
+}
+
+.waitlist-roadmap-link {
+  display: inline-flex;
+  gap: 6px;
+  margin-top: 16px;
+  color: var(--ink-muted);
+  font-size: 0.84rem;
+  font-weight: 600;
 }
 
 .cta-band {
@@ -1241,8 +1295,15 @@ pre {
   }
 
   .agent-kit-actions,
-  .agent-kit-actions .button,
-  .waitlist-actions .button {
+  .agent-kit-actions .button {
+    width: 100%;
+  }
+
+  .waitlist-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .waitlist-fields .button {
     width: 100%;
   }
 

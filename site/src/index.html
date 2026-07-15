@@ -261,12 +261,34 @@ next: switchboard install claude --write</span></pre>
       </div>
       <aside class="card waitlist-card" aria-labelledby="waitlist-heading">
         <span class="label">teams and enterprise</span>
-        <h3 id="waitlist-heading">Follow the team roadmap</h3>
-        <p>Team controls are later roadmap work. Follow the public plan and shipped releases without handing an address to a placeholder form.</p>
-        <div class="waitlist-actions">
-          <a class="button button-accent" href="/docs/roadmap">Read the roadmap</a>
-          <a class="button button-ghost" href="https://github.com/wkoverfield/switchboard/releases">View releases</a>
-        </div>
+        <h3 id="waitlist-heading">Join the team-tier list</h3>
+        <p>One email when team controls are ready. Nothing else.</p>
+        <form
+          class="team-interest-form"
+          action="https://formspree.io/p/3046019270145211610/f/teamInterest"
+          method="post"
+          data-team-interest
+        >
+          <input type="hidden" name="context" value="team-tier-interest">
+          <label class="sr-only" for="team-interest-email">Work email</label>
+          <div class="waitlist-fields">
+            <input
+              id="team-interest-email"
+              name="email"
+              type="email"
+              autocomplete="email"
+              inputmode="email"
+              placeholder="you@company.com"
+              aria-describedby="team-interest-status"
+              required
+            >
+            <button class="button button-accent" type="submit">
+              <span>Join the list</span>
+            </button>
+          </div>
+          <p class="waitlist-status" id="team-interest-status" aria-live="polite"></p>
+        </form>
+        <a class="waitlist-roadmap-link" href="/docs/roadmap">See the public roadmap <span aria-hidden="true">&rarr;</span></a>
       </aside>
     </div>
   </section>
