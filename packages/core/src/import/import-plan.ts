@@ -9,8 +9,14 @@ import {
 } from "../authority/authority-status.js";
 import { deepMerge, loadSwitchboardConfig } from "../config/load-config.js";
 import { resolveRepoConfigPaths } from "../config/paths.js";
-import { resolveProjectClientConfigPath } from "../install/client-config.js";
-import type { SupportedClient } from "../install/client-config.js";
+import {
+  resolveClientConfigPath,
+  resolveProjectClientConfigPath
+} from "../install/client-config.js";
+import type {
+  ClientConfigScope,
+  SupportedClient
+} from "../install/client-config.js";
 import { normalizeNamespace } from "../namespaces/namespaces.js";
 import {
   planRecommendedNextAction,
@@ -90,6 +96,7 @@ export interface CommandShape {
 
 export interface ImportClientDetection {
   client: SupportedClient;
+  scope: ClientConfigScope;
   targetPath: string;
   status: "missing" | "detected" | "invalid";
   message: string;
@@ -231,11 +238,20 @@ export async function createSwitchboardImportPlan(
       namespace: profile.namespace ?? null
     })
   );
-  const clients = detectClientConfigs(cwd, repoName);
+  const clients = detectClientConfigs({
+    cwd,
+    repoName,
+    ...(options.homeDir ? { homeDir: options.homeDir } : {}),
+    ...(options.env ? { env: options.env } : {})
+  });
   const envFiles = detectEnvFiles(cwd);
-  const detectedServers = clients.flatMap((client) =>
-    client.servers.filter((server) => server.name !== "switchboard")
-  );
+  // Only project-scoped servers are import candidates; user-level servers are
+  // reported (bypass findings, risk findings) but never imported or cleaned.
+  const detectedServers = clients
+    .filter((client) => client.scope === "project")
+    .flatMap((client) =>
+      client.servers.filter((server) => server.name !== "switchboard")
+    );
   const acceptedDirect = collectAcceptedDirectRiskIds({
     configured: loaded.config.acceptedRisks.directMcp.map((risk) => risk.id),
     requested: options.acceptDirect ?? []
@@ -268,10 +284,18 @@ export async function createSwitchboardImportPlan(
     reason:
       "The existing MCP config references this secret-looking env name; Switchboard will keep values out of repo and client config."
   }));
+  const routedClientNames = new Set(
+    clients
+      .filter((client) =>
+        client.servers.some((server) => server.routesThroughSwitchboard)
+      )
+      .map((client) => client.client)
+  );
+  // A user-scoped Switchboard entry already routes this repo, so it also
+  // suppresses the per-repo install suggestion for that client.
   const clientsMissingSwitchboard = clients.filter(
     (client) =>
-      client.status !== "detected" ||
-      !client.servers.some((server) => server.routesThroughSwitchboard)
+      client.scope === "project" && !routedClientNames.has(client.client)
   );
   const installActions = clientsMissingSwitchboard
     .map((client) => ({
@@ -437,17 +461,21 @@ export async function writeSwitchboardImportPlan(
   const cwd = plan.repo.cwd;
   const targetPath =
     resolveRepoConfigPaths({ cwd }).repoConfigPath ?? join(cwd, ".switchboard.yaml");
+  // Only project-scoped servers are imported; user-level client config is
+  // visibility-only and is never written to repo config or cleaned up.
   const importableServers = uniqueServersByProfile(
-    plan.detected.clients.flatMap((client) =>
-      client.servers.filter(
-        (server) =>
-          !server.routesThroughSwitchboard &&
-          server.command !== null &&
-          !plan.detected.switchboardProfiles.some(
-            (profile) => profile.name === server.suggestedProfileName
-          )
+    plan.detected.clients
+      .filter((client) => client.scope === "project")
+      .flatMap((client) =>
+        client.servers.filter(
+          (server) =>
+            !server.routesThroughSwitchboard &&
+            server.command !== null &&
+            !plan.detected.switchboardProfiles.some(
+              (profile) => profile.name === server.suggestedProfileName
+            )
+        )
       )
-    )
   );
   const acceptedDirectRisks = plan.bypassFindings.filter(
     (finding) =>
@@ -742,31 +770,65 @@ function uniqueServersByProfile(
   return [...byProfile.values()];
 }
 
-function detectClientConfigs(
-  cwd: string,
-  repoName: string
-): ImportClientDetection[] {
+function detectClientConfigs(options: {
+  cwd: string;
+  repoName: string;
+  homeDir?: string;
+  env?: NodeJS.ProcessEnv;
+}): ImportClientDetection[] {
+  const pathOptions = {
+    cwd: options.cwd,
+    ...(options.homeDir ? { homeDir: options.homeDir } : {}),
+    ...(options.env ? { env: options.env } : {})
+  };
+
+  // User-level client configs are read for visibility only; import cleanup
+  // never touches them. An absent user config is skipped rather than kept as
+  // a permanent "missing" row, because machine-level config says nothing
+  // about this repo.
   return [
-    detectCodexConfig(resolveProjectClientConfigPath("codex", cwd), repoName),
-    detectClaudeConfig(resolveProjectClientConfigPath("claude", cwd), repoName)
-  ];
+    detectCodexConfig(
+      resolveProjectClientConfigPath("codex", options.cwd),
+      options.repoName,
+      "project"
+    ),
+    detectClaudeConfig(
+      resolveProjectClientConfigPath("claude", options.cwd),
+      options.repoName,
+      "project"
+    ),
+    detectCodexConfig(
+      resolveClientConfigPath({ client: "codex", scope: "user", ...pathOptions }),
+      options.repoName,
+      "user"
+    ),
+    detectClaudeConfig(
+      resolveClientConfigPath({ client: "claude", scope: "user", ...pathOptions }),
+      options.repoName,
+      "user"
+    )
+  ].filter(
+    (detection) => detection.scope === "project" || detection.status !== "missing"
+  );
 }
 
 function detectCodexConfig(
   targetPath: string,
-  repoName: string
+  repoName: string,
+  scope: ClientConfigScope
 ): ImportClientDetection {
   const content = readOptionalTextFile(targetPath);
   if (content === null) {
-    return missingClient("codex", targetPath);
+    return missingClient("codex", scope, targetPath);
   }
 
   try {
     return {
       client: "codex",
+      scope,
       targetPath,
       status: "detected",
-      message: "Codex project MCP config was found.",
+      message: `Codex ${scopeLabel(scope)} MCP config was found.`,
       servers: codexServerSections(content).map((section) =>
         detectedServerFromEntry({
           repoName,
@@ -781,27 +843,31 @@ function detectCodexConfig(
       )
     };
   } catch (error) {
-    return invalidClient("codex", targetPath, error);
+    return invalidClient("codex", scope, targetPath, error);
   }
 }
 
 function detectClaudeConfig(
   targetPath: string,
-  repoName: string
+  repoName: string,
+  scope: ClientConfigScope
 ): ImportClientDetection {
   const content = readOptionalTextFile(targetPath);
   if (content === null) {
-    return missingClient("claude", targetPath);
+    return missingClient("claude", scope, targetPath);
   }
 
   try {
+    // Top-level mcpServers is also where `claude mcp add --scope user`
+    // registers servers in ~/.claude.json; unrelated keys are ignored.
     const parsed = JSON.parse(content) as Record<string, unknown>;
     const mcpServers = isRecord(parsed.mcpServers) ? parsed.mcpServers : {};
     return {
       client: "claude",
+      scope,
       targetPath,
       status: "detected",
-      message: "Claude project MCP config was found.",
+      message: `Claude ${scopeLabel(scope)} MCP config was found.`,
       servers: Object.entries(mcpServers).map(([name, value]) =>
         detectedServerFromEntry({
           repoName,
@@ -822,30 +888,38 @@ function detectClaudeConfig(
       )
     };
   } catch (error) {
-    return invalidClient("claude", targetPath, error);
+    return invalidClient("claude", scope, targetPath, error);
   }
+}
+
+function scopeLabel(scope: ClientConfigScope): string {
+  return scope === "user" ? "user-level" : "project";
 }
 
 function missingClient(
   client: SupportedClient,
+  scope: ClientConfigScope,
   targetPath: string
 ): ImportClientDetection {
   return {
     client,
+    scope,
     targetPath,
     status: "missing",
-    message: `${client} project MCP config was not found.`,
+    message: `${client} ${scopeLabel(scope)} MCP config was not found.`,
     servers: []
   };
 }
 
 function invalidClient(
   client: SupportedClient,
+  scope: ClientConfigScope,
   targetPath: string,
   error: unknown
 ): ImportClientDetection {
   return {
     client,
+    scope,
     targetPath,
     status: "invalid",
     message: messageFromError(error),
@@ -951,11 +1025,17 @@ function buildWarnings(options: {
   const warnings: string[] = [];
   for (const client of options.clients) {
     if (client.status === "invalid") {
-      warnings.push(`${client.client} config could not be parsed: ${client.message}`);
+      warnings.push(
+        client.scope === "user"
+          ? `${client.client} user-level config could not be parsed: ${client.message}`
+          : `${client.client} config could not be parsed: ${client.message}`
+      );
     }
     if (client.servers.some((server) => server.name === "switchboard")) {
       warnings.push(
-        `${client.client} already has a switchboard MCP server; import will preserve it.`
+        client.scope === "user"
+          ? `${client.client} has a user-level switchboard MCP server; import will preserve it.`
+          : `${client.client} already has a switchboard MCP server; import will preserve it.`
       );
     }
   }
@@ -1097,7 +1177,7 @@ export function buildRiskFindings(options: {
       if (server.routesThroughSwitchboard) {
         continue;
       }
-      if (acceptedBypassIds.has(`${client.client}:${server.name}`)) {
+      if (acceptedBypassIds.has(bypassFindingId(client, server.name))) {
         continue;
       }
       const adminEvidence = [
@@ -1108,7 +1188,7 @@ export function buildRiskFindings(options: {
         continue;
       }
       findings.push({
-        id: `client:${client.client}:${server.name}:provider-admin`,
+        id: `client:${bypassFindingId(client, server.name)}:provider-admin`,
         kind: "provider_admin_surface",
         severity: "high",
         provider: server.provider,
@@ -1194,7 +1274,9 @@ export function buildBypassFindings(options: {
       .map((server) => {
         const riskTags: BypassRiskTag[] = ["direct-mcp-server"];
         const reasons = [
-          `${client.client} server "${server.name}" can give agents tools without Switchboard mandate policy, leases, approvals, or audit.`
+          client.scope === "user"
+            ? `${client.client} user-level server "${server.name}" in ${client.targetPath} can give agents tools in every repo without Switchboard mandate policy, leases, approvals, or audit.`
+            : `${client.client} server "${server.name}" can give agents tools without Switchboard mandate policy, leases, approvals, or audit.`
         ];
 
         if (hasSwitchboardClientRoute) {
@@ -1242,7 +1324,7 @@ export function buildBypassFindings(options: {
             ? "high"
             : "medium";
 
-        const id = `${client.client}:${server.name}`;
+        const id = bypassFindingId(client, server.name);
         const accepted = options.acceptedDirect?.has(id) ?? false;
         return {
           id,
@@ -1258,18 +1340,36 @@ export function buildBypassFindings(options: {
           suggestedProfileName: server.suggestedProfileName,
           riskTags: [...new Set(riskTags)],
           reasons,
-          nextActions: [
-            "switchboard import --dry-run",
-            server.suggestedSecretRefs.length > 0
-              ? `switchboard secrets set ${server.suggestedSecretRefs[0]?.ref ?? "<ref>"} --value-stdin`
-              : `switchboard import --write`
-          ],
+          nextActions:
+            client.scope === "user"
+              ? [
+                  "switchboard import --dry-run",
+                  `switchboard import --write --accept-direct ${id}`
+                ]
+              : [
+                  "switchboard import --dry-run",
+                  server.suggestedSecretRefs.length > 0
+                    ? `switchboard secrets set ${server.suggestedSecretRefs[0]?.ref ?? "<ref>"} --value-stdin`
+                    : `switchboard import --write`
+                ],
           acceptedRiskGuidance: accepted
             ? "This direct route is marked as accepted risk; it remains visible and prevents controlled authority status."
             : `If this direct route is intentional, rerun with --accept-direct ${id} to preserve it as accepted risk.`
         };
       })
   );
+}
+
+// Bypass finding ids: `<client>:<server>` for project scope (preserved so
+// existing acceptedRisks.directMcp entries keep matching) and
+// `<client>:user:<server>` for user scope.
+function bypassFindingId(
+  client: Pick<ImportClientDetection, "client" | "scope">,
+  serverName: string
+): string {
+  return client.scope === "user"
+    ? `${client.client}:user:${serverName}`
+    : `${client.client}:${serverName}`;
 }
 
 function collectAcceptedDirectRiskIds(options: {
@@ -1279,7 +1379,7 @@ function collectAcceptedDirectRiskIds(options: {
   return new Set(
     [...options.configured, ...options.requested]
       .map((value) => value.trim())
-      .filter((value) => /^[a-z]+:[^:\s]+$/.test(value))
+      .filter((value) => /^[a-z]+(:user)?:[^:\s]+$/.test(value))
   );
 }
 
@@ -1328,19 +1428,23 @@ function buildClientCleanupPlan(
   clients: ImportClientDetection[],
   acceptedDirect: Set<string>
 ): ImportClientCleanupPlan[] {
-  return clients.map((client) => {
+  // Cleanup only ever plans against project-scoped client config; user-level
+  // files in the home directory are never rewritten by import.
+  return clients
+    .filter((client) => client.scope === "project")
+    .map((client) => {
     const affectedServerNames = client.servers
       .filter(
         (server) =>
           !server.routesThroughSwitchboard &&
-          !acceptedDirect.has(`${client.client}:${server.name}`)
+          !acceptedDirect.has(bypassFindingId(client, server.name))
       )
       .map((server) => server.name);
     const acceptedServerNames = client.servers
       .filter(
         (server) =>
           !server.routesThroughSwitchboard &&
-          acceptedDirect.has(`${client.client}:${server.name}`)
+          acceptedDirect.has(bypassFindingId(client, server.name))
       )
       .map((server) => server.name);
     const acceptedRiskGuidance =

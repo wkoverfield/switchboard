@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Gave scan, import, doctor, audit, and manifest read-only visibility of user-scoped client configs (`~/.codex/config.toml`, `~/.claude.json`). Direct user-level MCP servers surface as bypass findings with ids of the form `<client>:user:<server>` (project-scope ids are unchanged), acceptable via `--accept-direct`; a user-scoped Switchboard entry counts the repo as routed. Import cleanup and profile import never touch user-level files. Scan JSON adds an additive `scope` field ("project" or "user") to each client row and may include user-scope rows; the schema version is unchanged.
+- Made `switchboard install codex --scope user --write` manage `~/.codex/config.toml` directly (or `$CODEX_HOME/config.toml`): merge-with-backup, `--rollback`, and a dry run that prints the exact TOML. The user-scoped entry launches `switchboard mcp` with no `--cwd`, so one entry serves every repo; inspection reports a pinned `cwd` key in a user-scope entry as stale. Claude Code user scope stays print-only (`~/.claude.json` is owned by `claude mcp add --scope user`), and `install claude --scope user --write` now fails with that guidance.
+
 ## 0.2.0
 
 - Hardened the audit log against truncation: each entry now carries a monotonic `seq` (its absolute line position), and every write updates an atomically-replaced head marker (`switchboard.jsonl.head`) recording the tip `{seq, hash}`. `switchboard audit verify` compares the log against the marker and reports tail-truncation ("ends at N entries but the head marker records M") instead of accepting a truncated prefix as "Chain: OK". A removed marker alongside sequenced entries is flagged too. The head marker raises the bar to tampering with two files consistently; it is not an external anchor (deleting both still evades detection), which stays roadmap.

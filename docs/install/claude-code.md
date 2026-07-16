@@ -50,6 +50,11 @@ Claude Code can also register the stdio server with its CLI:
 claude mcp add switchboard -- switchboard --cwd /path/to/your/repo mcp
 ```
 
+User scope is managed by Claude Code itself via
+`claude mcp add --scope user switchboard -- switchboard mcp`; Switchboard
+prints that command from `switchboard install claude --scope user` and does
+not edit `~/.claude.json`.
+
 After installing, run `/mcp` inside Claude Code to verify the server is listed.
 
 For debugging without the daemon-backed adapter, run

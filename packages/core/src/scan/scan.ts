@@ -17,7 +17,7 @@ import {
   type BypassFinding,
   type RiskFinding
 } from "../import/import-plan.js";
-import { inspectProjectClientConfigs } from "../install/client-config.js";
+import { inspectSwitchboardClientConfigs } from "../install/client-config.js";
 import type { ProjectClientConfigInspection } from "../install/client-config.js";
 import {
   planRecommendedNextAction,
@@ -71,7 +71,7 @@ export interface SwitchboardScanResult {
   clients: Array<
     Pick<
       ProjectClientConfigInspection,
-      "client" | "targetPath" | "status" | "message" | "otherServerNames"
+      "client" | "scope" | "targetPath" | "status" | "message" | "otherServerNames"
     >
   >;
   providers: ScanProviderHint[];
@@ -166,8 +166,10 @@ export async function scanSwitchboardProject(
   });
   const profileNames = Object.keys(loaded.config.profiles);
   const workspaceNames = Object.keys(loaded.config.workspaces ?? {});
-  const clients = await inspectProjectClientConfigs({
+  const clients = await inspectSwitchboardClientConfigs({
     cwd: root,
+    ...(options.homeDir ? { homeDir: options.homeDir } : {}),
+    ...(options.env ? { env: options.env } : {}),
     ...(options.command ? { command: options.command } : {}),
     ...(options.commandArgs ? { commandArgs: options.commandArgs } : {})
   });
@@ -237,6 +239,7 @@ export async function scanSwitchboardProject(
     runtime,
     clients: clients.map((client) => ({
       client: client.client,
+      scope: client.scope,
       targetPath: client.targetPath,
       status: client.status,
       message: client.message,
@@ -661,7 +664,26 @@ function buildSuggestions(options: {
   }
 
   for (const client of options.clients) {
-    if (client.status !== "installed") {
+    if (client.scope === "user") {
+      // A missing user config never reaches scan output; only user rows with
+      // signal (stale, invalid) earn a suggestion, and it is scope-correct.
+      if (client.status !== "installed") {
+        suggestions.push({
+          kind: "client-install",
+          command: `switchboard install ${client.client} --scope user`,
+          reason: `${client.client} user config is ${client.status}.`
+        });
+      }
+      continue;
+    }
+
+    const userScopeInstalled = options.clients.some(
+      (other) =>
+        other.client === client.client &&
+        other.scope === "user" &&
+        other.status === "installed"
+    );
+    if (client.status !== "installed" && !userScopeInstalled) {
       suggestions.push({
         kind: "client-install",
         command: `switchboard install ${client.client} --write`,

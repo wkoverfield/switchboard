@@ -7,6 +7,7 @@ import {
   inspectProjectClientConfig,
   inspectProjectClientConfigs,
   renderSwitchboardClientConfig,
+  resolveClientConfigPath,
   resolveProjectClientConfigPath,
   rollbackSwitchboardClientConfig,
   validateSwitchboardClientConfigOptions,
@@ -70,6 +71,44 @@ describe("renderSwitchboardClientConfig", () => {
     );
   });
 
+  it("renders a user-scoped Codex entry with no --cwd and no cwd key", () => {
+    const rendered = renderSwitchboardClientConfig({
+      client: "codex",
+      cwd: "/repo/switchboard",
+      scope: "user"
+    });
+
+    expect(rendered.content).toBe(
+      [
+        '[mcp_servers."switchboard"]',
+        'command = "switchboard"',
+        'args = ["mcp"]',
+        "startup_timeout_sec = 20",
+        "tool_timeout_sec = 60"
+      ].join("\n")
+    );
+    expect(rendered.content).not.toContain("--cwd");
+    expect(rendered.content).not.toContain("cwd =");
+  });
+
+  it("renders a user-scoped Claude entry with bare mcp args", () => {
+    const rendered = renderSwitchboardClientConfig({
+      client: "claude",
+      cwd: "/repo/switchboard",
+      scope: "user"
+    });
+
+    expect(JSON.parse(rendered.content)).toEqual({
+      mcpServers: {
+        switchboard: {
+          command: "switchboard",
+          args: ["mcp"],
+          env: {}
+        }
+      }
+    });
+  });
+
   it("rejects empty and control-character config values", () => {
     expect(
       validateSwitchboardClientConfigOptions({
@@ -113,6 +152,7 @@ describe("writeSwitchboardClientConfig", () => {
     const targetPath = join(root, ".codex", "config.toml");
     expect(result).toEqual({
       client: "codex",
+      scope: "project",
       serverName: "switchboard",
       targetPath,
       backupPath: null,
@@ -258,6 +298,7 @@ describe("rollbackSwitchboardClientConfig", () => {
 
     expect(result).toEqual({
       client: "claude",
+      scope: "project",
       targetPath,
       restoredFrom: backupPath,
       backupPath: `${targetPath}.switchboard-backup-20260619-160200000Z`
@@ -276,6 +317,7 @@ describe("inspectProjectClientConfig", () => {
     await expect(inspectProjectClientConfigs({ cwd: root })).resolves.toEqual([
       {
         client: "codex",
+        scope: "project",
         serverName: "switchboard",
         targetPath: join(root, ".codex", "config.toml"),
         status: "missing",
@@ -285,6 +327,7 @@ describe("inspectProjectClientConfig", () => {
       },
       {
         client: "claude",
+        scope: "project",
         serverName: "switchboard",
         targetPath: join(root, ".mcp.json"),
         status: "missing",
@@ -303,6 +346,7 @@ describe("inspectProjectClientConfig", () => {
     await expect(inspectProjectClientConfigs({ cwd: root })).resolves.toEqual([
       {
         client: "codex",
+        scope: "project",
         serverName: "switchboard",
         targetPath: join(root, ".codex", "config.toml"),
         status: "installed",
@@ -315,6 +359,7 @@ describe("inspectProjectClientConfig", () => {
       },
       {
         client: "claude",
+        scope: "project",
         serverName: "switchboard",
         targetPath: join(root, ".mcp.json"),
         status: "installed",
@@ -437,6 +482,277 @@ describe("inspectProjectClientConfig", () => {
   });
 });
 
+describe("resolveClientConfigPath", () => {
+  it("resolves project and user scope paths per client", () => {
+    expect(
+      resolveClientConfigPath({ client: "codex", cwd: "/repo" })
+    ).toBe(join("/repo", ".codex", "config.toml"));
+    expect(
+      resolveClientConfigPath({ client: "claude", scope: "project", cwd: "/repo" })
+    ).toBe(join("/repo", ".mcp.json"));
+    expect(
+      resolveClientConfigPath({
+        client: "codex",
+        scope: "user",
+        cwd: "/repo",
+        homeDir: "/home/dev",
+        env: {}
+      })
+    ).toBe(join("/home/dev", ".codex", "config.toml"));
+    expect(
+      resolveClientConfigPath({
+        client: "claude",
+        scope: "user",
+        cwd: "/repo",
+        homeDir: "/home/dev",
+        env: {}
+      })
+    ).toBe(join("/home/dev", ".claude.json"));
+  });
+
+  it("prefers CODEX_HOME for the user-scoped Codex config", () => {
+    expect(
+      resolveClientConfigPath({
+        client: "codex",
+        scope: "user",
+        cwd: "/repo",
+        homeDir: "/home/dev",
+        env: { CODEX_HOME: "/custom/codex-home" }
+      })
+    ).toBe(join("/custom/codex-home", "config.toml"));
+    expect(
+      resolveClientConfigPath({
+        client: "claude",
+        scope: "user",
+        cwd: "/repo",
+        homeDir: "/home/dev",
+        env: { CODEX_HOME: "/custom/codex-home" }
+      })
+    ).toBe(join("/home/dev", ".claude.json"));
+  });
+});
+
+describe("user-scoped client config", () => {
+  it("creates ~/.codex/config.toml under the given home directory", async () => {
+    const homeDir = await makeTempHome();
+    const root = await makeTempProject();
+
+    const result = await writeSwitchboardClientConfig({
+      client: "codex",
+      cwd: root,
+      scope: "user",
+      homeDir,
+      env: {}
+    });
+
+    const targetPath = join(homeDir, ".codex", "config.toml");
+    expect(result).toEqual({
+      client: "codex",
+      scope: "user",
+      serverName: "switchboard",
+      targetPath,
+      backupPath: null,
+      action: "created"
+    });
+    const content = readFileSync(targetPath, "utf8");
+    expect(content).toContain('args = ["mcp"]');
+    expect(content).not.toContain("--cwd");
+    expect(content).not.toContain("cwd =");
+  });
+
+  it("preserves unrelated user-level TOML sections and backs up updates", async () => {
+    const homeDir = await makeTempHome();
+    const root = await makeTempProject();
+    const targetPath = join(homeDir, ".codex", "config.toml");
+    mkdirSync(join(homeDir, ".codex"), { recursive: true });
+    writeFileSync(
+      targetPath,
+      [
+        'model = "gpt-5"',
+        "",
+        "[mcp_servers.github]",
+        'command = "github-mcp"',
+        "",
+        '[projects."/repo/elsewhere"]',
+        'trust_level = "trusted"'
+      ].join("\n")
+    );
+
+    const result = await writeSwitchboardClientConfig({
+      client: "codex",
+      cwd: root,
+      scope: "user",
+      homeDir,
+      env: {},
+      now: new Date("2026-06-19T16:00:00.000Z")
+    });
+
+    expect(result.action).toBe("updated");
+    expect(result.backupPath).toBe(
+      `${targetPath}.switchboard-backup-20260619-160000000Z`
+    );
+    const content = readFileSync(targetPath, "utf8");
+    expect(content).toContain('model = "gpt-5"');
+    expect(content).toContain("[mcp_servers.github]");
+    expect(content).toContain('[projects."/repo/elsewhere"]');
+    expect(content).toContain('[mcp_servers."switchboard"]');
+    expect(content).toContain('args = ["mcp"]');
+
+    const rewrite = await writeSwitchboardClientConfig({
+      client: "codex",
+      cwd: root,
+      scope: "user",
+      homeDir,
+      env: {},
+      now: new Date("2026-06-19T16:01:00.000Z")
+    });
+    expect(rewrite.action).toBe("updated");
+    expect(rewrite.backupPath).toBe(
+      `${targetPath}.switchboard-backup-20260619-160100000Z`
+    );
+    expect(readFileSync(targetPath, "utf8")).toBe(content);
+  });
+
+  it("rolls back a user-scoped Codex config from a backup", async () => {
+    const homeDir = await makeTempHome();
+    const root = await makeTempProject();
+    const targetPath = join(homeDir, ".codex", "config.toml");
+    const backupPath = join(homeDir, "codex.backup.toml");
+    mkdirSync(join(homeDir, ".codex"), { recursive: true });
+    writeFileSync(targetPath, 'model = "current"\n');
+    writeFileSync(backupPath, 'model = "restored"\n');
+
+    const result = await rollbackSwitchboardClientConfig({
+      client: "codex",
+      cwd: root,
+      scope: "user",
+      homeDir,
+      env: {},
+      backupPath,
+      now: new Date("2026-06-19T16:02:00.000Z")
+    });
+
+    expect(result).toEqual({
+      client: "codex",
+      scope: "user",
+      targetPath,
+      restoredFrom: backupPath,
+      backupPath: `${targetPath}.switchboard-backup-20260619-160200000Z`
+    });
+    expect(readFileSync(targetPath, "utf8")).toBe('model = "restored"\n');
+    expect(readFileSync(result.backupPath ?? "", "utf8")).toBe(
+      'model = "current"\n'
+    );
+  });
+
+  it("inspects user-scoped Codex config states", async () => {
+    const homeDir = await makeTempHome();
+    const root = await makeTempProject();
+
+    const missing = await inspectProjectClientConfig({
+      client: "codex",
+      cwd: root,
+      scope: "user",
+      homeDir,
+      env: {}
+    });
+    expect(missing).toMatchObject({
+      client: "codex",
+      scope: "user",
+      status: "missing",
+      targetPath: join(homeDir, ".codex", "config.toml")
+    });
+
+    await writeSwitchboardClientConfig({
+      client: "codex",
+      cwd: root,
+      scope: "user",
+      homeDir,
+      env: {}
+    });
+    const installed = await inspectProjectClientConfig({
+      client: "codex",
+      cwd: root,
+      scope: "user",
+      homeDir,
+      env: {}
+    });
+    expect(installed).toMatchObject({
+      client: "codex",
+      scope: "user",
+      status: "installed",
+      message: "Codex user config routes through switchboard mcp.",
+      launch: { command: "switchboard", args: ["mcp"] }
+    });
+  });
+
+  it("reports a user-scoped Codex entry with a pinned cwd as stale", async () => {
+    const homeDir = await makeTempHome();
+    const root = await makeTempProject();
+    mkdirSync(join(homeDir, ".codex"), { recursive: true });
+    writeFileSync(
+      join(homeDir, ".codex", "config.toml"),
+      [
+        "[mcp_servers.github]",
+        'command = "github-mcp"',
+        "",
+        '[mcp_servers."switchboard"]',
+        'command = "switchboard"',
+        'args = ["mcp"]',
+        'cwd = "/repo/pinned"'
+      ].join("\n")
+    );
+
+    const inspection = await inspectProjectClientConfig({
+      client: "codex",
+      cwd: root,
+      scope: "user",
+      homeDir,
+      env: {}
+    });
+
+    expect(inspection).toMatchObject({
+      client: "codex",
+      scope: "user",
+      status: "stale",
+      message: "Codex user config has a different Switchboard MCP server entry.",
+      otherServerNames: ["github"]
+    });
+  });
+
+  it("accepts user-scoped launch args with launcher prefixes", async () => {
+    const homeDir = await makeTempHome();
+    const root = await makeTempProject();
+    mkdirSync(join(homeDir, ".codex"), { recursive: true });
+    writeFileSync(
+      join(homeDir, ".codex", "config.toml"),
+      [
+        '[mcp_servers."switchboard"]',
+        'command = "/usr/local/bin/node"',
+        'args = ["/opt/switchboard/dist/index.js", "mcp"]'
+      ].join("\n")
+    );
+
+    const inspection = await inspectProjectClientConfig({
+      client: "codex",
+      cwd: root,
+      scope: "user",
+      homeDir,
+      env: {}
+    });
+
+    expect(inspection).toMatchObject({
+      client: "codex",
+      scope: "user",
+      status: "installed"
+    });
+  });
+});
+
 async function makeTempProject(): Promise<string> {
   return mkdtemp(join(tmpdir(), "switchboard-install-"));
+}
+
+async function makeTempHome(): Promise<string> {
+  return mkdtemp(join(tmpdir(), "switchboard-install-home-"));
 }
