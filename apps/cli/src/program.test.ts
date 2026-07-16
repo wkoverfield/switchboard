@@ -2,6 +2,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   realpathSync,
   writeFileSync
@@ -18,7 +19,7 @@ import {
   markApprovalRequestStale,
   type SecretStore
 } from "@switchboard-mcp/core";
-import { createProgram } from "./program.js";
+import { createProgram as createProgramWithIo, type ProgramIo } from "./program.js";
 
 const fixtureServerPath = fileURLToPath(
   new URL(
@@ -26,6 +27,16 @@ const fixtureServerPath = fileURLToPath(
     import.meta.url
   )
 );
+
+// Every test runs against an isolated home directory so user-level client
+// config on the machine running the suite (~/.codex/config.toml,
+// ~/.claude.json) can never leak into scan, import, or doctor assertions.
+// Tests that exercise user scope pass their own homeDir instead.
+const defaultTestHomeDir = mkdtempSync(join(tmpdir(), "switchboard-cli-home-"));
+
+function createProgram(io: ProgramIo = {}): ReturnType<typeof createProgramWithIo> {
+  return createProgramWithIo({ homeDir: defaultTestHomeDir, ...io });
+}
 
 interface MandateStatusReadinessTestPayload {
   blockers: string[];
@@ -162,6 +173,59 @@ describe("switchboard CLI program", () => {
     expect(serialized).not.toContain("sk_test_should_not_print");
     expect(serialized).not.toContain("vercel_should_not_print");
     expect(serialized).not.toContain("prj_should_not_print");
+  });
+
+  it("surfaces user-level client servers in scan and keeps import cleanup away from them", async () => {
+    const root = makeTempProject();
+    const homeDir = makeTempProject();
+    initGitRepo(root, "main");
+    mkdirSync(join(homeDir, ".codex"), { recursive: true });
+    const userCodexPath = join(homeDir, ".codex", "config.toml");
+    const userCodexContent = [
+      'model = "gpt-5"',
+      "",
+      "[mcp_servers.posthog]",
+      'command = "npx"',
+      'args = ["-y", "mcp-remote", "https://mcp.posthog.com/mcp"]'
+    ].join("\n");
+    writeFileSync(userCodexPath, userCodexContent);
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      homeDir
+    });
+    await program.parseAsync(["--cwd", root, "scan", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      clients: Array<{ client: string; scope: string; status: string }>;
+      bypassFindings: Array<{ id: string; targetPath: string }>;
+    };
+    // A user config without a Switchboard entry stays out of the client
+    // rows (neutral per repo); its direct servers still surface as bypasses.
+    expect(parsed.clients.map((client) => client.scope)).toEqual([
+      "project",
+      "project"
+    ]);
+    expect(parsed.bypassFindings).toContainEqual(
+      expect.objectContaining({
+        id: "codex:user:posthog",
+        targetPath: userCodexPath
+      })
+    );
+
+    const importProgram = createProgram({
+      writeOut: (message) => output.push(message),
+      homeDir
+    });
+    await importProgram.parseAsync(
+      ["--cwd", root, "import", "--write", "--cleanup-client", "--json"],
+      { from: "user" }
+    );
+
+    expect(readFileSync(userCodexPath, "utf8")).toBe(userCodexContent);
   });
 
   it("prints scan human output with high-signal next actions", async () => {

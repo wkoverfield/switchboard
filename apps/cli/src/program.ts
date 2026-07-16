@@ -22,7 +22,7 @@ import {
   createMandate,
   decideApprovalRequest,
   createInitConfigPlan,
-  inspectProjectClientConfigs,
+  inspectSwitchboardClientConfigs,
   listApprovalRequests,
   listMandates,
   diffManifestClientRoutes,
@@ -717,6 +717,7 @@ export function createProgram(io: ProgramIo = {}): Command {
       const launch = resolveInstallLaunch({ commandArgs: [] });
       const result = await scanSwitchboardProject({
         ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+        ...(io.homeDir ? { homeDir: io.homeDir } : {}),
         command: launch.command,
         commandArgs: launch.commandArgs
       });
@@ -735,7 +736,8 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--json", "print machine-readable JSON")
     .action(async (options: { json?: boolean }) => {
       const manifest = await createRepoManifestForCurrentInvocation(program, {
-        secretStore
+        secretStore,
+        homeDir: io.homeDir
       });
       writeOut(
         options.json
@@ -749,7 +751,9 @@ export function createProgram(io: ProgramIo = {}): Command {
     .description("Audit this repo's coding-agent tool authority posture.")
     .option("--json", "print machine-readable JSON")
     .action(async (options: { json?: boolean }) => {
-      const audit = await createRepoAuditForCurrentInvocation(program);
+      const audit = await createRepoAuditForCurrentInvocation(program, {
+        homeDir: io.homeDir
+      });
 
       writeOut(
         options.json
@@ -797,7 +801,9 @@ export function createProgram(io: ProgramIo = {}): Command {
         }
 
         const globalOptions = program.opts<{ cwd?: string }>();
-        const audit = await createRepoAuditForCurrentInvocation(program);
+        const audit = await createRepoAuditForCurrentInvocation(program, {
+          homeDir: io.homeDir
+        });
         const includesEvidence =
           include.sections.mandates ||
           include.sections.approvals ||
@@ -1022,6 +1028,7 @@ export function createProgram(io: ProgramIo = {}): Command {
           try {
             const result = await writeSwitchboardImportPlan({
               ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+              ...(io.homeDir ? { homeDir: io.homeDir } : {}),
               ...(options.cleanupClient ? { cleanupClient: true } : {}),
               ...(options.acceptDirect && options.acceptDirect.length > 0
                 ? { acceptDirect: options.acceptDirect }
@@ -1029,6 +1036,7 @@ export function createProgram(io: ProgramIo = {}): Command {
             });
             const postWriteNextAction = await createPostWriteNextAction({
               cwd: result.plan.repo.cwd,
+              ...(io.homeDir ? { homeDir: io.homeDir } : {}),
               secretStore
             });
             const displayResult = formatWrittenImportForDisplay(
@@ -1056,6 +1064,7 @@ export function createProgram(io: ProgramIo = {}): Command {
 
         const plan = await createSwitchboardImportPlan({
           ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+          ...(io.homeDir ? { homeDir: io.homeDir } : {}),
           ...(options.acceptDirect && options.acceptDirect.length > 0
             ? { acceptDirect: options.acceptDirect }
             : {})
@@ -1147,6 +1156,7 @@ export function createProgram(io: ProgramIo = {}): Command {
       const globalOptions = program.opts<{ cwd?: string }>();
       const result = await createDoctorResult({
         cwd: globalOptions.cwd,
+        homeDir: io.homeDir,
         secretStore
       });
 
@@ -1169,6 +1179,7 @@ export function createProgram(io: ProgramIo = {}): Command {
       const globalOptions = program.opts<{ cwd?: string }>();
       const result = await createNextActionResult({
         cwd: globalOptions.cwd,
+        homeDir: io.homeDir,
         secretStore
       });
       const payload = {
@@ -3004,14 +3015,19 @@ export function createProgram(io: ProgramIo = {}): Command {
           let routedClients: string[] | null = null;
           try {
             const launch = resolveInstallLaunch({ commandArgs: [] });
-            const clientConfigs = await inspectProjectClientConfigs({
+            const clientConfigs = await inspectSwitchboardClientConfigs({
               cwd: repoPath,
+              homeDir: installHomeDir,
               command: launch.command,
               commandArgs: launch.commandArgs
             });
-            routedClients = clientConfigs
-              .filter((client) => client.status === "installed")
-              .map((client) => client.client);
+            routedClients = [
+              ...new Set(
+                clientConfigs
+                  .filter((client) => client.status === "installed")
+                  .map((client) => client.client)
+              )
+            ];
           } catch {
             // Detection is a courtesy; never let it break a successful grant.
           }
@@ -4939,12 +4955,14 @@ function formatScan(result: SwitchboardScanResult): string {
 }
 
 async function createRepoAuditForCurrentInvocation(
-  program: Command
+  program: Command,
+  options: { homeDir?: string | undefined } = {}
 ): Promise<RepoAuditResult> {
   const globalOptions = program.opts<{ cwd?: string }>();
   const launch = resolveInstallLaunch({ commandArgs: [] });
   const scan = await scanSwitchboardProject({
     ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+    ...(options.homeDir ? { homeDir: options.homeDir } : {}),
     command: launch.command,
     commandArgs: launch.commandArgs
   });
@@ -5193,12 +5211,13 @@ interface RepoManifest {
 
 async function createRepoManifestForCurrentInvocation(
   program: Command,
-  options: { secretStore: SecretStore }
+  options: { secretStore: SecretStore; homeDir?: string | undefined }
 ): Promise<RepoManifest> {
   const globalOptions = program.opts<{ cwd?: string }>();
   const launch = resolveInstallLaunch({ commandArgs: [] });
   const scan = await scanSwitchboardProject({
     ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+    ...(options.homeDir ? { homeDir: options.homeDir } : {}),
     command: launch.command,
     commandArgs: launch.commandArgs
   });
@@ -5290,8 +5309,12 @@ function createManifestClientEntries(options: {
   launch: ReturnType<typeof resolveInstallLaunch>;
   configValid: boolean;
 }): RepoManifest["clients"] {
+  // The manifest describes this repo's own client routes; user-scope rows
+  // stay in scan output and findings, not in per-repo client entries.
   const byClient = new Map(
-    options.scan.clients.map((client) => [client.client, client] as const)
+    options.scan.clients
+      .filter((client) => client.scope === "project")
+      .map((client) => [client.client, client] as const)
   );
   return (["codex", "claude"] as SupportedClient[]).map((client) => {
     const scanClient = byClient.get(client);
@@ -5545,12 +5568,14 @@ function rewriteAuthorityStatus(
 
 async function createNextActionResult(options: {
   cwd?: string | undefined;
+  homeDir?: string | undefined;
   secretStore: SecretStore;
 }): Promise<RecommendedNextAction> {
   const doctor = await createDoctorResult(options);
   const scan = rewriteScanCommandsForCurrentInvocation(
     await scanSwitchboardProject({
       ...(options.cwd ? { cwd: options.cwd } : {}),
+      ...(options.homeDir ? { homeDir: options.homeDir } : {}),
       ...resolveInstallLaunch({ commandArgs: [] })
     })
   );
@@ -5577,6 +5602,7 @@ function nextActionCommands(action: RecommendedNextAction): string[] {
 
 async function createPostWriteNextAction(options: {
   cwd: string;
+  homeDir?: string | undefined;
   secretStore: SecretStore;
 }): Promise<RecommendedNextAction | undefined> {
   try {
@@ -5637,7 +5663,9 @@ function formatScanDetected(result: SwitchboardScanResult): string[] {
     lines.push(formatScanClientRoute(client));
     for (const name of client.otherServerNames) {
       lines.push(
-        `${capitalize(client.client)} direct MCP server "${name}" detected`
+        client.scope === "user"
+          ? `${capitalize(client.client)} user-level direct MCP server "${name}" detected`
+          : `${capitalize(client.client)} direct MCP server "${name}" detected`
       );
     }
   }
@@ -5667,9 +5695,15 @@ function formatScanDetected(result: SwitchboardScanResult): string[] {
 
 function formatScanClientRoute(client: {
   client: "codex" | "claude";
+  scope: "project" | "user";
   status: string;
 }): string {
-  const name = capitalize(client.client);
+  const name =
+    client.scope === "user"
+      ? `${capitalize(client.client)} (user scope)`
+      : capitalize(client.client);
+  const configLabel =
+    client.scope === "user" ? "user MCP config" : "project MCP config";
   if (client.status === "missing") {
     return `${name} Switchboard route missing`;
   }
@@ -5680,9 +5714,9 @@ function formatScanClientRoute(client: {
     return `${name} Switchboard route stale`;
   }
   if (client.status === "invalid") {
-    return `${name} project MCP config invalid`;
+    return `${name} ${configLabel} invalid`;
   }
-  return `${name} project MCP config ${client.status}`;
+  return `${name} ${configLabel} ${client.status}`;
 }
 
 function formatImportPlan(plan: SwitchboardImportPlan): string {
@@ -5697,7 +5731,7 @@ function formatImportPlan(plan: SwitchboardImportPlan): string {
 
   for (const client of plan.detected.clients) {
     lines.push(
-      `- ${capitalize(client.client)} project MCP config ${formatImportClientStatus(client.status)} (${client.targetPath})`
+      `- ${capitalize(client.client)} ${client.scope === "user" ? "user-level" : "project"} MCP config ${formatImportClientStatus(client.status)} (${client.targetPath})`
     );
     for (const server of client.servers) {
       if (server.routesThroughSwitchboard) {
@@ -6011,6 +6045,7 @@ function renderCommandShape(command: { command: string; args: string[] }): strin
 
 async function createDoctorResult(options: {
   cwd?: string | undefined;
+  homeDir?: string | undefined;
   secretStore: SecretStore;
 }): Promise<{
   ok: boolean;
@@ -6034,8 +6069,9 @@ async function createDoctorResult(options: {
   const localIgnore = checkLocalConfigIgnored(options.cwd);
   const cwd = configCwdBase(loaded, options.cwd);
   const launch = resolveInstallLaunch({ commandArgs: [] });
-  const clientConfigs = await inspectProjectClientConfigs({
+  const clientConfigs = await inspectSwitchboardClientConfigs({
     cwd,
+    ...(options.homeDir ? { homeDir: options.homeDir } : {}),
     command: launch.command,
     commandArgs: launch.commandArgs
   });
@@ -6046,7 +6082,8 @@ async function createDoctorResult(options: {
   );
   const importPlan = await createSwitchboardImportPlan({
     cwd,
-    env: process.env
+    env: process.env,
+    ...(options.homeDir ? { homeDir: options.homeDir } : {})
   });
   const bypassFindings = importPlan.bypassFindings;
   const checks = [
@@ -6189,8 +6226,14 @@ function doctorNextActionCandidates(options: {
     if (config.status === "missing" || config.status === "stale") {
       candidates.push({
         kind: "client-install",
-        command: `switchboard install ${config.client} --write`,
-        reason: `Route ${config.client} through Switchboard MCP.`
+        command:
+          config.scope === "user"
+            ? `switchboard install ${config.client} --scope user`
+            : `switchboard install ${config.client} --write`,
+        reason:
+          config.scope === "user"
+            ? `Fix the user-scoped ${config.client} Switchboard route.`
+            : `Route ${config.client} through Switchboard MCP.`
       });
     }
   }
@@ -6258,7 +6301,7 @@ function formatDoctor(result: {
           ? `; other MCP servers: ${config.otherServerNames.join(", ")}`
           : "";
       lines.push(
-        `  ${config.client}: ${formatClientConfigStatus(config.status)} - ${config.message}${otherServers} (${config.targetPath})`
+        `  ${config.client}${config.scope === "user" ? " (user scope)" : ""}: ${formatClientConfigStatus(config.status)} - ${config.message}${otherServers} (${config.targetPath})`
       );
     }
   }
@@ -6420,10 +6463,10 @@ function clientConfigSummary(configs: ProjectClientConfigInspection[]): string {
   const invalid = configs.filter((item) => item.status === "invalid").length;
 
   if (invalid > 0) {
-    return `${invalid} project client config file(s) could not be inspected.`;
+    return `${invalid} client config file(s) could not be inspected.`;
   }
 
-  return `${installed}/${configs.length} project client config(s) route through switchboard mcp.`;
+  return `${installed}/${configs.length} client config(s) route through switchboard mcp.`;
 }
 
 function secretCheckSummary(missingSecrets: MissingSecretRef[]): string {

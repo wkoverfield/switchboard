@@ -276,4 +276,69 @@ describe("switchboard project scan", () => {
       "switchboard mandate create --from github-ci"
     );
   });
+
+  it("counts a user-scoped Switchboard entry as an installed route", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-scan-user-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "switchboard-scan-home-"));
+    await mkdir(join(homeDir, ".codex"), { recursive: true });
+    await writeFile(
+      join(homeDir, ".codex", "config.toml"),
+      [
+        '[mcp_servers."switchboard"]',
+        'command = "switchboard"',
+        'args = ["mcp"]',
+        "startup_timeout_sec = 20",
+        "tool_timeout_sec = 60"
+      ].join("\n"),
+      "utf8"
+    );
+    await writeFile(
+      join(root, ".switchboard.yaml"),
+      [
+        "version: 1",
+        "profiles:",
+        "  local_echo:",
+        "    provider: fixture",
+        "    namespace: local_echo",
+        "    upstream:",
+        "      type: stdio",
+        "      command: node"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const result = await scanSwitchboardProject({ cwd: root, homeDir });
+
+    expect(result.clients).toContainEqual(
+      expect.objectContaining({
+        client: "codex",
+        scope: "user",
+        status: "installed",
+        targetPath: join(homeDir, ".codex", "config.toml")
+      })
+    );
+    // The repo counts as routed, so no per-repo codex install nag remains.
+    expect(
+      result.suggestions.filter(
+        (suggestion) =>
+          suggestion.kind === "client-install" &&
+          suggestion.command.includes("install codex")
+      )
+    ).toEqual([]);
+    expect(result.warnings).not.toContain(
+      "Switchboard profiles are configured, but Codex/Claude project config is not installed yet."
+    );
+  });
+
+  it("keeps a missing user config out of scan client rows", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-scan-user-missing-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "switchboard-scan-home-"));
+
+    const result = await scanSwitchboardProject({ cwd: root, homeDir });
+
+    expect(result.clients.map((client) => client.scope)).toEqual([
+      "project",
+      "project"
+    ]);
+  });
 });

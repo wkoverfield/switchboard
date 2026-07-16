@@ -332,6 +332,31 @@ export async function inspectProjectClientConfigs(options: {
   ]);
 }
 
+export async function inspectSwitchboardClientConfigs(options: {
+  cwd: string;
+  homeDir?: string;
+  env?: NodeJS.ProcessEnv;
+  serverName?: string;
+  command?: string;
+  commandArgs?: string[];
+}): Promise<ProjectClientConfigInspection[]> {
+  const [project, userInspections] = await Promise.all([
+    inspectProjectClientConfigs(options),
+    Promise.all([
+      inspectProjectClientConfig({ ...options, client: "codex", scope: "user" }),
+      inspectProjectClientConfig({ ...options, client: "claude", scope: "user" })
+    ])
+  ]);
+
+  // User-scope rows are machine-level, not per-repo: a user config that is
+  // absent or has no Switchboard entry says nothing about this repo, so only
+  // rows with signal (installed, stale, invalid) are returned.
+  return [
+    ...project,
+    ...userInspections.filter((inspection) => inspection.status !== "missing")
+  ];
+}
+
 export function validateSwitchboardClientConfigOptions(
   options: SwitchboardClientConfigOptions
 ): ClientConfigValidationResult {

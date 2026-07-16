@@ -10,6 +10,7 @@ import {
 describe("switchboard import plan", () => {
   it("plans a cleanup from existing Codex and Claude MCP config without leaking secret values", async () => {
     const base = await mkdtemp(join(tmpdir(), "switchboard-import-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "switchboard-import-home-"));
     const root = join(base, "stockr");
     await mkdir(root);
     await mkdir(join(root, ".codex"), { recursive: true });
@@ -59,7 +60,7 @@ describe("switchboard import plan", () => {
       "utf8"
     );
 
-    const plan = await createSwitchboardImportPlan({ cwd: root });
+    const plan = await createSwitchboardImportPlan({ cwd: root, homeDir });
     const serialized = JSON.stringify(plan);
 
     expect(plan.schemaVersion).toBe("switchboard.import-plan.v1");
@@ -167,6 +168,7 @@ describe("switchboard import plan", () => {
 
   it("flags broad filesystem mounts as high-risk bypasses", async () => {
     const base = await mkdtemp(join(tmpdir(), "switchboard-import-fs-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "switchboard-import-home-"));
     const root = join(base, "repo");
     await mkdir(root);
     await writeFile(
@@ -186,7 +188,7 @@ describe("switchboard import plan", () => {
       "utf8"
     );
 
-    const plan = await createSwitchboardImportPlan({ cwd: root });
+    const plan = await createSwitchboardImportPlan({ cwd: root, homeDir });
 
     expect(plan.bypassFindings).toHaveLength(1);
     expect(plan.bypassFindings[0]).toMatchObject({
@@ -198,9 +200,10 @@ describe("switchboard import plan", () => {
 
   it("returns an import plan with an invalid client finding instead of throwing", async () => {
     const root = await mkdtemp(join(tmpdir(), "switchboard-import-invalid-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "switchboard-import-home-"));
     await writeFile(join(root, ".mcp.json"), "{ nope", "utf8");
 
-    const plan = await createSwitchboardImportPlan({ cwd: root });
+    const plan = await createSwitchboardImportPlan({ cwd: root, homeDir });
 
     expect(plan.ok).toBe(true);
     expect(plan.detected.clients.find((client) => client.client === "claude")).toMatchObject({
@@ -212,6 +215,7 @@ describe("switchboard import plan", () => {
 
   it("writes imported profiles to repo config with secretRefs and backs up existing config", async () => {
     const base = await mkdtemp(join(tmpdir(), "switchboard-import-write-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "switchboard-import-home-"));
     const root = join(base, "stockr");
     await mkdir(root);
     await writeFile(
@@ -258,6 +262,7 @@ describe("switchboard import plan", () => {
 
     const result = await writeSwitchboardImportPlan({
       cwd: root,
+      homeDir,
       now: new Date("2026-01-02T03:04:05.006Z")
     });
     const config = await readFile(join(root, ".switchboard.yaml"), "utf8");
@@ -282,6 +287,7 @@ describe("switchboard import plan", () => {
 
   it("cleans direct client MCP bypass routes with backups and is idempotent", async () => {
     const base = await mkdtemp(join(tmpdir(), "switchboard-import-cleanup-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "switchboard-import-home-"));
     const root = join(base, "stockr");
     await mkdir(root);
     await mkdir(join(root, ".codex"), { recursive: true });
@@ -344,6 +350,7 @@ describe("switchboard import plan", () => {
 
     const result = await writeSwitchboardImportPlan({
       cwd: root,
+      homeDir,
       cleanupClient: true,
       now: new Date("2026-02-03T04:05:06.007Z")
     });
@@ -386,13 +393,176 @@ describe("switchboard import plan", () => {
 
     const rerun = await writeSwitchboardImportPlan({
       cwd: root,
+      homeDir,
       cleanupClient: true
     });
     expect(rerun.clientCleanup.every((item) => item.status !== "updated")).toBe(true);
   });
 
+  it("reports user-level direct servers as bypasses without planning cleanup", async () => {
+    const base = await mkdtemp(join(tmpdir(), "switchboard-import-user-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "switchboard-import-home-"));
+    const root = join(base, "stockr");
+    await mkdir(root);
+    await mkdir(join(homeDir, ".codex"), { recursive: true });
+    const userCodexPath = join(homeDir, ".codex", "config.toml");
+    await writeFile(
+      userCodexPath,
+      [
+        'model = "gpt-5"',
+        "",
+        "[mcp_servers.posthog]",
+        'command = "npx"',
+        'args = ["-y", "mcp-remote", "https://mcp.posthog.com/mcp"]'
+      ].join("\n"),
+      "utf8"
+    );
+    await writeFile(
+      join(homeDir, ".claude.json"),
+      JSON.stringify({
+        numStartups: 12,
+        theme: "dark",
+        tipsHistory: { "shift-enter": 3 },
+        mcpServers: {
+          github: {
+            command: "docker",
+            args: ["run", "ghcr.io/github/github-mcp-server"],
+            env: { GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_user_should_not_print" }
+          }
+        }
+      }),
+      "utf8"
+    );
+    const userCodexBefore = await readFile(userCodexPath, "utf8");
+
+    const plan = await createSwitchboardImportPlan({ cwd: root, homeDir });
+
+    expect(
+      plan.detected.clients.map((client) => [client.client, client.scope])
+    ).toEqual([
+      ["codex", "project"],
+      ["claude", "project"],
+      ["codex", "user"],
+      ["claude", "user"]
+    ]);
+    expect(plan.bypassFindings).toContainEqual(
+      expect.objectContaining({
+        id: "codex:user:posthog",
+        client: "codex",
+        targetPath: userCodexPath,
+        serverName: "posthog"
+      })
+    );
+    expect(plan.bypassFindings).toContainEqual(
+      expect.objectContaining({
+        id: "claude:user:github",
+        targetPath: join(homeDir, ".claude.json")
+      })
+    );
+    const userFinding = plan.bypassFindings.find(
+      (finding) => finding.id === "codex:user:posthog"
+    );
+    expect(userFinding?.reasons[0]).toContain("user-level");
+    expect(userFinding?.reasons[0]).toContain(userCodexPath);
+    // User-level servers are visibility-only: no cleanup entry, no profile
+    // import candidate.
+    expect(plan.cleanupPlan.map((item) => item.targetPath)).not.toContain(
+      userCodexPath
+    );
+    expect(plan.cleanupPlan).toHaveLength(2);
+    expect(
+      plan.actions.some(
+        (action) =>
+          action.kind === "create-profile" && action.serverName === "posthog"
+      )
+    ).toBe(false);
+    expect(JSON.stringify(plan)).not.toContain("ghp_user_should_not_print");
+
+    const written = await writeSwitchboardImportPlan({
+      cwd: root,
+      homeDir,
+      cleanupClient: true
+    });
+    expect(await readFile(userCodexPath, "utf8")).toBe(userCodexBefore);
+    expect(
+      written.clientCleanup.map((item) => item.targetPath)
+    ).not.toContain(userCodexPath);
+  });
+
+  it("accepts user-level direct routes with --accept-direct and round-trips the id", async () => {
+    const base = await mkdtemp(join(tmpdir(), "switchboard-import-user-accept-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "switchboard-import-home-"));
+    const root = join(base, "stockr");
+    await mkdir(root);
+    await mkdir(join(homeDir, ".codex"), { recursive: true });
+    await writeFile(
+      join(homeDir, ".codex", "config.toml"),
+      [
+        "[mcp_servers.posthog]",
+        'command = "npx"',
+        'args = ["-y", "mcp-remote", "https://mcp.posthog.com/mcp"]'
+      ].join("\n"),
+      "utf8"
+    );
+
+    const written = await writeSwitchboardImportPlan({
+      cwd: root,
+      homeDir,
+      acceptDirect: ["codex:user:posthog"]
+    });
+    const config = await readFile(join(root, ".switchboard.yaml"), "utf8");
+
+    expect(config).toContain("id: codex:user:posthog");
+    expect(written.plan.bypassFindings).toContainEqual(
+      expect.objectContaining({
+        id: "codex:user:posthog",
+        status: "accepted"
+      })
+    );
+
+    const replay = await createSwitchboardImportPlan({ cwd: root, homeDir });
+    expect(replay.bypassFindings).toContainEqual(
+      expect.objectContaining({
+        id: "codex:user:posthog",
+        status: "accepted"
+      })
+    );
+  });
+
+  it("counts a user-scoped Switchboard entry as an installed client route", async () => {
+    const base = await mkdtemp(join(tmpdir(), "switchboard-import-user-routed-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "switchboard-import-home-"));
+    const root = join(base, "stockr");
+    await mkdir(root);
+    await mkdir(join(homeDir, ".codex"), { recursive: true });
+    await writeFile(
+      join(homeDir, ".codex", "config.toml"),
+      [
+        '[mcp_servers."switchboard"]',
+        'command = "switchboard"',
+        'args = ["mcp"]'
+      ].join("\n"),
+      "utf8"
+    );
+
+    const plan = await createSwitchboardImportPlan({ cwd: root, homeDir });
+
+    expect(plan.bypassFindings).toEqual([]);
+    expect(
+      plan.actions.filter(
+        (action) => action.kind === "install-client" && action.client === "codex"
+      )
+    ).toEqual([]);
+    expect(
+      plan.actions.filter(
+        (action) => action.kind === "install-client" && action.client === "claude"
+      )
+    ).toHaveLength(1);
+  });
+
   it("preserves accepted direct routes during cleanup and records accepted risk", async () => {
     const base = await mkdtemp(join(tmpdir(), "switchboard-import-accept-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "switchboard-import-home-"));
     const root = join(base, "stockr");
     await mkdir(root);
     await mkdir(join(root, ".codex"), { recursive: true });
@@ -431,6 +601,7 @@ describe("switchboard import plan", () => {
 
     const result = await writeSwitchboardImportPlan({
       cwd: root,
+      homeDir,
       cleanupClient: true,
       acceptDirect: ["codex:filesystem"],
       now: new Date("2026-03-04T05:06:07.008Z")

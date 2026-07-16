@@ -119,6 +119,7 @@ function scanFixture(options: {
     clients: [
       {
         client: "codex",
+        scope: "project",
         targetPath: "/repo/.codex/config.toml",
         status: options.installedClients ? "installed" : "missing",
         message: options.installedClients
@@ -128,6 +129,7 @@ function scanFixture(options: {
       },
       {
         client: "claude",
+        scope: "project",
         targetPath: "/repo/.mcp.json",
         status: options.installedClients ? "installed" : "missing",
         message: options.installedClients
