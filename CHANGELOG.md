@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Made `switchboard install codex --scope user --write` manage `~/.codex/config.toml` directly (or `$CODEX_HOME/config.toml`): merge-with-backup, `--rollback`, and a dry run that prints the exact TOML. The user-scoped entry launches `switchboard mcp` with no `--cwd`, so one entry serves every repo; inspection reports a pinned `cwd` key in a user-scope entry as stale. Claude Code user scope stays print-only (`~/.claude.json` is owned by `claude mcp add --scope user`), and `install claude --scope user --write` now fails with that guidance.
+
 ## 0.2.0
 
 - Hardened the audit log against truncation: each entry now carries a monotonic `seq` (its absolute line position), and every write updates an atomically-replaced head marker (`switchboard.jsonl.head`) recording the tip `{seq, hash}`. `switchboard audit verify` compares the log against the marker and reports tail-truncation ("ends at N entries but the head marker records M") instead of accepting a truncated prefix as "Chain: OK". A removed marker alongside sequenced entries is flagged too. The head marker raises the bar to tampering with two files consistently; it is not an external anchor (deleting both still evades detection), which stays roadmap.

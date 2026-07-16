@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -41,6 +42,7 @@ import {
   renewMandate,
   verifyAuditLog,
   renderSwitchboardClientConfig,
+  resolveClientConfigPath,
   resolveApprovalRequestStorePath,
   resolveAuditLogPath,
   resolveActiveMandate,
@@ -515,6 +517,7 @@ interface AuditLogPayload {
 export interface ProgramIo {
   writeOut?: (message: string) => void;
   writeErr?: (message: string) => void;
+  homeDir?: string;
   auditLogger?: AuditLogger;
   auditLogPath?: string;
   approvalStorePath?: string;
@@ -609,6 +612,7 @@ function makePaint(enabled: boolean): Paint {
 export function createProgram(io: ProgramIo = {}): Command {
   const writeOut = io.writeOut ?? ((message: string) => console.log(message));
   const writeErr = io.writeErr ?? ((message: string) => console.error(message));
+  const installHomeDir = io.homeDir ?? homedir();
   const paint = makePaint(io.color ?? detectColorEnabled());
   const serveMcp = io.serveMcp ?? serveProfilesOverStdio;
   const listToolsForProfiles = io.listTools ?? listToolsOverProfiles;
@@ -4520,36 +4524,136 @@ export function createProgram(io: ProgramIo = {}): Command {
           return;
         }
 
-        // User scope: one trusted Switchboard server for every repo. The server
-        // runs with no --cwd and no --mandate; each agent session launches it
-        // in the project dir, so it resolves that repo's config and auto-binds
-        // the live pass. We print the one-time client command rather than
-        // editing the client's global config file directly.
-        if (options.scope === "user") {
-          const launch = resolveInstallLaunch({
-            ...(options.command !== undefined ? { command: options.command } : {}),
-            commandArgs: options.commandArg
-          });
-          const result = renderUserScopeInstall(
-            supportedClient,
-            options.serverName,
-            launch.command,
-            [...launch.commandArgs, "mcp"]
-          );
-          writeOut(
-            options.json
-              ? JSON.stringify(result, null, 2)
-              : formatUserScopeInstall(result)
-          );
-          return;
-        }
-
-        const rollbackCwd = installTargetCwd(globalOptions.cwd);
         if (options.write && options.rollback) {
           writeErr("error: use either --write or --rollback, not both");
           process.exitCode = 1;
           return;
         }
+
+        // User scope: one trusted Switchboard server for every repo. The
+        // server runs with no --cwd and no --mandate; each agent session
+        // launches it in the project dir, so it resolves that repo's config
+        // and auto-binds the live pass. User scope is repo-config-independent,
+        // so no stdio-profile validation runs here. Codex user config
+        // (~/.codex/config.toml) is written directly; Claude Code user config
+        // (~/.claude.json) is owned by `claude mcp add --scope user`.
+        if (options.scope === "user") {
+          const launch = resolveInstallLaunch({
+            ...(options.command !== undefined ? { command: options.command } : {}),
+            commandArgs: options.commandArg
+          });
+          const userScope = renderUserScopeInstall(
+            supportedClient,
+            options.serverName,
+            launch.command,
+            [...launch.commandArgs, "mcp"]
+          );
+
+          if (supportedClient === "claude") {
+            if (options.write || options.rollback) {
+              writeErr(
+                "error: Switchboard does not edit ~/.claude.json; Claude Code owns its user-scope config."
+              );
+              writeErr(
+                `Register the user-scoped server with: ${userScope.addCommand.map(shellQuoteCommandArg).join(" ")}`
+              );
+              process.exitCode = 1;
+              return;
+            }
+
+            writeOut(
+              options.json
+                ? JSON.stringify(userScope, null, 2)
+                : formatUserScopeInstall(userScope)
+            );
+            return;
+          }
+
+          const clientConfigOptions = {
+            client: supportedClient,
+            serverName: options.serverName,
+            command: launch.command,
+            commandArgs: launch.commandArgs,
+            cwd: installTargetCwd(globalOptions.cwd),
+            scope: "user" as const,
+            homeDir: installHomeDir
+          };
+          const userScopeValidation =
+            validateSwitchboardClientConfigOptions(clientConfigOptions);
+          if (!userScopeValidation.ok) {
+            for (const error of userScopeValidation.errors) {
+              writeErr(`error: ${error}`);
+            }
+            process.exitCode = 1;
+            return;
+          }
+
+          const targetPath = resolveClientConfigPath({
+            client: supportedClient,
+            scope: "user",
+            cwd: clientConfigOptions.cwd,
+            homeDir: installHomeDir
+          });
+
+          if (options.rollback) {
+            try {
+              const result = await rollbackSwitchboardClientConfig({
+                client: supportedClient,
+                cwd: clientConfigOptions.cwd,
+                scope: "user",
+                homeDir: installHomeDir,
+                backupPath: isAbsolute(options.rollback)
+                  ? options.rollback
+                  : resolve(dirname(targetPath), options.rollback)
+              });
+              writeOut(
+                options.json
+                  ? JSON.stringify(result, null, 2)
+                  : formatInstallRollback(result)
+              );
+            } catch (error) {
+              writeErr(`error: ${messageFromError(error)}`);
+              process.exitCode = 1;
+            }
+            return;
+          }
+
+          if (options.write) {
+            try {
+              const result =
+                await writeSwitchboardClientConfig(clientConfigOptions);
+              writeOut(
+                options.json
+                  ? JSON.stringify(result, null, 2)
+                  : [
+                      formatInstallWrite(result),
+                      "",
+                      "Alternatively, Codex can register the same server itself:",
+                      `  ${userScope.addCommand.map(shellQuoteCommandArg).join(" ")}`
+                    ].join("\n")
+              );
+            } catch (error) {
+              writeErr(`error: ${messageFromError(error)}`);
+              process.exitCode = 1;
+            }
+            return;
+          }
+
+          const rendered = renderSwitchboardClientConfig(clientConfigOptions);
+          const addCommand = userScope.addCommand;
+          writeOut(
+            options.json
+              ? JSON.stringify(
+                  { ...rendered, scope: "user", targetPath, addCommand },
+                  null,
+                  2
+                )
+              : formatUserScopeCodexDryRun({ rendered, targetPath, addCommand })
+          );
+          return;
+        }
+
+        const rollbackCwd = installTargetCwd(globalOptions.cwd);
 
         if (options.rollback) {
           try {
@@ -9409,6 +9513,7 @@ function formatInstallSnippet(rendered: {
 }
 
 function formatInstallWrite(result: WrittenClientConfig): string {
+  const clientLabel = result.client === "claude" ? "Claude Code" : "Codex";
   return [
     `Installed Switchboard ${result.client} config`,
     `Server name: ${result.serverName}`,
@@ -9416,7 +9521,12 @@ function formatInstallWrite(result: WrittenClientConfig): string {
     `Action: ${result.action}`,
     `Backup: ${result.backupPath ?? "none"}`,
     "",
-    userScopeTip(result.client)
+    `Restart ${clientLabel} to pick up the change.`,
+    ...(result.scope === "user"
+      ? [
+          "Each repo still needs its own switchboard init and switchboard grant."
+        ]
+      : [userScopeTip(result.client)])
   ].join("\n");
 }
 
@@ -9468,7 +9578,32 @@ function formatUserScopeInstall(result: UserScopeInstall): string {
     "agent is working in, reads that repo's config, and applies the live pass",
     "from switchboard grant. No per-repo install, no per-project trust prompt.",
     "",
+    `Restart ${clientLabel} to pick up the change.`,
     "Then in any repo: switchboard grant --for 4h."
+  ].join("\n");
+}
+
+function formatUserScopeCodexDryRun(options: {
+  rendered: {
+    serverName: string;
+    content: string;
+  };
+  targetPath: string;
+  addCommand: string[];
+}): string {
+  return [
+    "Switchboard codex config dry run (user scope)",
+    `Server name: ${options.rendered.serverName}`,
+    `Target: ${options.targetPath}`,
+    "",
+    options.rendered.content,
+    "",
+    "Write it with: switchboard install codex --scope user --write",
+    "Or let Codex register the same server itself:",
+    `  ${options.addCommand.map(shellQuoteCommandArg).join(" ")}`,
+    "",
+    "One user-scoped server covers every repo; each repo still needs its own",
+    "switchboard init and switchboard grant."
   ].join("\n");
 }
 
