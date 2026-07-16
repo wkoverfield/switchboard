@@ -1,7 +1,8 @@
 # Switchboard
 
-Switchboard is a firewall and password manager for AI coding agents. It is a
-local CLI and daemon that puts an agent on a scoped, expiring pass: named MCP
+Switchboard is one firewall and password manager for all your AI coding
+agents' MCP servers and secrets. It is a local CLI and daemon that puts an
+agent on a scoped, expiring pass: named MCP
 tools reachable, everything else denied, risky calls gated behind human
 approval, secrets held in the OS keychain as named refs, and every routed call
 recorded in a hash-chained local audit log.
