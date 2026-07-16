@@ -2,6 +2,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   realpathSync,
   writeFileSync
@@ -18,7 +19,7 @@ import {
   markApprovalRequestStale,
   type SecretStore
 } from "@switchboard-mcp/core";
-import { createProgram } from "./program.js";
+import { createProgram as createProgramWithIo, type ProgramIo } from "./program.js";
 
 const fixtureServerPath = fileURLToPath(
   new URL(
@@ -26,6 +27,16 @@ const fixtureServerPath = fileURLToPath(
     import.meta.url
   )
 );
+
+// Every test runs against an isolated home directory so user-level client
+// config on the machine running the suite (~/.codex/config.toml,
+// ~/.claude.json) can never leak into scan, import, or doctor assertions.
+// Tests that exercise user scope pass their own homeDir instead.
+const defaultTestHomeDir = mkdtempSync(join(tmpdir(), "switchboard-cli-home-"));
+
+function createProgram(io: ProgramIo = {}): ReturnType<typeof createProgramWithIo> {
+  return createProgramWithIo({ homeDir: defaultTestHomeDir, ...io });
+}
 
 interface MandateStatusReadinessTestPayload {
   blockers: string[];
@@ -162,6 +173,59 @@ describe("switchboard CLI program", () => {
     expect(serialized).not.toContain("sk_test_should_not_print");
     expect(serialized).not.toContain("vercel_should_not_print");
     expect(serialized).not.toContain("prj_should_not_print");
+  });
+
+  it("surfaces user-level client servers in scan and keeps import cleanup away from them", async () => {
+    const root = makeTempProject();
+    const homeDir = makeTempProject();
+    initGitRepo(root, "main");
+    mkdirSync(join(homeDir, ".codex"), { recursive: true });
+    const userCodexPath = join(homeDir, ".codex", "config.toml");
+    const userCodexContent = [
+      'model = "gpt-5"',
+      "",
+      "[mcp_servers.posthog]",
+      'command = "npx"',
+      'args = ["-y", "mcp-remote", "https://mcp.posthog.com/mcp"]'
+    ].join("\n");
+    writeFileSync(userCodexPath, userCodexContent);
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      homeDir
+    });
+    await program.parseAsync(["--cwd", root, "scan", "--json"], {
+      from: "user"
+    });
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      clients: Array<{ client: string; scope: string; status: string }>;
+      bypassFindings: Array<{ id: string; targetPath: string }>;
+    };
+    // A user config without a Switchboard entry stays out of the client
+    // rows (neutral per repo); its direct servers still surface as bypasses.
+    expect(parsed.clients.map((client) => client.scope)).toEqual([
+      "project",
+      "project"
+    ]);
+    expect(parsed.bypassFindings).toContainEqual(
+      expect.objectContaining({
+        id: "codex:user:posthog",
+        targetPath: userCodexPath
+      })
+    );
+
+    const importProgram = createProgram({
+      writeOut: (message) => output.push(message),
+      homeDir
+    });
+    await importProgram.parseAsync(
+      ["--cwd", root, "import", "--write", "--cleanup-client", "--json"],
+      { from: "user" }
+    );
+
+    expect(readFileSync(userCodexPath, "utf8")).toBe(userCodexContent);
   });
 
   it("prints scan human output with high-signal next actions", async () => {
@@ -5095,6 +5159,150 @@ describe("switchboard CLI program", () => {
     expect(parsed.addCommand).toContain("mcp");
     expect(parsed.addCommand).not.toContain("--cwd");
     expect(parsed.addCommand).not.toContain("--mandate");
+  });
+
+  it("prints a user-scoped Codex dry run against the injected home directory", async () => {
+    const root = makeTempProject();
+    const homeDir = makeTempProject();
+    writeStdioConfig(root);
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      homeDir
+    });
+    await program.parseAsync(
+      ["--cwd", root, "install", "codex", "--scope", "user", "--json"],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      client: string;
+      scope: string;
+      targetPath: string;
+      content: string;
+      addCommand: string[];
+    };
+    expect(parsed.client).toBe("codex");
+    expect(parsed.scope).toBe("user");
+    expect(parsed.targetPath).toBe(join(homeDir, ".codex", "config.toml"));
+    expect(parsed.content).toContain('[mcp_servers."switchboard"]');
+    expect(parsed.content).not.toContain("--cwd");
+    expect(parsed.content).not.toContain("cwd =");
+    expect(parsed.addCommand.slice(0, 3)).toEqual(["codex", "mcp", "add"]);
+    expect(existsSync(join(homeDir, ".codex", "config.toml"))).toBe(false);
+  });
+
+  it("writes and backs up user-scoped Codex config under the injected home directory", async () => {
+    const root = makeTempProject();
+    const homeDir = makeTempProject();
+    writeStdioConfig(root);
+    const targetPath = join(homeDir, ".codex", "config.toml");
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      homeDir
+    });
+    await program.parseAsync(
+      ["--cwd", root, "install", "codex", "--scope", "user", "--write", "--json"],
+      { from: "user" }
+    );
+
+    const first = JSON.parse(output[0] ?? "{}") as {
+      scope: string;
+      targetPath: string;
+      backupPath: string | null;
+      action: string;
+    };
+    expect(first).toMatchObject({
+      scope: "user",
+      targetPath,
+      backupPath: null,
+      action: "created"
+    });
+    const content = readFileSync(targetPath, "utf8");
+    expect(content).toContain('args = ["mcp"]');
+    expect(content).not.toContain("--cwd");
+
+    const secondProgram = createProgram({
+      writeOut: (message) => output.push(message),
+      homeDir
+    });
+    await secondProgram.parseAsync(
+      ["--cwd", root, "install", "codex", "--scope", "user", "--write"],
+      { from: "user" }
+    );
+
+    const secondText = output[1] ?? "";
+    expect(secondText).toContain("Action: updated");
+    expect(secondText).toContain(
+      `Backup: ${targetPath}.switchboard-backup-`
+    );
+    expect(secondText).toContain("Restart Codex to pick up the change.");
+  });
+
+  it("rolls back user-scoped Codex config from a backup", async () => {
+    const root = makeTempProject();
+    const homeDir = makeTempProject();
+    writeStdioConfig(root);
+    const targetPath = join(homeDir, ".codex", "config.toml");
+    const backupPath = join(homeDir, ".codex", "codex.backup.toml");
+    mkdirSync(join(homeDir, ".codex"), { recursive: true });
+    writeFileSync(targetPath, 'model = "current"\n');
+    writeFileSync(backupPath, 'model = "restored"\n');
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      homeDir
+    });
+    await program.parseAsync(
+      [
+        "--cwd",
+        root,
+        "install",
+        "codex",
+        "--scope",
+        "user",
+        "--rollback",
+        "codex.backup.toml",
+        "--json"
+      ],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      scope: string;
+      targetPath: string;
+      restoredFrom: string;
+    };
+    expect(parsed.scope).toBe("user");
+    expect(parsed.targetPath).toBe(targetPath);
+    expect(parsed.restoredFrom).toBe(backupPath);
+    expect(readFileSync(targetPath, "utf8")).toBe('model = "restored"\n');
+  });
+
+  it("fails user-scoped Claude writes and points at claude mcp add", async () => {
+    const root = makeTempProject();
+    const homeDir = makeTempProject();
+    writeStdioConfig(root);
+
+    const errors: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message),
+      homeDir
+    });
+    await program.parseAsync(
+      ["--cwd", root, "install", "claude", "--scope", "user", "--write"],
+      { from: "user" }
+    );
+
+    expect(errors[0]).toContain("Switchboard does not edit ~/.claude.json");
+    expect(errors[1]).toContain("claude mcp add --scope user");
+    expect(process.exitCode).toBe(1);
+    expect(existsSync(join(homeDir, ".claude.json"))).toBe(false);
+    process.exitCode = undefined;
   });
 
   it("rejects an unknown install scope", async () => {

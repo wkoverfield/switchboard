@@ -6,9 +6,12 @@ import {
   readFile,
   writeFile
 } from "node:fs/promises";
+import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 
 export type SupportedClient = "codex" | "claude";
+
+export type ClientConfigScope = "project" | "user";
 
 export interface SwitchboardClientConfigOptions {
   client: SupportedClient;
@@ -16,6 +19,9 @@ export interface SwitchboardClientConfigOptions {
   command?: string;
   commandArgs?: string[];
   cwd: string;
+  scope?: ClientConfigScope;
+  homeDir?: string;
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface RenderedClientConfig {
@@ -27,6 +33,7 @@ export interface RenderedClientConfig {
 
 export interface WrittenClientConfig {
   client: SupportedClient;
+  scope: ClientConfigScope;
   serverName: string;
   targetPath: string;
   backupPath: string | null;
@@ -35,6 +42,7 @@ export interface WrittenClientConfig {
 
 export interface RolledBackClientConfig {
   client: SupportedClient;
+  scope: ClientConfigScope;
   targetPath: string;
   restoredFrom: string;
   backupPath: string | null;
@@ -53,6 +61,7 @@ export type ProjectClientConfigStatus =
 
 export interface ProjectClientConfigInspection {
   client: SupportedClient;
+  scope: ClientConfigScope;
   serverName: string;
   targetPath: string;
   status: ProjectClientConfigStatus;
@@ -82,7 +91,14 @@ export function renderSwitchboardClientConfig(
   const serverName = options.serverName ?? defaultServerName;
   const command = options.command ?? defaultCommand;
   const commandArgs = options.commandArgs ?? [];
-  const args = [...commandArgs, "--cwd", options.cwd, "mcp"];
+  const scope = options.scope ?? "project";
+  // A user-scoped server entry launches with no --cwd: `switchboard mcp`
+  // resolves the repo from the process working directory per request, so one
+  // entry serves every repo.
+  const args =
+    scope === "user"
+      ? [...commandArgs, "mcp"]
+      : [...commandArgs, "--cwd", options.cwd, "mcp"];
   const validation = validateSwitchboardClientConfigOptions({
     ...options,
     serverName,
@@ -98,15 +114,26 @@ export function renderSwitchboardClientConfig(
     return {
       client: "codex",
       serverName,
-      target: "~/.codex/config.toml or .codex/config.toml",
-      content: renderCodexConfig({ serverName, command, args, cwd: options.cwd })
+      target:
+        scope === "user"
+          ? "~/.codex/config.toml (or $CODEX_HOME/config.toml)"
+          : "~/.codex/config.toml or .codex/config.toml",
+      content: renderCodexConfig({
+        serverName,
+        command,
+        args,
+        ...(scope === "project" ? { cwd: options.cwd } : {})
+      })
     };
   }
 
   return {
     client: "claude",
     serverName,
-    target: ".mcp.json for project scope or ~/.claude.json for local/user scope",
+    target:
+      scope === "user"
+        ? "~/.claude.json (managed by claude mcp add --scope user)"
+        : ".mcp.json for project scope or ~/.claude.json for local/user scope",
     content: JSON.stringify(
       {
         mcpServers: {
@@ -126,8 +153,15 @@ export function renderSwitchboardClientConfig(
 export async function writeSwitchboardClientConfig(
   options: SwitchboardClientConfigOptions & { now?: Date }
 ): Promise<WrittenClientConfig> {
+  const scope = options.scope ?? "project";
   const rendered = renderSwitchboardClientConfig(options);
-  const targetPath = resolveProjectClientConfigPath(options.client, options.cwd);
+  const targetPath = resolveClientConfigPath({
+    client: options.client,
+    scope,
+    cwd: options.cwd,
+    ...(options.homeDir ? { homeDir: options.homeDir } : {}),
+    ...(options.env ? { env: options.env } : {})
+  });
   const existing = await readOptionalTextFile(targetPath);
   const nextContent = mergeClientConfigContent({
     client: options.client,
@@ -145,6 +179,7 @@ export async function writeSwitchboardClientConfig(
 
   return {
     client: options.client,
+    scope,
     serverName: rendered.serverName,
     targetPath,
     backupPath,
@@ -156,9 +191,19 @@ export async function rollbackSwitchboardClientConfig(options: {
   client: SupportedClient;
   cwd: string;
   backupPath: string;
+  scope?: ClientConfigScope;
+  homeDir?: string;
+  env?: NodeJS.ProcessEnv;
   now?: Date;
 }): Promise<RolledBackClientConfig> {
-  const targetPath = resolveProjectClientConfigPath(options.client, options.cwd);
+  const scope = options.scope ?? "project";
+  const targetPath = resolveClientConfigPath({
+    client: options.client,
+    scope,
+    cwd: options.cwd,
+    ...(options.homeDir ? { homeDir: options.homeDir } : {}),
+    ...(options.env ? { env: options.env } : {})
+  });
   const backupContent = await readFile(options.backupPath, "utf8");
   const existing = await readOptionalTextFile(targetPath);
 
@@ -170,37 +215,72 @@ export async function rollbackSwitchboardClientConfig(options: {
 
   return {
     client: options.client,
+    scope,
     targetPath,
     restoredFrom: options.backupPath,
     backupPath: currentBackupPath
   };
 }
 
+export function resolveClientConfigPath(options: {
+  client: SupportedClient;
+  scope?: ClientConfigScope;
+  cwd: string;
+  homeDir?: string;
+  env?: NodeJS.ProcessEnv;
+}): string {
+  const scope = options.scope ?? "project";
+
+  if (scope === "project") {
+    if (options.client === "codex") {
+      return join(options.cwd, ".codex", "config.toml");
+    }
+
+    return join(options.cwd, ".mcp.json");
+  }
+
+  const home = options.homeDir ?? homedir();
+  if (options.client === "codex") {
+    const env = options.env ?? process.env;
+    const codexHome = env.CODEX_HOME?.trim();
+    return join(codexHome ? codexHome : join(home, ".codex"), "config.toml");
+  }
+
+  return join(home, ".claude.json");
+}
+
 export function resolveProjectClientConfigPath(
   client: SupportedClient,
   cwd: string
 ): string {
-  if (client === "codex") {
-    return join(cwd, ".codex", "config.toml");
-  }
-
-  return join(cwd, ".mcp.json");
+  return resolveClientConfigPath({ client, scope: "project", cwd });
 }
 
 export async function inspectProjectClientConfig(
   options: SwitchboardClientConfigOptions
 ): Promise<ProjectClientConfigInspection> {
+  const scope = options.scope ?? "project";
   const rendered = renderSwitchboardClientConfig(options);
-  const targetPath = resolveProjectClientConfigPath(options.client, options.cwd);
+  const targetPath = resolveClientConfigPath({
+    client: options.client,
+    scope,
+    cwd: options.cwd,
+    ...(options.homeDir ? { homeDir: options.homeDir } : {}),
+    ...(options.env ? { env: options.env } : {})
+  });
   const existing = await readOptionalTextFile(targetPath);
 
   if (existing === null) {
     return {
       client: options.client,
+      scope,
       serverName: rendered.serverName,
       targetPath,
       status: "missing",
-      message: "Project client config file was not found.",
+      message:
+        scope === "user"
+          ? "User client config file was not found."
+          : "Project client config file was not found.",
       otherServerNames: [],
       launch: null
     };
@@ -208,25 +288,28 @@ export async function inspectProjectClientConfig(
 
   try {
     if (options.client === "claude") {
-      return inspectClaudeProjectConfig({
+      return inspectClaudeClientConfig({
         existing,
         renderedContent: rendered.content,
         targetPath,
-        serverName: rendered.serverName
+        serverName: rendered.serverName,
+        scope
       });
     }
 
-    return inspectCodexProjectConfig({
+    return inspectCodexClientConfig({
       existing,
       targetPath,
       serverName: rendered.serverName,
       command: options.command ?? defaultCommand,
       commandArgs: options.commandArgs ?? [],
-      cwd: options.cwd
+      cwd: options.cwd,
+      scope
     });
   } catch (error) {
     return {
       client: options.client,
+      scope,
       serverName: rendered.serverName,
       targetPath,
       status: "invalid",
@@ -247,6 +330,31 @@ export async function inspectProjectClientConfigs(options: {
     inspectProjectClientConfig({ ...options, client: "codex" }),
     inspectProjectClientConfig({ ...options, client: "claude" })
   ]);
+}
+
+export async function inspectSwitchboardClientConfigs(options: {
+  cwd: string;
+  homeDir?: string;
+  env?: NodeJS.ProcessEnv;
+  serverName?: string;
+  command?: string;
+  commandArgs?: string[];
+}): Promise<ProjectClientConfigInspection[]> {
+  const [project, userInspections] = await Promise.all([
+    inspectProjectClientConfigs(options),
+    Promise.all([
+      inspectProjectClientConfig({ ...options, client: "codex", scope: "user" }),
+      inspectProjectClientConfig({ ...options, client: "claude", scope: "user" })
+    ])
+  ]);
+
+  // User-scope rows are machine-level, not per-repo: a user config that is
+  // absent or has no Switchboard entry says nothing about this repo, so only
+  // rows with signal (installed, stale, invalid) are returned.
+  return [
+    ...project,
+    ...userInspections.filter((inspection) => inspection.status !== "missing")
+  ];
 }
 
 export function validateSwitchboardClientConfigOptions(
@@ -455,12 +563,14 @@ function mergeCodexConfigContent(
   return `${lines.join("\n").replace(/\n*$/, "")}\n`;
 }
 
-function inspectClaudeProjectConfig(options: {
+function inspectClaudeClientConfig(options: {
   existing: string;
   renderedContent: string;
   targetPath: string;
   serverName: string;
+  scope: ClientConfigScope;
 }): ProjectClientConfigInspection {
+  const scopeLabel = options.scope === "user" ? "user" : "project";
   const parsed = JSON.parse(options.existing) as Record<string, unknown>;
   const rendered = JSON.parse(options.renderedContent) as {
     mcpServers: Record<string, unknown>;
@@ -478,22 +588,24 @@ function inspectClaudeProjectConfig(options: {
   if (actual === undefined) {
     return {
       client: "claude",
+      scope: options.scope,
       serverName: options.serverName,
       targetPath: options.targetPath,
       status: "missing",
-      message: "Claude project config does not include the Switchboard MCP server.",
+      message: `Claude ${scopeLabel} config does not include the Switchboard MCP server.`,
       otherServerNames,
       launch: null
     };
   }
 
-  if (!clientServerEntryRoutesThroughSwitchboard(actual, expected)) {
+  if (!clientServerEntryRoutesThroughSwitchboard(actual, expected, options.scope)) {
     return {
       client: "claude",
+      scope: options.scope,
       serverName: options.serverName,
       targetPath: options.targetPath,
       status: "stale",
-      message: "Claude project config has a different Switchboard MCP server entry.",
+      message: `Claude ${scopeLabel} config has a different Switchboard MCP server entry.`,
       otherServerNames,
       launch: clientServerEntryLaunch(actual)
     };
@@ -501,23 +613,26 @@ function inspectClaudeProjectConfig(options: {
 
   return {
     client: "claude",
+    scope: options.scope,
     serverName: options.serverName,
     targetPath: options.targetPath,
     status: "installed",
-    message: "Claude project config routes through switchboard mcp.",
+    message: `Claude ${scopeLabel} config routes through switchboard mcp.`,
     otherServerNames,
     launch: clientServerEntryLaunch(actual)
   };
 }
 
-function inspectCodexProjectConfig(options: {
+function inspectCodexClientConfig(options: {
   existing: string;
   targetPath: string;
   serverName: string;
   command: string;
   commandArgs: string[];
   cwd: string;
+  scope: ClientConfigScope;
 }): ProjectClientConfigInspection {
+  const scopeLabel = options.scope === "user" ? "user" : "project";
   const section = codexMcpServerSection(options.existing, options.serverName);
   const otherServerNames = codexMcpServerNames(options.existing).filter(
     (name) => name !== options.serverName
@@ -526,10 +641,11 @@ function inspectCodexProjectConfig(options: {
   if (section === null) {
     return {
       client: "codex",
+      scope: options.scope,
       serverName: options.serverName,
       targetPath: options.targetPath,
       status: "missing",
-      message: "Codex project config does not include the Switchboard MCP server.",
+      message: `Codex ${scopeLabel} config does not include the Switchboard MCP server.`,
       otherServerNames,
       launch: null
     };
@@ -539,20 +655,30 @@ function inspectCodexProjectConfig(options: {
   const command = parseTomlString(values.command);
   const args = parseTomlStringArray(values.args);
   const cwd = parseTomlString(values.cwd);
-  const expectedArgs = [...options.commandArgs, "--cwd", options.cwd, "mcp"];
+  const expectedArgs =
+    options.scope === "user"
+      ? [...options.commandArgs, "mcp"]
+      : [...options.commandArgs, "--cwd", options.cwd, "mcp"];
+  // A user-scoped entry must stay repo-agnostic: any pinned cwd key would
+  // lock every repo's session to one directory, so it is reported stale.
+  const cwdIsStale =
+    options.scope === "user"
+      ? cwd !== undefined
+      : cwd !== undefined && cwd !== options.cwd;
 
   if (
     !command ||
-    (cwd !== undefined && cwd !== options.cwd) ||
+    cwdIsStale ||
     !args ||
-    !launchArgsRouteThroughSwitchboard(args, expectedArgs)
+    !launchArgsRouteThroughSwitchboard(args, expectedArgs, options.scope)
   ) {
     return {
       client: "codex",
+      scope: options.scope,
       serverName: options.serverName,
       targetPath: options.targetPath,
       status: "stale",
-      message: "Codex project config has a different Switchboard MCP server entry.",
+      message: `Codex ${scopeLabel} config has a different Switchboard MCP server entry.`,
       otherServerNames,
       launch: command && args ? { command, args } : null
     };
@@ -560,10 +686,11 @@ function inspectCodexProjectConfig(options: {
 
   return {
     client: "codex",
+    scope: options.scope,
     serverName: options.serverName,
     targetPath: options.targetPath,
     status: "installed",
-    message: "Codex project config routes through switchboard mcp.",
+    message: `Codex ${scopeLabel} config routes through switchboard mcp.`,
     otherServerNames,
     launch: { command, args }
   };
@@ -578,7 +705,8 @@ function codexMcpServerNames(content: string): string[] {
 
 function clientServerEntryRoutesThroughSwitchboard(
   actual: unknown,
-  expected: unknown
+  expected: unknown,
+  scope: ClientConfigScope = "project"
 ): boolean {
   if (!isRecord(actual) || !isRecord(expected)) {
     return false;
@@ -595,14 +723,21 @@ function clientServerEntryRoutesThroughSwitchboard(
   return (
     actual.args.every((arg) => typeof arg === "string") &&
     expected.args.every((arg) => typeof arg === "string") &&
-    launchArgsRouteThroughSwitchboard(actual.args, expected.args)
+    launchArgsRouteThroughSwitchboard(actual.args, expected.args, scope)
   );
 }
 
 function launchArgsRouteThroughSwitchboard(
   actual: string[],
-  expected: string[]
+  expected: string[],
+  scope: ClientConfigScope = "project"
 ): boolean {
+  if (scope === "user") {
+    // User-scoped launches end in a bare `mcp` with no pinned --cwd; prefix
+    // args such as `node <entrypoint>` are launcher detail, not routing.
+    return actual.at(-1) === "mcp" && !actual.includes("--cwd");
+  }
+
   const expectedPrefixLength = Math.max(0, expected.length - 3);
   if (expectedPrefixLength > 0) {
     return JSON.stringify(actual) === JSON.stringify(expected);
@@ -725,13 +860,13 @@ function renderCodexConfig(options: {
   serverName: string;
   command: string;
   args: string[];
-  cwd: string;
+  cwd?: string;
 }): string {
   return [
     `[mcp_servers.${tomlKey(options.serverName)}]`,
     `command = ${tomlString(options.command)}`,
     `args = ${tomlArray(options.args)}`,
-    `cwd = ${tomlString(options.cwd)}`,
+    ...(options.cwd !== undefined ? [`cwd = ${tomlString(options.cwd)}`] : []),
     "startup_timeout_sec = 20",
     "tool_timeout_sec = 60"
   ].join("\n");

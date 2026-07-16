@@ -25,5 +25,30 @@ This page is the short posture summary.
   can defeat local controls; defending against that is explicitly out of
   scope, and the threat model says exactly what that implies.
 
+## How the pass model maps to OAuth token exchange (RFC 8693)
+
+The pass (mandate) model uses the same delegation semantics that
+[RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) defines for OAuth token
+exchange:
+
+- **Issuer**: Switchboard, acting as the local authority that mints and
+  verifies every pass on the machine where agents run.
+- **Subject**: the agent a pass binds. Its identity is recorded on the
+  mandate and on every audit entry its calls produce.
+- **Actor**: the delegating party, either the human who ran
+  `switchboard grant` or the parent agent that created a child pass. The
+  delegating actor is recorded as `authority.createdBy`, and the full
+  parent chain is preserved on each mandate.
+- **Attenuated scope**: child passes are validated as strict subsets of
+  their parent: same repo, worktree, and branch, a subset of profiles and
+  tools, inherited deny lists that cannot be removed, and a lease that
+  expires no later than the parent's. Delegation can only narrow
+  authority, never widen it.
+
+The envelope format is `switchboard.workspace-lease.v1` rather than an
+OAuth token, because passes are minted, verified, and enforced on one
+machine and never cross a network boundary. The semantics above are what
+would survive a translation to token exchange if they ever needed to.
+
 If behavior and these statements ever disagree, report it via
 [SECURITY.md](../../SECURITY.md).

@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -21,7 +22,7 @@ import {
   createMandate,
   decideApprovalRequest,
   createInitConfigPlan,
-  inspectProjectClientConfigs,
+  inspectSwitchboardClientConfigs,
   listApprovalRequests,
   listMandates,
   diffManifestClientRoutes,
@@ -41,6 +42,7 @@ import {
   renewMandate,
   verifyAuditLog,
   renderSwitchboardClientConfig,
+  resolveClientConfigPath,
   resolveApprovalRequestStorePath,
   resolveAuditLogPath,
   resolveActiveMandate,
@@ -515,6 +517,7 @@ interface AuditLogPayload {
 export interface ProgramIo {
   writeOut?: (message: string) => void;
   writeErr?: (message: string) => void;
+  homeDir?: string;
   auditLogger?: AuditLogger;
   auditLogPath?: string;
   approvalStorePath?: string;
@@ -609,6 +612,7 @@ function makePaint(enabled: boolean): Paint {
 export function createProgram(io: ProgramIo = {}): Command {
   const writeOut = io.writeOut ?? ((message: string) => console.log(message));
   const writeErr = io.writeErr ?? ((message: string) => console.error(message));
+  const installHomeDir = io.homeDir ?? homedir();
   const paint = makePaint(io.color ?? detectColorEnabled());
   const serveMcp = io.serveMcp ?? serveProfilesOverStdio;
   const listToolsForProfiles = io.listTools ?? listToolsOverProfiles;
@@ -713,6 +717,7 @@ export function createProgram(io: ProgramIo = {}): Command {
       const launch = resolveInstallLaunch({ commandArgs: [] });
       const result = await scanSwitchboardProject({
         ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+        ...(io.homeDir ? { homeDir: io.homeDir } : {}),
         command: launch.command,
         commandArgs: launch.commandArgs
       });
@@ -731,7 +736,8 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--json", "print machine-readable JSON")
     .action(async (options: { json?: boolean }) => {
       const manifest = await createRepoManifestForCurrentInvocation(program, {
-        secretStore
+        secretStore,
+        homeDir: io.homeDir
       });
       writeOut(
         options.json
@@ -745,7 +751,9 @@ export function createProgram(io: ProgramIo = {}): Command {
     .description("Audit this repo's coding-agent tool authority posture.")
     .option("--json", "print machine-readable JSON")
     .action(async (options: { json?: boolean }) => {
-      const audit = await createRepoAuditForCurrentInvocation(program);
+      const audit = await createRepoAuditForCurrentInvocation(program, {
+        homeDir: io.homeDir
+      });
 
       writeOut(
         options.json
@@ -793,7 +801,9 @@ export function createProgram(io: ProgramIo = {}): Command {
         }
 
         const globalOptions = program.opts<{ cwd?: string }>();
-        const audit = await createRepoAuditForCurrentInvocation(program);
+        const audit = await createRepoAuditForCurrentInvocation(program, {
+          homeDir: io.homeDir
+        });
         const includesEvidence =
           include.sections.mandates ||
           include.sections.approvals ||
@@ -1018,6 +1028,7 @@ export function createProgram(io: ProgramIo = {}): Command {
           try {
             const result = await writeSwitchboardImportPlan({
               ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+              ...(io.homeDir ? { homeDir: io.homeDir } : {}),
               ...(options.cleanupClient ? { cleanupClient: true } : {}),
               ...(options.acceptDirect && options.acceptDirect.length > 0
                 ? { acceptDirect: options.acceptDirect }
@@ -1025,6 +1036,7 @@ export function createProgram(io: ProgramIo = {}): Command {
             });
             const postWriteNextAction = await createPostWriteNextAction({
               cwd: result.plan.repo.cwd,
+              ...(io.homeDir ? { homeDir: io.homeDir } : {}),
               secretStore
             });
             const displayResult = formatWrittenImportForDisplay(
@@ -1052,6 +1064,7 @@ export function createProgram(io: ProgramIo = {}): Command {
 
         const plan = await createSwitchboardImportPlan({
           ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+          ...(io.homeDir ? { homeDir: io.homeDir } : {}),
           ...(options.acceptDirect && options.acceptDirect.length > 0
             ? { acceptDirect: options.acceptDirect }
             : {})
@@ -1143,6 +1156,7 @@ export function createProgram(io: ProgramIo = {}): Command {
       const globalOptions = program.opts<{ cwd?: string }>();
       const result = await createDoctorResult({
         cwd: globalOptions.cwd,
+        homeDir: io.homeDir,
         secretStore
       });
 
@@ -1165,6 +1179,7 @@ export function createProgram(io: ProgramIo = {}): Command {
       const globalOptions = program.opts<{ cwd?: string }>();
       const result = await createNextActionResult({
         cwd: globalOptions.cwd,
+        homeDir: io.homeDir,
         secretStore
       });
       const payload = {
@@ -3000,14 +3015,19 @@ export function createProgram(io: ProgramIo = {}): Command {
           let routedClients: string[] | null = null;
           try {
             const launch = resolveInstallLaunch({ commandArgs: [] });
-            const clientConfigs = await inspectProjectClientConfigs({
+            const clientConfigs = await inspectSwitchboardClientConfigs({
               cwd: repoPath,
+              homeDir: installHomeDir,
               command: launch.command,
               commandArgs: launch.commandArgs
             });
-            routedClients = clientConfigs
-              .filter((client) => client.status === "installed")
-              .map((client) => client.client);
+            routedClients = [
+              ...new Set(
+                clientConfigs
+                  .filter((client) => client.status === "installed")
+                  .map((client) => client.client)
+              )
+            ];
           } catch {
             // Detection is a courtesy; never let it break a successful grant.
           }
@@ -4520,36 +4540,136 @@ export function createProgram(io: ProgramIo = {}): Command {
           return;
         }
 
-        // User scope: one trusted Switchboard server for every repo. The server
-        // runs with no --cwd and no --mandate; each agent session launches it
-        // in the project dir, so it resolves that repo's config and auto-binds
-        // the live pass. We print the one-time client command rather than
-        // editing the client's global config file directly.
-        if (options.scope === "user") {
-          const launch = resolveInstallLaunch({
-            ...(options.command !== undefined ? { command: options.command } : {}),
-            commandArgs: options.commandArg
-          });
-          const result = renderUserScopeInstall(
-            supportedClient,
-            options.serverName,
-            launch.command,
-            [...launch.commandArgs, "mcp"]
-          );
-          writeOut(
-            options.json
-              ? JSON.stringify(result, null, 2)
-              : formatUserScopeInstall(result)
-          );
-          return;
-        }
-
-        const rollbackCwd = installTargetCwd(globalOptions.cwd);
         if (options.write && options.rollback) {
           writeErr("error: use either --write or --rollback, not both");
           process.exitCode = 1;
           return;
         }
+
+        // User scope: one trusted Switchboard server for every repo. The
+        // server runs with no --cwd and no --mandate; each agent session
+        // launches it in the project dir, so it resolves that repo's config
+        // and auto-binds the live pass. User scope is repo-config-independent,
+        // so no stdio-profile validation runs here. Codex user config
+        // (~/.codex/config.toml) is written directly; Claude Code user config
+        // (~/.claude.json) is owned by `claude mcp add --scope user`.
+        if (options.scope === "user") {
+          const launch = resolveInstallLaunch({
+            ...(options.command !== undefined ? { command: options.command } : {}),
+            commandArgs: options.commandArg
+          });
+          const userScope = renderUserScopeInstall(
+            supportedClient,
+            options.serverName,
+            launch.command,
+            [...launch.commandArgs, "mcp"]
+          );
+
+          if (supportedClient === "claude") {
+            if (options.write || options.rollback) {
+              writeErr(
+                "error: Switchboard does not edit ~/.claude.json; Claude Code owns its user-scope config."
+              );
+              writeErr(
+                `Register the user-scoped server with: ${userScope.addCommand.map(shellQuoteCommandArg).join(" ")}`
+              );
+              process.exitCode = 1;
+              return;
+            }
+
+            writeOut(
+              options.json
+                ? JSON.stringify(userScope, null, 2)
+                : formatUserScopeInstall(userScope)
+            );
+            return;
+          }
+
+          const clientConfigOptions = {
+            client: supportedClient,
+            serverName: options.serverName,
+            command: launch.command,
+            commandArgs: launch.commandArgs,
+            cwd: installTargetCwd(globalOptions.cwd),
+            scope: "user" as const,
+            homeDir: installHomeDir
+          };
+          const userScopeValidation =
+            validateSwitchboardClientConfigOptions(clientConfigOptions);
+          if (!userScopeValidation.ok) {
+            for (const error of userScopeValidation.errors) {
+              writeErr(`error: ${error}`);
+            }
+            process.exitCode = 1;
+            return;
+          }
+
+          const targetPath = resolveClientConfigPath({
+            client: supportedClient,
+            scope: "user",
+            cwd: clientConfigOptions.cwd,
+            homeDir: installHomeDir
+          });
+
+          if (options.rollback) {
+            try {
+              const result = await rollbackSwitchboardClientConfig({
+                client: supportedClient,
+                cwd: clientConfigOptions.cwd,
+                scope: "user",
+                homeDir: installHomeDir,
+                backupPath: isAbsolute(options.rollback)
+                  ? options.rollback
+                  : resolve(dirname(targetPath), options.rollback)
+              });
+              writeOut(
+                options.json
+                  ? JSON.stringify(result, null, 2)
+                  : formatInstallRollback(result)
+              );
+            } catch (error) {
+              writeErr(`error: ${messageFromError(error)}`);
+              process.exitCode = 1;
+            }
+            return;
+          }
+
+          if (options.write) {
+            try {
+              const result =
+                await writeSwitchboardClientConfig(clientConfigOptions);
+              writeOut(
+                options.json
+                  ? JSON.stringify(result, null, 2)
+                  : [
+                      formatInstallWrite(result),
+                      "",
+                      "Alternatively, Codex can register the same server itself:",
+                      `  ${userScope.addCommand.map(shellQuoteCommandArg).join(" ")}`
+                    ].join("\n")
+              );
+            } catch (error) {
+              writeErr(`error: ${messageFromError(error)}`);
+              process.exitCode = 1;
+            }
+            return;
+          }
+
+          const rendered = renderSwitchboardClientConfig(clientConfigOptions);
+          const addCommand = userScope.addCommand;
+          writeOut(
+            options.json
+              ? JSON.stringify(
+                  { ...rendered, scope: "user", targetPath, addCommand },
+                  null,
+                  2
+                )
+              : formatUserScopeCodexDryRun({ rendered, targetPath, addCommand })
+          );
+          return;
+        }
+
+        const rollbackCwd = installTargetCwd(globalOptions.cwd);
 
         if (options.rollback) {
           try {
@@ -4835,12 +4955,14 @@ function formatScan(result: SwitchboardScanResult): string {
 }
 
 async function createRepoAuditForCurrentInvocation(
-  program: Command
+  program: Command,
+  options: { homeDir?: string | undefined } = {}
 ): Promise<RepoAuditResult> {
   const globalOptions = program.opts<{ cwd?: string }>();
   const launch = resolveInstallLaunch({ commandArgs: [] });
   const scan = await scanSwitchboardProject({
     ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+    ...(options.homeDir ? { homeDir: options.homeDir } : {}),
     command: launch.command,
     commandArgs: launch.commandArgs
   });
@@ -5089,12 +5211,13 @@ interface RepoManifest {
 
 async function createRepoManifestForCurrentInvocation(
   program: Command,
-  options: { secretStore: SecretStore }
+  options: { secretStore: SecretStore; homeDir?: string | undefined }
 ): Promise<RepoManifest> {
   const globalOptions = program.opts<{ cwd?: string }>();
   const launch = resolveInstallLaunch({ commandArgs: [] });
   const scan = await scanSwitchboardProject({
     ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {}),
+    ...(options.homeDir ? { homeDir: options.homeDir } : {}),
     command: launch.command,
     commandArgs: launch.commandArgs
   });
@@ -5186,8 +5309,12 @@ function createManifestClientEntries(options: {
   launch: ReturnType<typeof resolveInstallLaunch>;
   configValid: boolean;
 }): RepoManifest["clients"] {
+  // The manifest describes this repo's own client routes; user-scope rows
+  // stay in scan output and findings, not in per-repo client entries.
   const byClient = new Map(
-    options.scan.clients.map((client) => [client.client, client] as const)
+    options.scan.clients
+      .filter((client) => client.scope === "project")
+      .map((client) => [client.client, client] as const)
   );
   return (["codex", "claude"] as SupportedClient[]).map((client) => {
     const scanClient = byClient.get(client);
@@ -5441,12 +5568,14 @@ function rewriteAuthorityStatus(
 
 async function createNextActionResult(options: {
   cwd?: string | undefined;
+  homeDir?: string | undefined;
   secretStore: SecretStore;
 }): Promise<RecommendedNextAction> {
   const doctor = await createDoctorResult(options);
   const scan = rewriteScanCommandsForCurrentInvocation(
     await scanSwitchboardProject({
       ...(options.cwd ? { cwd: options.cwd } : {}),
+      ...(options.homeDir ? { homeDir: options.homeDir } : {}),
       ...resolveInstallLaunch({ commandArgs: [] })
     })
   );
@@ -5473,6 +5602,7 @@ function nextActionCommands(action: RecommendedNextAction): string[] {
 
 async function createPostWriteNextAction(options: {
   cwd: string;
+  homeDir?: string | undefined;
   secretStore: SecretStore;
 }): Promise<RecommendedNextAction | undefined> {
   try {
@@ -5533,7 +5663,9 @@ function formatScanDetected(result: SwitchboardScanResult): string[] {
     lines.push(formatScanClientRoute(client));
     for (const name of client.otherServerNames) {
       lines.push(
-        `${capitalize(client.client)} direct MCP server "${name}" detected`
+        client.scope === "user"
+          ? `${capitalize(client.client)} user-level direct MCP server "${name}" detected`
+          : `${capitalize(client.client)} direct MCP server "${name}" detected`
       );
     }
   }
@@ -5563,9 +5695,15 @@ function formatScanDetected(result: SwitchboardScanResult): string[] {
 
 function formatScanClientRoute(client: {
   client: "codex" | "claude";
+  scope: "project" | "user";
   status: string;
 }): string {
-  const name = capitalize(client.client);
+  const name =
+    client.scope === "user"
+      ? `${capitalize(client.client)} (user scope)`
+      : capitalize(client.client);
+  const configLabel =
+    client.scope === "user" ? "user MCP config" : "project MCP config";
   if (client.status === "missing") {
     return `${name} Switchboard route missing`;
   }
@@ -5576,9 +5714,9 @@ function formatScanClientRoute(client: {
     return `${name} Switchboard route stale`;
   }
   if (client.status === "invalid") {
-    return `${name} project MCP config invalid`;
+    return `${name} ${configLabel} invalid`;
   }
-  return `${name} project MCP config ${client.status}`;
+  return `${name} ${configLabel} ${client.status}`;
 }
 
 function formatImportPlan(plan: SwitchboardImportPlan): string {
@@ -5593,7 +5731,7 @@ function formatImportPlan(plan: SwitchboardImportPlan): string {
 
   for (const client of plan.detected.clients) {
     lines.push(
-      `- ${capitalize(client.client)} project MCP config ${formatImportClientStatus(client.status)} (${client.targetPath})`
+      `- ${capitalize(client.client)} ${client.scope === "user" ? "user-level" : "project"} MCP config ${formatImportClientStatus(client.status)} (${client.targetPath})`
     );
     for (const server of client.servers) {
       if (server.routesThroughSwitchboard) {
@@ -5907,6 +6045,7 @@ function renderCommandShape(command: { command: string; args: string[] }): strin
 
 async function createDoctorResult(options: {
   cwd?: string | undefined;
+  homeDir?: string | undefined;
   secretStore: SecretStore;
 }): Promise<{
   ok: boolean;
@@ -5930,8 +6069,9 @@ async function createDoctorResult(options: {
   const localIgnore = checkLocalConfigIgnored(options.cwd);
   const cwd = configCwdBase(loaded, options.cwd);
   const launch = resolveInstallLaunch({ commandArgs: [] });
-  const clientConfigs = await inspectProjectClientConfigs({
+  const clientConfigs = await inspectSwitchboardClientConfigs({
     cwd,
+    ...(options.homeDir ? { homeDir: options.homeDir } : {}),
     command: launch.command,
     commandArgs: launch.commandArgs
   });
@@ -5942,7 +6082,8 @@ async function createDoctorResult(options: {
   );
   const importPlan = await createSwitchboardImportPlan({
     cwd,
-    env: process.env
+    env: process.env,
+    ...(options.homeDir ? { homeDir: options.homeDir } : {})
   });
   const bypassFindings = importPlan.bypassFindings;
   const checks = [
@@ -6085,8 +6226,14 @@ function doctorNextActionCandidates(options: {
     if (config.status === "missing" || config.status === "stale") {
       candidates.push({
         kind: "client-install",
-        command: `switchboard install ${config.client} --write`,
-        reason: `Route ${config.client} through Switchboard MCP.`
+        command:
+          config.scope === "user"
+            ? `switchboard install ${config.client} --scope user`
+            : `switchboard install ${config.client} --write`,
+        reason:
+          config.scope === "user"
+            ? `Fix the user-scoped ${config.client} Switchboard route.`
+            : `Route ${config.client} through Switchboard MCP.`
       });
     }
   }
@@ -6154,7 +6301,7 @@ function formatDoctor(result: {
           ? `; other MCP servers: ${config.otherServerNames.join(", ")}`
           : "";
       lines.push(
-        `  ${config.client}: ${formatClientConfigStatus(config.status)} - ${config.message}${otherServers} (${config.targetPath})`
+        `  ${config.client}${config.scope === "user" ? " (user scope)" : ""}: ${formatClientConfigStatus(config.status)} - ${config.message}${otherServers} (${config.targetPath})`
       );
     }
   }
@@ -6316,10 +6463,10 @@ function clientConfigSummary(configs: ProjectClientConfigInspection[]): string {
   const invalid = configs.filter((item) => item.status === "invalid").length;
 
   if (invalid > 0) {
-    return `${invalid} project client config file(s) could not be inspected.`;
+    return `${invalid} client config file(s) could not be inspected.`;
   }
 
-  return `${installed}/${configs.length} project client config(s) route through switchboard mcp.`;
+  return `${installed}/${configs.length} client config(s) route through switchboard mcp.`;
 }
 
 function secretCheckSummary(missingSecrets: MissingSecretRef[]): string {
@@ -9409,6 +9556,7 @@ function formatInstallSnippet(rendered: {
 }
 
 function formatInstallWrite(result: WrittenClientConfig): string {
+  const clientLabel = result.client === "claude" ? "Claude Code" : "Codex";
   return [
     `Installed Switchboard ${result.client} config`,
     `Server name: ${result.serverName}`,
@@ -9416,7 +9564,12 @@ function formatInstallWrite(result: WrittenClientConfig): string {
     `Action: ${result.action}`,
     `Backup: ${result.backupPath ?? "none"}`,
     "",
-    userScopeTip(result.client)
+    `Restart ${clientLabel} to pick up the change.`,
+    ...(result.scope === "user"
+      ? [
+          "Each repo still needs its own switchboard init and switchboard grant."
+        ]
+      : [userScopeTip(result.client)])
   ].join("\n");
 }
 
@@ -9468,7 +9621,32 @@ function formatUserScopeInstall(result: UserScopeInstall): string {
     "agent is working in, reads that repo's config, and applies the live pass",
     "from switchboard grant. No per-repo install, no per-project trust prompt.",
     "",
+    `Restart ${clientLabel} to pick up the change.`,
     "Then in any repo: switchboard grant --for 4h."
+  ].join("\n");
+}
+
+function formatUserScopeCodexDryRun(options: {
+  rendered: {
+    serverName: string;
+    content: string;
+  };
+  targetPath: string;
+  addCommand: string[];
+}): string {
+  return [
+    "Switchboard codex config dry run (user scope)",
+    `Server name: ${options.rendered.serverName}`,
+    `Target: ${options.targetPath}`,
+    "",
+    options.rendered.content,
+    "",
+    "Write it with: switchboard install codex --scope user --write",
+    "Or let Codex register the same server itself:",
+    `  ${options.addCommand.map(shellQuoteCommandArg).join(" ")}`,
+    "",
+    "One user-scoped server covers every repo; each repo still needs its own",
+    "switchboard init and switchboard grant."
   ].join("\n");
 }
 

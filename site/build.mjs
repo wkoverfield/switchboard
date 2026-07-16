@@ -22,6 +22,7 @@ const docsManifest = [
   { section: "Security", slug: "security-trust-model", source: "docs/security/trust-model.md", title: "Trust Model" },
   { section: "Security", slug: "security-audit-logs", source: "docs/security/audit-logs.md", title: "Audit Logs" },
   { section: "Security", slug: "security-secrets", source: "docs/security/secrets-keychain-architecture.md", title: "Secrets and Keychain" },
+  { section: "Concepts", slug: "delegation-model", source: "docs/use-cases/harness-scoped-mandates.md", title: "Delegation Model" },
   { section: "Reference", slug: "daemon", source: "docs/daemon.md", title: "Daemon Lifecycle" },
   { section: "Reference", slug: "for-agents", source: "docs/for-agents.md", title: "For Agents" },
   { section: "Reference", slug: "provider-safety-templates", source: "docs/providers/safety-templates.md", title: "Provider Safety Templates" },
