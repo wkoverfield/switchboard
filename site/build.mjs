@@ -26,7 +26,8 @@ const docsManifest = [
   { section: "Reference", slug: "for-agents", source: "docs/for-agents.md", title: "For Agents" },
   { section: "Reference", slug: "provider-safety-templates", source: "docs/providers/safety-templates.md", title: "Provider Safety Templates" },
   { section: "Reference", slug: "harness-json-contracts", source: "docs/use-cases/harness-json-contracts.md", title: "Harness JSON Contracts" },
-  { section: "Product", slug: "roadmap", source: "docs/product/public-roadmap.md", title: "Roadmap" }
+  { section: "Product", slug: "roadmap", source: "docs/product/public-roadmap.md", title: "Roadmap" },
+  { section: "Reading", slug: "what-the-spec-left-out", source: "docs/product/what-the-spec-left-out.md", title: "What the MCP Spec Left Out" }
 ];
 
 rmSync(distDir, { recursive: true, force: true });
