@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.wkoverfield/switchboard",
-  "description": "A firewall and password manager for AI coding agents: scoped, expiring access to their tools.",
+  "description": "One firewall and password manager for all your AI coding agents' MCP servers and secrets: scoped, expiring access to their tools.",
   "version": "0.2.0",
   "repository": {
     "url": "https://github.com/wkoverfield/switchboard",

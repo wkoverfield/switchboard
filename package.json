@@ -5,7 +5,7 @@
   "version": "0.2.0",
   "license": "MIT",
   "packageManager": "pnpm@10.28.2",
-  "description": "Local-first MCP profile router for multiple accounts, projects, environments, and AI coding agents.",
+  "description": "One firewall and password manager for all your AI coding agents' MCP servers and secrets.",
   "scripts": {
     "build": "pnpm -r build",
     "switchboard": "node apps/cli/dist/index.js",

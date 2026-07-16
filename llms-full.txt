@@ -1,8 +1,9 @@
 # Switchboard Agent Reference
 
-Switchboard is a firewall and password manager for AI coding agents: a
-local-first authority layer that decides what an agent can reach, for how
-long, with which credentials, and with what record of it happening.
+Switchboard is one firewall and password manager for all your AI coding
+agents' MCP servers and secrets: a local-first authority layer that decides
+what an agent can reach, for how long, with which credentials, and with what
+record of it happening.
 
 The primitive is the pass (internally: mandate). A human grants a pass scoped
 to a repo, a branch, named profiles, and tool patterns, with a lease that
