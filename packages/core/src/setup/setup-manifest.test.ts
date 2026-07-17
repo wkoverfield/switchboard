@@ -1,12 +1,24 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  utimesSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  acquireSetupRunLock,
+  quarantineSetupManifest,
   readSetupManifest,
   recordSetupWrites,
   resolveSetupManifestPath,
-  rollbackSetupWrites
+  rollbackSetupWrites,
+  SetupLockHeldError,
+  SetupManifestCorruptError
 } from "./setup-manifest.js";
 
 function makeTempDir(): string {
@@ -164,6 +176,158 @@ describe("setup manifest", () => {
     const second = await rollbackSetupWrites({ env });
     expect(second.rolledBack).toBe(false);
     expect(second.items).toEqual([]);
+  });
+
+  it("snapshots a created file that changed after setup before removing it", async () => {
+    const stateHome = makeTempDir();
+    const workDir = makeTempDir();
+    const env = { XDG_STATE_HOME: stateHome } as NodeJS.ProcessEnv;
+    const createdPath = join(workDir, "config.toml");
+    writeFileSync(createdPath, "written by setup\n");
+    await recordSetupWrites(
+      [
+        {
+          kind: "client-config",
+          path: createdPath,
+          action: "created",
+          backupPath: null,
+          client: "codex",
+          scope: "user",
+          cwd: workDir
+        }
+      ],
+      { env }
+    );
+
+    // The user (or Codex) edits the file after setup created it.
+    const editedContent = "written by setup\n\n[mcp_servers.added_by_user]\n";
+    writeFileSync(createdPath, editedContent);
+
+    const result = await rollbackSetupWrites({ env });
+
+    expect(result.failures).toBe(0);
+    const item = result.items[0];
+    expect(item?.status).toBe("removed");
+    expect(item?.snapshotPath).not.toBeNull();
+    expect(item?.message).toContain("snapshot was preserved");
+    expect(existsSync(createdPath)).toBe(false);
+    expect(readFileSync(item?.snapshotPath ?? "", "utf8")).toBe(editedContent);
+  });
+
+  it("removes an unchanged created file without leaving a snapshot", async () => {
+    const stateHome = makeTempDir();
+    const workDir = makeTempDir();
+    const env = { XDG_STATE_HOME: stateHome } as NodeJS.ProcessEnv;
+    const createdPath = join(workDir, "config.yaml");
+    writeFileSync(createdPath, "written by setup\n");
+    await recordSetupWrites(
+      [
+        {
+          kind: "global-config",
+          path: createdPath,
+          action: "created",
+          backupPath: null
+        }
+      ],
+      { env }
+    );
+
+    const result = await rollbackSetupWrites({ env });
+
+    expect(result.items[0]).toMatchObject({
+      status: "removed",
+      snapshotPath: null
+    });
+    expect(readdirSync(workDir)).toEqual([]);
+  });
+
+  it("snapshots the current content before restoring an updated file", async () => {
+    const stateHome = makeTempDir();
+    const workDir = makeTempDir();
+    const env = { XDG_STATE_HOME: stateHome } as NodeJS.ProcessEnv;
+    const updatedPath = join(workDir, ".switchboard.yaml");
+    const backupPath = join(workDir, ".switchboard.yaml.backup");
+    const originalContent = "version: 1\n";
+    const currentContent = "version: 1\nprofiles:\n  imported: {}\n";
+    writeFileSync(backupPath, originalContent);
+    writeFileSync(updatedPath, currentContent);
+    await recordSetupWrites(
+      [
+        {
+          kind: "repo-config",
+          path: updatedPath,
+          action: "updated",
+          backupPath
+        }
+      ],
+      { env }
+    );
+
+    const result = await rollbackSetupWrites({ env });
+
+    const item = result.items[0];
+    expect(item?.status).toBe("restored");
+    expect(item?.snapshotPath).not.toBeNull();
+    expect(readFileSync(item?.snapshotPath ?? "", "utf8")).toBe(currentContent);
+    expect(readFileSync(updatedPath, "utf8")).toBe(originalContent);
+  });
+
+  it("reports a corrupt manifest as a typed error and quarantines it intact", async () => {
+    const stateHome = makeTempDir();
+    const env = { XDG_STATE_HOME: stateHome } as NodeJS.ProcessEnv;
+    const manifestPath = resolveSetupManifestPath({ env });
+    mkdirSync(dirname(manifestPath), { recursive: true });
+    const corruptContent = "{ not json";
+    writeFileSync(manifestPath, corruptContent);
+
+    await expect(readSetupManifest({ env })).rejects.toThrow(
+      SetupManifestCorruptError
+    );
+
+    const quarantinedPath = await quarantineSetupManifest({ env });
+    expect(quarantinedPath).toContain("manifest.json.corrupt-");
+    expect(existsSync(manifestPath)).toBe(false);
+    expect(readFileSync(quarantinedPath, "utf8")).toBe(corruptContent);
+    expect(await readSetupManifest({ env })).toBeNull();
+  });
+
+  it("writes the manifest atomically without leaving temp files", async () => {
+    const stateHome = makeTempDir();
+    const env = { XDG_STATE_HOME: stateHome } as NodeJS.ProcessEnv;
+    await recordSetupWrites(
+      [
+        {
+          kind: "global-config",
+          path: "/tmp/example/config.yaml",
+          action: "updated",
+          backupPath: "/tmp/example/config.yaml.backup"
+        }
+      ],
+      { env }
+    );
+
+    const manifestDir = dirname(resolveSetupManifestPath({ env }));
+    expect(readdirSync(manifestDir)).toEqual(["manifest.json"]);
+  });
+
+  it("serializes runs with a lock and replaces a stale one", async () => {
+    const stateHome = makeTempDir();
+    const env = { XDG_STATE_HOME: stateHome } as NodeJS.ProcessEnv;
+
+    const lock = await acquireSetupRunLock({ env });
+    await expect(acquireSetupRunLock({ env })).rejects.toThrow(
+      SetupLockHeldError
+    );
+    await lock.release();
+
+    // Released locks can be re-acquired.
+    const second = await acquireSetupRunLock({ env });
+
+    // A lock left behind by a crashed run (old mtime) is replaced.
+    const staleTime = new Date(Date.now() - 60 * 60_000);
+    utimesSync(second.path, staleTime, staleTime);
+    const third = await acquireSetupRunLock({ env });
+    await third.release();
   });
 
   it("keeps failed entries in the manifest for a retried rollback", async () => {

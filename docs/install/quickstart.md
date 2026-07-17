@@ -1,10 +1,11 @@
 # Quickstart
 
 One command sets up a machine: `switchboard setup` scans for existing MCP
-config, consolidates it into Switchboard profiles, swaps plaintext tokens for
-`secretRef`s, routes agent clients through a single user-scoped Switchboard
-server, and initializes the machine-level config file. Every write is backed
-up and one command undoes all of it.
+config, consolidates the current repo's project client config into
+Switchboard profiles, swaps plaintext tokens for `secretRef`s, routes agent
+clients through a single user-scoped Switchboard server, and initializes the
+machine-level config file. Every file it updates is backed up first, and one
+command undoes all of it.
 
 ## Install
 
@@ -39,10 +40,13 @@ What it does, in order:
    (`.mcp.json`, `.codex/config.toml`, `~/.claude.json`,
    `~/.codex/config.toml`), provider hints, and direct MCP routes that bypass
    Switchboard. Read-only; secret values are never read or printed.
-2. **Consolidate** the current repo: existing direct MCP servers become
+2. **Consolidate** the current repo: direct MCP servers in the repo's
+   project-scope client config (`.mcp.json`, `.codex/config.toml`) become
    Switchboard profiles in `.switchboard.yaml`, with token env vars rewritten
-   to `secretRef`s. Skippable with `--skip-import`; setup is machine-level
-   first and works outside any repo.
+   to `secretRef`s. User-level direct servers are never rewritten; they are
+   surfaced as bypass findings, and `switchboard scan` shows the detail.
+   Skippable with `--skip-import`; setup is machine-level first and works
+   outside any repo.
 3. **List the secrets to store.** Setup never reads token values. It prints
    the exact `switchboard secrets set <ref> --value-stdin` command for each
    `secretRef` the consolidated config points at.
@@ -75,10 +79,13 @@ Off a TTY there are no prompts at all.
 switchboard setup --rollback
 ```
 
-One command reverses every write setup made: client configs are restored from
-their timestamped backups, and files setup created (including the global
-config) are removed. The write record lives in a setup manifest under
-`$XDG_STATE_HOME/switchboard/setup/` (default `~/.local/state/`).
+One command reverses every write setup made: files setup updated are restored
+from their timestamped backups, and files setup created (including the global
+config) are removed. Rollback never destroys content it did not write: before
+restoring an update it snapshots the current file, and a created file that
+changed after setup is snapshotted before removal. The write record lives in
+a setup manifest under `$XDG_STATE_HOME/switchboard/setup/` (default
+`~/.local/state/`).
 
 ### After setup
 

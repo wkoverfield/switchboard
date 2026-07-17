@@ -10194,6 +10194,286 @@ describe("switchboard CLI program", () => {
     expect(process.exitCode).toBe(1);
     process.exitCode = undefined;
   });
+
+  it("rejects preset-only flags in machine setup instead of ignoring them", async () => {
+    const sandbox = makeSetupSandbox();
+    try {
+      const { root, homeDir, codexHome } = sandbox;
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      // A dropped positional (e.g. `setup --secret-ref x` instead of
+      // `setup github-ci --secret-ref x`) must not run machine setup.
+      await program.parseAsync(
+        [
+          "--cwd",
+          root,
+          "setup",
+          "--secret-ref",
+          "github/findu/dev/token",
+          "--json"
+        ],
+        { from: "user" }
+      );
+
+      const parsed = JSON.parse(output[0] ?? "{}") as {
+        ok: boolean;
+        code: string;
+        message: string;
+      };
+      expect(parsed).toMatchObject({ ok: false, code: "invalid_setup_option" });
+      expect(parsed.message).toContain("--secret-ref");
+      expect(existsSync(join(codexHome, "config.toml"))).toBe(false);
+      expect(process.exitCode).toBe(1);
+      process.exitCode = undefined;
+    } finally {
+      sandbox.restore();
+    }
+  });
+
+  it("rejects machine-only flags in provider preset setup", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message)
+    });
+    await program.parseAsync(
+      ["--cwd", root, "setup", "github-ci", "--skip-import", "--no-hooks", "--json"],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      code: string;
+      message: string;
+    };
+    expect(parsed).toMatchObject({ ok: false, code: "invalid_setup_option" });
+    expect(parsed.message).toContain("--skip-import");
+    expect(parsed.message).toContain("--no-hooks");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+  });
+
+  it("fails closed and quarantines a corrupt setup manifest before writing", async () => {
+    const sandbox = makeSetupSandbox();
+    try {
+      const { root, homeDir, codexHome, stateHome } = sandbox;
+      const manifestPath = join(
+        stateHome,
+        "switchboard",
+        "setup",
+        "manifest.json"
+      );
+      mkdirSync(join(stateHome, "switchboard", "setup"), { recursive: true });
+      writeFileSync(manifestPath, "{ definitely not json");
+
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await program.parseAsync(["--cwd", root, "setup", "--json"], {
+        from: "user"
+      });
+
+      const parsed = JSON.parse(output[0] ?? "{}") as {
+        ok: boolean;
+        code: string;
+        manifestPath: string;
+        quarantinedManifestPath: string;
+      };
+      expect(parsed).toMatchObject({
+        ok: false,
+        code: "setup_manifest_corrupt",
+        manifestPath
+      });
+      expect(parsed.quarantinedManifestPath).toContain(
+        "manifest.json.corrupt-"
+      );
+      // Fail closed: nothing was written before the manifest check.
+      expect(existsSync(join(codexHome, "config.toml"))).toBe(false);
+      // The corrupt record stays recoverable.
+      expect(readFileSync(parsed.quarantinedManifestPath, "utf8")).toBe(
+        "{ definitely not json"
+      );
+      expect(existsSync(manifestPath)).toBe(false);
+      expect(process.exitCode).toBe(1);
+      process.exitCode = undefined;
+
+      // With the corrupt file quarantined, the next run succeeds.
+      const rerunOutput: string[] = [];
+      const rerunProgram = createProgram({
+        writeOut: (message) => rerunOutput.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await rerunProgram.parseAsync(["--cwd", root, "setup", "--json"], {
+        from: "user"
+      });
+      expect(JSON.parse(rerunOutput[0] ?? "{}")).toMatchObject({ ok: true });
+    } finally {
+      sandbox.restore();
+    }
+  });
+
+  it("records each setup write immediately so a mid-run failure stays undoable", async () => {
+    const sandbox = makeSetupSandbox();
+    try {
+      const { root, homeDir, codexHome, configHome, stateHome } = sandbox;
+      // A global config that is not a YAML mapping makes the global-config
+      // step throw after the client write already happened.
+      mkdirSync(join(configHome, "switchboard"), { recursive: true });
+      writeFileSync(
+        join(configHome, "switchboard", "config.yaml"),
+        "- not\n- a\n- mapping\n"
+      );
+
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await program.parseAsync(["--cwd", root, "setup", "--json"], {
+        from: "user"
+      });
+
+      const manifestPath = join(
+        stateHome,
+        "switchboard",
+        "setup",
+        "manifest.json"
+      );
+      const parsed = JSON.parse(output[0] ?? "{}") as {
+        ok: boolean;
+        code: string;
+        manifestPath: string;
+      };
+      expect(parsed).toMatchObject({
+        ok: false,
+        code: "setup_failed",
+        manifestPath
+      });
+      expect(process.exitCode).toBe(1);
+      process.exitCode = undefined;
+
+      // The codex write that completed before the failure is already in
+      // the manifest, so one rollback unwinds the partial run.
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+        entries: Array<{ kind: string; path: string }>;
+      };
+      expect(manifest.entries).toContainEqual(
+        expect.objectContaining({
+          kind: "client-config",
+          path: join(codexHome, "config.toml")
+        })
+      );
+
+      const rollbackOutput: string[] = [];
+      const rollbackProgram = createProgram({
+        writeOut: (message) => rollbackOutput.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await rollbackProgram.parseAsync(["setup", "--rollback", "--json"], {
+        from: "user"
+      });
+      expect(JSON.parse(rollbackOutput[0] ?? "{}")).toMatchObject({
+        ok: true
+      });
+      expect(existsSync(join(codexHome, "config.toml"))).toBe(false);
+    } finally {
+      sandbox.restore();
+    }
+  });
+
+  it("fails fast when another setup run holds the lock", async () => {
+    const sandbox = makeSetupSandbox();
+    try {
+      const { root, homeDir, codexHome, stateHome } = sandbox;
+      const lockPath = join(stateHome, "switchboard", "setup", "setup.lock");
+      mkdirSync(join(stateHome, "switchboard", "setup"), { recursive: true });
+      writeFileSync(lockPath, '{"pid":12345}\n');
+
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await program.parseAsync(["--cwd", root, "setup", "--json"], {
+        from: "user"
+      });
+
+      expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+        ok: false,
+        code: "setup_already_running",
+        lockPath
+      });
+      expect(existsSync(join(codexHome, "config.toml"))).toBe(false);
+      // The foreign lock is left in place for its owner.
+      expect(existsSync(lockPath)).toBe(true);
+      expect(process.exitCode).toBe(1);
+      process.exitCode = undefined;
+    } finally {
+      sandbox.restore();
+    }
+  });
+
+  it("preserves a snapshot when rollback removes a setup-created file that was edited", async () => {
+    const sandbox = makeSetupSandbox();
+    try {
+      const { root, homeDir, codexHome } = sandbox;
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await program.parseAsync(["--cwd", root, "setup", "--json"], {
+        from: "user"
+      });
+      expect(JSON.parse(output[0] ?? "{}")).toMatchObject({ ok: true });
+
+      // The user adds their own server to the file setup created.
+      const codexPath = join(codexHome, "config.toml");
+      const editedContent = `${readFileSync(codexPath, "utf8")}\n[mcp_servers.added_by_user]\ncommand = "npx"\n`;
+      writeFileSync(codexPath, editedContent);
+
+      const rollbackOutput: string[] = [];
+      const rollbackProgram = createProgram({
+        writeOut: (message) => rollbackOutput.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await rollbackProgram.parseAsync(["setup", "--rollback", "--json"], {
+        from: "user"
+      });
+
+      const rollback = JSON.parse(rollbackOutput[0] ?? "{}") as {
+        ok: boolean;
+        items: Array<{
+          path: string;
+          status: string;
+          snapshotPath: string | null;
+        }>;
+      };
+      expect(rollback.ok).toBe(true);
+      const codexItem = rollback.items.find((item) => item.path === codexPath);
+      expect(codexItem?.status).toBe("removed");
+      expect(codexItem?.snapshotPath).not.toBeNull();
+      expect(existsSync(codexPath)).toBe(false);
+      expect(readFileSync(codexItem?.snapshotPath ?? "", "utf8")).toBe(
+        editedContent
+      );
+    } finally {
+      sandbox.restore();
+    }
+  });
 });
 
 interface SetupSandbox {

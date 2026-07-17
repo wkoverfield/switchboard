@@ -53,9 +53,14 @@ import {
   checkProviderSafetyTemplateTools,
   createSwitchboardImportPlan,
   inspectProjectClientConfig,
+  acquireSetupRunLock,
+  quarantineSetupManifest,
+  readSetupManifest,
   recordSetupWrites,
   resolveSetupManifestPath,
   rollbackSetupWrites,
+  SetupLockHeldError,
+  SetupManifestCorruptError,
   type SetupManifestEntry,
   type SetupRollbackResult,
   writeGlobalSwitchboardConfig,
@@ -167,6 +172,7 @@ interface CommandErrorEnvelope {
   code: string;
   message: string;
   nextActions: string[];
+  [key: string]: unknown;
 }
 
 interface CommandErrorOptions {
@@ -174,6 +180,10 @@ interface CommandErrorOptions {
   code: string;
   message: string;
   nextActions?: string[];
+  /** Extra structured fields merged into the JSON error envelope (for
+   * example the manifest path a setup error refers to). Ignored in human
+   * output. */
+  extra?: Record<string, unknown>;
 }
 
 interface MandateMcpLaunchPayload {
@@ -1633,25 +1643,31 @@ export function createProgram(io: ProgramIo = {}): Command {
       "Set up this machine in one command (scan, consolidate, route agent clients), or run guided provider setup with a preset."
     )
     .option("--json", "print machine-readable JSON; provider preset setup also requires --value-stdin")
-    .option("--rollback", "undo every write machine setup made")
+    .option("--rollback", "machine setup only: undo every write setup made")
     .option(
       "--no-hooks",
-      "record agent-client hooks as disabled in the global config"
+      "machine setup only: record agent-client hooks as disabled in the global config"
     )
-    .option("--skip-import", "skip consolidating the current repo's MCP client config")
-    .option("--profile-name <name>", "profile name to render")
-    .option("--namespace <name>", "namespace to render")
-    .option("--secret-ref <ref>", "secretRef to render")
-    .option("--command <command>", "upstream MCP server command to render")
+    .option(
+      "--skip-import",
+      "machine setup only: skip consolidating the current repo's MCP client config"
+    )
+    .option("--profile-name <name>", "provider preset only: profile name to render")
+    .option("--namespace <name>", "provider preset only: namespace to render")
+    .option("--secret-ref <ref>", "provider preset only: secretRef to render")
+    .option(
+      "--command <command>",
+      "provider preset only: upstream MCP server command to render"
+    )
     .option(
       "--arg <arg>",
-      "upstream MCP server arg to render (repeatable)",
+      "provider preset only: upstream MCP server arg to render (repeatable)",
       collectOption,
       [] as string[]
     )
     .option(
       "--value-stdin",
-      "read the token from stdin instead of prompting"
+      "provider preset only: read the token from stdin instead of prompting"
     )
     .action(
       async (
@@ -1671,6 +1687,30 @@ export function createProgram(io: ProgramIo = {}): Command {
         setupCommand: Command
       ) => {
         if (preset === undefined) {
+          // Machine mode: refuse preset-only flags instead of silently
+          // ignoring them; a dropped positional would otherwise run a full
+          // machine setup the caller did not ask for.
+          const presetOnlyFlags = [
+            ...(options.profileName !== undefined ? ["--profile-name"] : []),
+            ...(options.namespace !== undefined ? ["--namespace"] : []),
+            ...(options.secretRef !== undefined ? ["--secret-ref"] : []),
+            ...(options.command !== undefined ? ["--command"] : []),
+            ...(options.arg.length > 0 ? ["--arg"] : []),
+            ...(options.valueStdin ? ["--value-stdin"] : [])
+          ];
+          if (presetOnlyFlags.length > 0) {
+            writeCommandError({
+              json: options.json,
+              code: "invalid_setup_option",
+              message: `${presetOnlyFlags.join(", ")} appl${presetOnlyFlags.length === 1 ? "ies" : "y"} to provider preset setup only`,
+              nextActions: [
+                "Add a preset, for example: switchboard setup github-ci.",
+                "Or drop the provider flags to run machine setup."
+              ]
+            });
+            return;
+          }
+
           await runMachineSetup({ options, setupCommand });
           return;
         }
@@ -1684,6 +1724,27 @@ export function createProgram(io: ProgramIo = {}): Command {
             nextActions: [
               "Run switchboard setup --rollback to undo machine setup.",
               `Run switchboard setup ${preset} for provider setup.`
+            ]
+          });
+          return;
+        }
+
+        // Preset mode: machine-only flags would be silently ignored, so
+        // refuse them the same way machine mode refuses preset flags.
+        const machineOnlyFlags = [
+          ...(options.skipImport ? ["--skip-import"] : []),
+          ...(setupCommand.getOptionValueSource("hooks") === "cli"
+            ? ["--no-hooks"]
+            : [])
+        ];
+        if (machineOnlyFlags.length > 0) {
+          writeCommandError({
+            json: options.json,
+            code: "invalid_setup_option",
+            message: `${machineOnlyFlags.join(", ")} appl${machineOnlyFlags.length === 1 ? "ies" : "y"} to machine setup only`,
+            nextActions: [
+              "Run switchboard setup (no preset) for machine setup.",
+              `Run switchboard setup ${preset} without machine flags for provider setup.`
             ]
           });
           return;
@@ -4817,11 +4878,85 @@ export function createProgram(io: ProgramIo = {}): Command {
     const globalOptions = program.opts<{ cwd?: string }>();
     const cwd = installTargetCwd(globalOptions.cwd);
     const homeOptions = io.homeDir ? { homeDir: io.homeDir } : {};
+    const manifestPath = resolveSetupManifestPath(homeOptions);
     const commandPrefix = switchboardCommandPrefixForRepo(cwd);
     const rewrite = (command: string): string =>
       rewriteSwitchboardCommand(command, commandPrefix);
 
+    // Fail closed on an unreadable manifest before anything is written or
+    // rolled back: quarantine it (so its record stays recoverable) and stop
+    // with the paths a human or agent needs to recover.
+    const manifestReadable = async (): Promise<boolean> => {
+      try {
+        await readSetupManifest(homeOptions);
+        return true;
+      } catch (error) {
+        if (!(error instanceof SetupManifestCorruptError)) {
+          throw error;
+        }
+
+        const quarantinedPath = await quarantineSetupManifest(
+          homeOptions
+        ).catch(() => null);
+        writeCommandError({
+          json: options.json,
+          code: "setup_manifest_corrupt",
+          message: quarantinedPath
+            ? `${error.message}; it was moved to ${quarantinedPath}`
+            : error.message,
+          nextActions: [
+            ...(quarantinedPath
+              ? [
+                  `Recover earlier setup writes by hand from ${quarantinedPath} if needed.`
+                ]
+              : []),
+            rewrite("switchboard setup")
+          ],
+          extra: {
+            manifestPath,
+            ...(quarantinedPath
+              ? { quarantinedManifestPath: quarantinedPath }
+              : {})
+          }
+        });
+        return false;
+      }
+    };
+
+    const acquireLock = async (): Promise<
+      Awaited<ReturnType<typeof acquireSetupRunLock>> | null
+    > => {
+      try {
+        return await acquireSetupRunLock(homeOptions);
+      } catch (error) {
+        if (!(error instanceof SetupLockHeldError)) {
+          throw error;
+        }
+
+        writeCommandError({
+          json: options.json,
+          code: "setup_already_running",
+          message: error.message,
+          nextActions: [
+            "Wait for the other setup run to finish, then rerun.",
+            `Delete ${error.path} if no setup is running.`
+          ],
+          extra: { manifestPath, lockPath: error.path }
+        });
+        return null;
+      }
+    };
+
     if (options.rollback) {
+      if (!(await manifestReadable())) {
+        return;
+      }
+
+      const lock = await acquireLock();
+      if (lock === null) {
+        return;
+      }
+
       let result: SetupRollbackResult;
       try {
         result = await rollbackSetupWrites(homeOptions);
@@ -4831,11 +4966,13 @@ export function createProgram(io: ProgramIo = {}): Command {
           code: "setup_rollback_failed",
           message: messageFromError(error),
           nextActions: [
-            "Inspect the setup manifest before retrying: " +
-              resolveSetupManifestPath(homeOptions)
-          ]
+            `Inspect the setup manifest before retrying: ${manifestPath}`
+          ],
+          extra: { manifestPath }
         });
         return;
+      } finally {
+        await lock.release();
       }
 
       const payload: MachineSetupRollbackPayload = {
@@ -4896,7 +5033,27 @@ export function createProgram(io: ProgramIo = {}): Command {
       }
     }
 
+    // Both guards run before the first write: a corrupt manifest would
+    // strand writes with no rollback record, and a concurrent run would
+    // race the manifest merge.
+    if (!(await manifestReadable())) {
+      return;
+    }
+
+    const lock = await acquireLock();
+    if (lock === null) {
+      return;
+    }
+
     const changes: Omit<SetupManifestEntry, "recordedAt">[] = [];
+    // Each write lands in the manifest immediately, so a crash mid-run
+    // leaves nothing untracked and setup --rollback still unwinds it.
+    const recordChange = async (
+      entry: Omit<SetupManifestEntry, "recordedAt">
+    ): Promise<void> => {
+      changes.push(entry);
+      await recordSetupWrites([entry], homeOptions);
+    };
     try {
       // Step: repo import. Machine setup is repo-independent, so a repo
       // with nothing to consolidate is a clean noop, and --skip-import
@@ -4916,7 +5073,7 @@ export function createProgram(io: ProgramIo = {}): Command {
           ...homeOptions
         });
         if (written.action !== "noop") {
-          changes.push({
+          await recordChange({
             kind: "repo-config",
             path: written.targetPath,
             action: written.action,
@@ -4991,7 +5148,7 @@ export function createProgram(io: ProgramIo = {}): Command {
         };
       } else {
         const written = await writeSwitchboardClientConfig(codexOptions);
-        changes.push({
+        await recordChange({
           kind: "client-config",
           path: written.targetPath,
           action: written.action,
@@ -5043,7 +5200,7 @@ export function createProgram(io: ProgramIo = {}): Command {
             : {})
         });
       if (globalConfig.action !== "noop") {
-        changes.push({
+        await recordChange({
           kind: "global-config",
           path: globalConfig.path,
           action: globalConfig.action,
@@ -5061,8 +5218,6 @@ export function createProgram(io: ProgramIo = {}): Command {
         enabled: globalConfig.hooks === "enabled"
       };
 
-      await recordSetupWrites(changes, homeOptions);
-      const manifestPath = resolveSetupManifestPath(homeOptions);
       const auditLogPath = io.auditLogPath ?? resolveAuditLogPath(homeOptions);
       const payload: MachineSetupPayload = {
         ok: true,
@@ -5111,9 +5266,8 @@ export function createProgram(io: ProgramIo = {}): Command {
           : formatMachineSetup(payload)
       );
     } catch (error) {
-      // Keep the manifest current so a partial setup stays undoable with
-      // one rollback command.
-      await recordSetupWrites(changes, homeOptions).catch(() => undefined);
+      // Every completed write is already in the manifest, so a partial
+      // setup stays undoable with one rollback command.
       writeCommandError({
         json: options.json,
         code: "setup_failed",
@@ -5121,8 +5275,11 @@ export function createProgram(io: ProgramIo = {}): Command {
         nextActions: [
           rewrite("switchboard setup --rollback"),
           rewrite("switchboard doctor")
-        ]
+        ],
+        extra: { manifestPath }
       });
+    } finally {
+      await lock.release();
     }
   }
 
@@ -10540,7 +10697,8 @@ function commandErrorEnvelope(
     schemaVersion: errorSchemaVersion,
     code: options.code,
     message: options.message,
-    nextActions: options.nextActions ?? []
+    nextActions: options.nextActions ?? [],
+    ...(options.extra ?? {})
   };
 }
 

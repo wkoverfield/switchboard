@@ -95,13 +95,19 @@ export async function writeGlobalSwitchboardConfig(
     return { path, action: "noop", backupPath: null, hooks };
   }
 
+  // Missing top-level sections are appended as text so hand-written
+  // comments survive; only a change inside an existing section (a policies
+  // mapping without "default", or a different recorded hooks value) falls
+  // through to the YAML printer, which drops comments but runs behind a
+  // backup.
   let nextContent: string;
+  const separator = existing.endsWith("\n") ? "\n" : "\n\n";
   if (!hasPolicies && !hasSetup) {
-    const separator = existing.endsWith("\n") ? "\n" : "\n\n";
     nextContent = `${existing}${separator}${policiesBlock}\n\n${setupBlock(hooks)}\n`;
   } else if (policiesSatisfied && !hasSetup) {
-    const separator = existing.endsWith("\n") ? "\n" : "\n\n";
     nextContent = `${existing}${separator}${setupBlock(hooks)}\n`;
+  } else if (!hasPolicies && hooksSatisfied) {
+    nextContent = `${existing}${separator}${policiesBlock}\n`;
   } else {
     const merged = deepMerge(parsed, {
       policies: { default: defaultPolicyStanza(parsed) },

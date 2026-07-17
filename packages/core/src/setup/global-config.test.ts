@@ -114,6 +114,35 @@ describe("writeGlobalSwitchboardConfig", () => {
     expect(parsed.setup.hooks).toBe("enabled");
   });
 
+  it("appends only the policies block when setup is recorded but policies is absent", async () => {
+    const configHome = makeTempDir();
+    const env = { XDG_CONFIG_HOME: configHome } as NodeJS.ProcessEnv;
+    const dir = join(configHome, "switchboard");
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "config.yaml");
+    const original = [
+      "# hand-written machine config",
+      "version: 1",
+      "setup:",
+      "  hooks: enabled",
+      ""
+    ].join("\n");
+    writeFileSync(path, original);
+
+    const result = await writeGlobalSwitchboardConfig({ env });
+
+    expect(result.action).toBe("updated");
+    const content = readFileSync(path, "utf8");
+    // The hand-written prefix, comment included, survives verbatim.
+    expect(content.startsWith(original)).toBe(true);
+    const parsed = parseYaml(content) as {
+      policies: Record<string, unknown>;
+      setup: { hooks: string };
+    };
+    expect(parsed.policies.default).toEqual({});
+    expect(parsed.setup.hooks).toBe("enabled");
+  });
+
   it("preserves an existing default policy stanza when merging", async () => {
     const configHome = makeTempDir();
     const env = { XDG_CONFIG_HOME: configHome } as NodeJS.ProcessEnv;
