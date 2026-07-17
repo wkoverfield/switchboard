@@ -20,3 +20,5 @@ export * from "./scan/scan.js";
 export * from "./schemas/config.js";
 export * from "./secrets/secret-refs.js";
 export * from "./secrets/secrets.js";
+export * from "./setup/global-config.js";
+export * from "./setup/setup-manifest.js";
