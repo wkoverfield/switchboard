@@ -2,7 +2,7 @@
   "name": "switchboard",
   "private": true,
   "type": "module",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "license": "MIT",
   "packageManager": "pnpm@10.28.2",
   "description": "One firewall and password manager for all your AI coding agents' MCP servers and secrets.",
