@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   writeFileSync
@@ -9864,7 +9865,657 @@ describe("switchboard CLI program", () => {
       message: "unknown option '--bogus'"
     });
   });
+
+  it("runs machine setup end to end, idempotently, with a byte-identical rollback", async () => {
+    const sandbox = makeSetupSandbox();
+    try {
+      const { root, homeDir, codexHome, configHome, stateHome } = sandbox;
+      writeMandateFixtureConfig(root);
+      writeFileSync(
+        join(root, ".mcp.json"),
+        JSON.stringify(
+          {
+            mcpServers: {
+              "github-tools": {
+                command: "npx",
+                args: ["-y", "github-mcp"],
+                env: { GITHUB_TOKEN: "ghp_should_not_print" }
+              }
+            }
+          },
+          null,
+          2
+        )
+      );
+      const repoConfigBefore = readFileSync(
+        join(root, ".switchboard.yaml"),
+        "utf8"
+      );
+
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore(),
+        startDaemon: async () => {
+          throw new Error("machine setup must never start a daemon");
+        }
+      });
+      await program.parseAsync(["--cwd", root, "setup", "--json"], {
+        from: "user"
+      });
+
+      const payload = JSON.parse(output[0] ?? "{}") as {
+        ok: boolean;
+        schemaVersion: string;
+        steps: {
+          scan: { status: string };
+          import: {
+            status: string;
+            action: string;
+            targetPath: string;
+            backupPath: string | null;
+            createdProfiles: string[];
+          };
+          secrets: {
+            valuesRead: boolean;
+            refs: Array<{ ref: string }>;
+            commands: string[];
+          };
+          clients: {
+            codex: { status: string; targetPath: string };
+            claude: { status: string; addCommand: string[] };
+          };
+          globalConfig: { path: string; action: string; hooks: string };
+          hooks: { status: string; reason: string; enabled: boolean };
+        };
+        changes: unknown[];
+        manifestPath: string;
+        auditLogPath: string;
+        undo: { command: string };
+        nextActions: string[];
+      };
+      expect(payload.ok).toBe(true);
+      expect(payload.schemaVersion).toBe("switchboard.setup.v1");
+      expect(payload.steps.scan.status).toBe("ok");
+      expect(payload.steps.import).toMatchObject({
+        status: "applied",
+        action: "updated",
+        targetPath: join(root, ".switchboard.yaml")
+      });
+      expect(payload.steps.import.backupPath).not.toBeNull();
+      expect(payload.steps.import.createdProfiles.join(",")).toContain(
+        "github"
+      );
+      // Fork A: value-untouched. The token value from client config never
+      // appears, and setup emits the exact secrets set command instead.
+      expect(payload.steps.secrets.valuesRead).toBe(false);
+      expect(payload.steps.secrets.commands).toContain(
+        `switchboard secrets set ${githubRepoSecretRef(root)} --value-stdin`
+      );
+      expect(output.join("\n")).not.toContain("ghp_should_not_print");
+      expect(payload.steps.clients.codex).toMatchObject({
+        status: "created",
+        targetPath: join(codexHome, "config.toml")
+      });
+      const codexContent = readFileSync(join(codexHome, "config.toml"), "utf8");
+      expect(codexContent).toContain('args = ["mcp"]');
+      expect(codexContent).not.toContain("--cwd");
+      expect(payload.steps.clients.claude.status).toBe("manual");
+      expect(payload.steps.clients.claude.addCommand.slice(0, 5)).toEqual([
+        "claude",
+        "mcp",
+        "add",
+        "--scope",
+        "user"
+      ]);
+      expect(payload.steps.globalConfig).toMatchObject({
+        path: join(configHome, "switchboard", "config.yaml"),
+        action: "created",
+        hooks: "enabled"
+      });
+      expect(readFileSync(payload.steps.globalConfig.path, "utf8")).toContain(
+        "default: {}"
+      );
+      expect(payload.steps.hooks).toMatchObject({
+        status: "pending",
+        enabled: true
+      });
+      expect(payload.steps.hooks.reason.length).toBeGreaterThan(0);
+      expect(payload.changes).toHaveLength(3);
+      expect(payload.manifestPath).toBe(
+        join(stateHome, "switchboard", "setup", "manifest.json")
+      );
+      expect(payload.auditLogPath.length).toBeGreaterThan(0);
+      expect(payload.undo.command).toBe("switchboard setup --rollback");
+      expect(payload.nextActions.length).toBeGreaterThan(0);
+
+      // The consolidated config still routes: a profile test against the
+      // fixture upstream succeeds after setup.
+      const testOutput: string[] = [];
+      const testProgram = createProgram({
+        writeOut: (message) => testOutput.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await testProgram.parseAsync(
+        ["--cwd", root, "test", "github_findu", "--json"],
+        { from: "user" }
+      );
+      const testResult = JSON.parse(testOutput[0] ?? "{}") as {
+        ok: boolean;
+      };
+      expect(testResult.ok).toBe(true);
+
+      // Re-run: repair only. Nothing is duplicated and unchanged files are
+      // not re-backed-up.
+      const rerunOutput: string[] = [];
+      const rerunProgram = createProgram({
+        writeOut: (message) => rerunOutput.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore(),
+        startDaemon: async () => {
+          throw new Error("machine setup must never start a daemon");
+        }
+      });
+      await rerunProgram.parseAsync(["--cwd", root, "setup", "--json"], {
+        from: "user"
+      });
+      const rerun = JSON.parse(rerunOutput[0] ?? "{}") as {
+        steps: {
+          import: { status: string };
+          clients: { codex: { status: string } };
+          globalConfig: { action: string };
+        };
+        changes: unknown[];
+      };
+      expect(rerun.steps.import.status).toBe("noop");
+      expect(rerun.steps.clients.codex.status).toBe("already-installed");
+      expect(rerun.steps.globalConfig.action).toBe("noop");
+      expect(rerun.changes).toEqual([]);
+      expect(readdirSync(codexHome)).toEqual(["config.toml"]);
+
+      // One rollback unwinds everything setup wrote.
+      const rollbackOutput: string[] = [];
+      const rollbackProgram = createProgram({
+        writeOut: (message) => rollbackOutput.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await rollbackProgram.parseAsync(["setup", "--rollback", "--json"], {
+        from: "user"
+      });
+      const rollback = JSON.parse(rollbackOutput[0] ?? "{}") as {
+        ok: boolean;
+        schemaVersion: string;
+        counts: { items: number; failures: number };
+      };
+      expect(rollback.ok).toBe(true);
+      expect(rollback.schemaVersion).toBe("switchboard.setup-rollback.v1");
+      expect(rollback.counts).toEqual({ items: 3, failures: 0 });
+      expect(readFileSync(join(root, ".switchboard.yaml"), "utf8")).toBe(
+        repoConfigBefore
+      );
+      expect(existsSync(join(codexHome, "config.toml"))).toBe(false);
+      expect(
+        existsSync(join(configHome, "switchboard", "config.yaml"))
+      ).toBe(false);
+      expect(existsSync(payload.manifestPath)).toBe(false);
+
+      // A second rollback is a clean noop.
+      const secondRollbackOutput: string[] = [];
+      const secondRollbackProgram = createProgram({
+        writeOut: (message) => secondRollbackOutput.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await secondRollbackProgram.parseAsync(
+        ["setup", "--rollback", "--json"],
+        { from: "user" }
+      );
+      expect(JSON.parse(secondRollbackOutput[0] ?? "{}")).toMatchObject({
+        ok: true,
+        rolledBack: false
+      });
+    } finally {
+      sandbox.restore();
+    }
+  });
+
+  it("records --no-hooks in the global config and preserves the choice on re-run", async () => {
+    const sandbox = makeSetupSandbox();
+    try {
+      const { root, homeDir, configHome } = sandbox;
+
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await program.parseAsync(
+        ["--cwd", root, "setup", "--json", "--no-hooks"],
+        { from: "user" }
+      );
+      const payload = JSON.parse(output[0] ?? "{}") as {
+        steps: {
+          globalConfig: { hooks: string };
+          hooks: { enabled: boolean };
+        };
+      };
+      expect(payload.steps.globalConfig.hooks).toBe("disabled");
+      expect(payload.steps.hooks.enabled).toBe(false);
+      const globalConfigPath = join(configHome, "switchboard", "config.yaml");
+      expect(readFileSync(globalConfigPath, "utf8")).toContain(
+        "hooks: disabled"
+      );
+
+      // A plain re-run does not silently flip the recorded opt-out.
+      const rerunOutput: string[] = [];
+      const rerunProgram = createProgram({
+        writeOut: (message) => rerunOutput.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await rerunProgram.parseAsync(["--cwd", root, "setup", "--json"], {
+        from: "user"
+      });
+      const rerun = JSON.parse(rerunOutput[0] ?? "{}") as {
+        steps: { globalConfig: { action: string; hooks: string } };
+      };
+      expect(rerun.steps.globalConfig.action).toBe("noop");
+      expect(rerun.steps.globalConfig.hooks).toBe("disabled");
+    } finally {
+      sandbox.restore();
+    }
+  });
+
+  it("completes machine setup in human mode without prompting off a TTY", async () => {
+    const sandbox = makeSetupSandbox();
+    try {
+      const { root, homeDir } = sandbox;
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await program.parseAsync(["--cwd", root, "setup"], { from: "user" });
+
+      const text = output.join("\n");
+      expect(text).toContain("Switchboard machine setup");
+      expect(text).toContain("Undo everything: switchboard setup --rollback");
+      expect(text).toContain("Hooks: pending");
+    } finally {
+      sandbox.restore();
+    }
+  });
+
+  it("cancels machine setup cleanly when the confirmation is declined", async () => {
+    const sandbox = makeSetupSandbox();
+    try {
+      const { root, homeDir, codexHome, configHome } = sandbox;
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore(),
+        confirmSetup: async () => false
+      });
+      await program.parseAsync(["--cwd", root, "setup"], { from: "user" });
+
+      expect(output.join("\n")).toContain(
+        "Setup cancelled; nothing was written."
+      );
+      expect(existsSync(join(codexHome, "config.toml"))).toBe(false);
+      expect(
+        existsSync(join(configHome, "switchboard", "config.yaml"))
+      ).toBe(false);
+    } finally {
+      sandbox.restore();
+    }
+  });
+
+  it("rejects --rollback combined with a provider preset", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message)
+    });
+    await program.parseAsync(
+      ["--cwd", root, "setup", "github-ci", "--rollback", "--json"],
+      { from: "user" }
+    );
+
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: false,
+      code: "conflicting_setup_modes"
+    });
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+  });
+
+  it("rejects preset-only flags in machine setup instead of ignoring them", async () => {
+    const sandbox = makeSetupSandbox();
+    try {
+      const { root, homeDir, codexHome } = sandbox;
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      // A dropped positional (e.g. `setup --secret-ref x` instead of
+      // `setup github-ci --secret-ref x`) must not run machine setup.
+      await program.parseAsync(
+        [
+          "--cwd",
+          root,
+          "setup",
+          "--secret-ref",
+          "github/findu/dev/token",
+          "--json"
+        ],
+        { from: "user" }
+      );
+
+      const parsed = JSON.parse(output[0] ?? "{}") as {
+        ok: boolean;
+        code: string;
+        message: string;
+      };
+      expect(parsed).toMatchObject({ ok: false, code: "invalid_setup_option" });
+      expect(parsed.message).toContain("--secret-ref");
+      expect(existsSync(join(codexHome, "config.toml"))).toBe(false);
+      expect(process.exitCode).toBe(1);
+      process.exitCode = undefined;
+    } finally {
+      sandbox.restore();
+    }
+  });
+
+  it("rejects machine-only flags in provider preset setup", async () => {
+    const root = makeTempProject();
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message)
+    });
+    await program.parseAsync(
+      ["--cwd", root, "setup", "github-ci", "--skip-import", "--no-hooks", "--json"],
+      { from: "user" }
+    );
+
+    const parsed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      code: string;
+      message: string;
+    };
+    expect(parsed).toMatchObject({ ok: false, code: "invalid_setup_option" });
+    expect(parsed.message).toContain("--skip-import");
+    expect(parsed.message).toContain("--no-hooks");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+  });
+
+  it("fails closed and quarantines a corrupt setup manifest before writing", async () => {
+    const sandbox = makeSetupSandbox();
+    try {
+      const { root, homeDir, codexHome, stateHome } = sandbox;
+      const manifestPath = join(
+        stateHome,
+        "switchboard",
+        "setup",
+        "manifest.json"
+      );
+      mkdirSync(join(stateHome, "switchboard", "setup"), { recursive: true });
+      writeFileSync(manifestPath, "{ definitely not json");
+
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await program.parseAsync(["--cwd", root, "setup", "--json"], {
+        from: "user"
+      });
+
+      const parsed = JSON.parse(output[0] ?? "{}") as {
+        ok: boolean;
+        code: string;
+        manifestPath: string;
+        quarantinedManifestPath: string;
+      };
+      expect(parsed).toMatchObject({
+        ok: false,
+        code: "setup_manifest_corrupt",
+        manifestPath
+      });
+      expect(parsed.quarantinedManifestPath).toContain(
+        "manifest.json.corrupt-"
+      );
+      // Fail closed: nothing was written before the manifest check.
+      expect(existsSync(join(codexHome, "config.toml"))).toBe(false);
+      // The corrupt record stays recoverable.
+      expect(readFileSync(parsed.quarantinedManifestPath, "utf8")).toBe(
+        "{ definitely not json"
+      );
+      expect(existsSync(manifestPath)).toBe(false);
+      expect(process.exitCode).toBe(1);
+      process.exitCode = undefined;
+
+      // With the corrupt file quarantined, the next run succeeds.
+      const rerunOutput: string[] = [];
+      const rerunProgram = createProgram({
+        writeOut: (message) => rerunOutput.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await rerunProgram.parseAsync(["--cwd", root, "setup", "--json"], {
+        from: "user"
+      });
+      expect(JSON.parse(rerunOutput[0] ?? "{}")).toMatchObject({ ok: true });
+    } finally {
+      sandbox.restore();
+    }
+  });
+
+  it("records each setup write immediately so a mid-run failure stays undoable", async () => {
+    const sandbox = makeSetupSandbox();
+    try {
+      const { root, homeDir, codexHome, configHome, stateHome } = sandbox;
+      // A global config that is not a YAML mapping makes the global-config
+      // step throw after the client write already happened.
+      mkdirSync(join(configHome, "switchboard"), { recursive: true });
+      writeFileSync(
+        join(configHome, "switchboard", "config.yaml"),
+        "- not\n- a\n- mapping\n"
+      );
+
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await program.parseAsync(["--cwd", root, "setup", "--json"], {
+        from: "user"
+      });
+
+      const manifestPath = join(
+        stateHome,
+        "switchboard",
+        "setup",
+        "manifest.json"
+      );
+      const parsed = JSON.parse(output[0] ?? "{}") as {
+        ok: boolean;
+        code: string;
+        manifestPath: string;
+      };
+      expect(parsed).toMatchObject({
+        ok: false,
+        code: "setup_failed",
+        manifestPath
+      });
+      expect(process.exitCode).toBe(1);
+      process.exitCode = undefined;
+
+      // The codex write that completed before the failure is already in
+      // the manifest, so one rollback unwinds the partial run.
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+        entries: Array<{ kind: string; path: string }>;
+      };
+      expect(manifest.entries).toContainEqual(
+        expect.objectContaining({
+          kind: "client-config",
+          path: join(codexHome, "config.toml")
+        })
+      );
+
+      const rollbackOutput: string[] = [];
+      const rollbackProgram = createProgram({
+        writeOut: (message) => rollbackOutput.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await rollbackProgram.parseAsync(["setup", "--rollback", "--json"], {
+        from: "user"
+      });
+      expect(JSON.parse(rollbackOutput[0] ?? "{}")).toMatchObject({
+        ok: true
+      });
+      expect(existsSync(join(codexHome, "config.toml"))).toBe(false);
+    } finally {
+      sandbox.restore();
+    }
+  });
+
+  it("fails fast when another setup run holds the lock", async () => {
+    const sandbox = makeSetupSandbox();
+    try {
+      const { root, homeDir, codexHome, stateHome } = sandbox;
+      const lockPath = join(stateHome, "switchboard", "setup", "setup.lock");
+      mkdirSync(join(stateHome, "switchboard", "setup"), { recursive: true });
+      writeFileSync(lockPath, '{"pid":12345}\n');
+
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await program.parseAsync(["--cwd", root, "setup", "--json"], {
+        from: "user"
+      });
+
+      expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+        ok: false,
+        code: "setup_already_running",
+        lockPath
+      });
+      expect(existsSync(join(codexHome, "config.toml"))).toBe(false);
+      // The foreign lock is left in place for its owner.
+      expect(existsSync(lockPath)).toBe(true);
+      expect(process.exitCode).toBe(1);
+      process.exitCode = undefined;
+    } finally {
+      sandbox.restore();
+    }
+  });
+
+  it("preserves a snapshot when rollback removes a setup-created file that was edited", async () => {
+    const sandbox = makeSetupSandbox();
+    try {
+      const { root, homeDir, codexHome } = sandbox;
+      const output: string[] = [];
+      const program = createProgram({
+        writeOut: (message) => output.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await program.parseAsync(["--cwd", root, "setup", "--json"], {
+        from: "user"
+      });
+      expect(JSON.parse(output[0] ?? "{}")).toMatchObject({ ok: true });
+
+      // The user adds their own server to the file setup created.
+      const codexPath = join(codexHome, "config.toml");
+      const editedContent = `${readFileSync(codexPath, "utf8")}\n[mcp_servers.added_by_user]\ncommand = "npx"\n`;
+      writeFileSync(codexPath, editedContent);
+
+      const rollbackOutput: string[] = [];
+      const rollbackProgram = createProgram({
+        writeOut: (message) => rollbackOutput.push(message),
+        homeDir,
+        secretStore: createMemorySecretStore()
+      });
+      await rollbackProgram.parseAsync(["setup", "--rollback", "--json"], {
+        from: "user"
+      });
+
+      const rollback = JSON.parse(rollbackOutput[0] ?? "{}") as {
+        ok: boolean;
+        items: Array<{
+          path: string;
+          status: string;
+          snapshotPath: string | null;
+        }>;
+      };
+      expect(rollback.ok).toBe(true);
+      const codexItem = rollback.items.find((item) => item.path === codexPath);
+      expect(codexItem?.status).toBe("removed");
+      expect(codexItem?.snapshotPath).not.toBeNull();
+      expect(existsSync(codexPath)).toBe(false);
+      expect(readFileSync(codexItem?.snapshotPath ?? "", "utf8")).toBe(
+        editedContent
+      );
+    } finally {
+      sandbox.restore();
+    }
+  });
 });
+
+interface SetupSandbox {
+  root: string;
+  homeDir: string;
+  codexHome: string;
+  configHome: string;
+  stateHome: string;
+  restore: () => void;
+}
+
+// Machine setup writes user-level files, so every test sandboxes them with
+// XDG_CONFIG_HOME/XDG_STATE_HOME/CODEX_HOME plus an injected homeDir. HOME
+// itself is never overridden: a fake HOME has no login keychain and macOS
+// answers keychain access with a dialog on the user's screen.
+function makeSetupSandbox(): SetupSandbox {
+  const root = makeTempProject();
+  const homeDir = makeTempProject();
+  const codexHome = makeTempProject();
+  const configHome = makeTempProject();
+  const stateHome = makeTempProject();
+  const originalConfigHome = process.env.XDG_CONFIG_HOME;
+  const originalStateHome = process.env.XDG_STATE_HOME;
+  const originalCodexHome = process.env.CODEX_HOME;
+  process.env.XDG_CONFIG_HOME = configHome;
+  process.env.XDG_STATE_HOME = stateHome;
+  process.env.CODEX_HOME = codexHome;
+  initGitRepo(root, "main");
+
+  return {
+    root,
+    homeDir,
+    codexHome,
+    configHome,
+    stateHome,
+    restore: () => {
+      restoreEnvValue("XDG_CONFIG_HOME", originalConfigHome);
+      restoreEnvValue("XDG_STATE_HOME", originalStateHome);
+      restoreEnvValue("CODEX_HOME", originalCodexHome);
+    }
+  };
+}
 
 function makeTempProject(): string {
   const root = join(

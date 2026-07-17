@@ -52,6 +52,19 @@ import {
   collectSecretRefUsages,
   checkProviderSafetyTemplateTools,
   createSwitchboardImportPlan,
+  inspectProjectClientConfig,
+  acquireSetupRunLock,
+  quarantineSetupManifest,
+  readSetupManifest,
+  recordSetupWrites,
+  resolveSetupManifestPath,
+  rollbackSetupWrites,
+  SetupLockHeldError,
+  SetupManifestCorruptError,
+  type SetupManifestEntry,
+  type SetupRollbackResult,
+  writeGlobalSwitchboardConfig,
+  type WrittenGlobalConfig,
   createProviderAddPlan,
   createKeychainSecretStore,
   describeSecretBackendError,
@@ -149,6 +162,8 @@ const secretsSchemaVersion = "switchboard.secrets.v1";
 const providerPresetSchemaVersion = "switchboard.provider-preset.v1";
 const providerPresetCheckSchemaVersion = "switchboard.provider-preset-check.v1";
 const providerAddSchemaVersion = "switchboard.provider-add.v1";
+const setupSchemaVersion = "switchboard.setup.v1";
+const setupRollbackSchemaVersion = "switchboard.setup-rollback.v1";
 const errorSchemaVersion = "switchboard.error.v1";
 
 interface CommandErrorEnvelope {
@@ -157,6 +172,7 @@ interface CommandErrorEnvelope {
   code: string;
   message: string;
   nextActions: string[];
+  [key: string]: unknown;
 }
 
 interface CommandErrorOptions {
@@ -164,6 +180,10 @@ interface CommandErrorOptions {
   code: string;
   message: string;
   nextActions?: string[];
+  /** Extra structured fields merged into the JSON error envelope (for
+   * example the manifest path a setup error refers to). Ignored in human
+   * output. */
+  extra?: Record<string, unknown>;
 }
 
 interface MandateMcpLaunchPayload {
@@ -572,6 +592,12 @@ export interface ProgramIo {
   secretIndexPath?: string;
   readSecretFromStdin?: () => Promise<string>;
   readSecretFromPrompt?: (prompt: string) => Promise<string>;
+  /**
+   * Yes/no confirmation used by machine setup in human mode. The default
+   * implementation prompts only on a real TTY (Enter accepts the default)
+   * and answers yes everywhere else, so scripted runs never block.
+   */
+  confirmSetup?: (question: string) => Promise<boolean>;
   /** Force ANSI color on or off; default: on only for a real TTY. */
   color?: boolean;
 }
@@ -624,6 +650,7 @@ export function createProgram(io: ProgramIo = {}): Command {
   const secretStore = io.secretStore ?? createKeychainSecretStore();
   const readSecretFromStdin = io.readSecretFromStdin ?? readAllStdin;
   const readSecretFromPrompt = io.readSecretFromPrompt ?? readHiddenPrompt;
+  const confirmSetup = io.confirmSetup ?? confirmDefaultYes;
   const program = new Command();
   let currentParseArgs: string[] = [];
   const writeCommandError = (options: CommandErrorOptions): void => {
@@ -1611,36 +1638,118 @@ export function createProgram(io: ProgramIo = {}): Command {
     );
 
   program
-    .command("setup <preset>")
-    .description("Guided provider setup: write config and store the provider token.")
-    .option("--json", "print machine-readable JSON; requires --value-stdin")
-    .option("--profile-name <name>", "profile name to render")
-    .option("--namespace <name>", "namespace to render")
-    .option("--secret-ref <ref>", "secretRef to render")
-    .option("--command <command>", "upstream MCP server command to render")
+    .command("setup [preset]")
+    .description(
+      "Set up this machine in one command (scan, consolidate, route agent clients), or run guided provider setup with a preset."
+    )
+    .option("--json", "print machine-readable JSON; provider preset setup also requires --value-stdin")
+    .option("--rollback", "machine setup only: undo every write setup made")
+    .option(
+      "--no-hooks",
+      "machine setup only: record agent-client hooks as disabled in the global config"
+    )
+    .option(
+      "--skip-import",
+      "machine setup only: skip consolidating the current repo's MCP client config"
+    )
+    .option("--profile-name <name>", "provider preset only: profile name to render")
+    .option("--namespace <name>", "provider preset only: namespace to render")
+    .option("--secret-ref <ref>", "provider preset only: secretRef to render")
+    .option(
+      "--command <command>",
+      "provider preset only: upstream MCP server command to render"
+    )
     .option(
       "--arg <arg>",
-      "upstream MCP server arg to render (repeatable)",
+      "provider preset only: upstream MCP server arg to render (repeatable)",
       collectOption,
       [] as string[]
     )
     .option(
       "--value-stdin",
-      "read the token from stdin instead of prompting"
+      "provider preset only: read the token from stdin instead of prompting"
     )
     .action(
       async (
-        preset: string,
+        preset: string | undefined,
         options: {
           json?: boolean;
+          rollback?: boolean;
+          hooks: boolean;
+          skipImport?: boolean;
           profileName?: string;
           namespace?: string;
           secretRef?: string;
           command?: string;
           arg: string[];
           valueStdin?: boolean;
-        }
+        },
+        setupCommand: Command
       ) => {
+        if (preset === undefined) {
+          // Machine mode: refuse preset-only flags instead of silently
+          // ignoring them; a dropped positional would otherwise run a full
+          // machine setup the caller did not ask for.
+          const presetOnlyFlags = [
+            ...(options.profileName !== undefined ? ["--profile-name"] : []),
+            ...(options.namespace !== undefined ? ["--namespace"] : []),
+            ...(options.secretRef !== undefined ? ["--secret-ref"] : []),
+            ...(options.command !== undefined ? ["--command"] : []),
+            ...(options.arg.length > 0 ? ["--arg"] : []),
+            ...(options.valueStdin ? ["--value-stdin"] : [])
+          ];
+          if (presetOnlyFlags.length > 0) {
+            writeCommandError({
+              json: options.json,
+              code: "invalid_setup_option",
+              message: `${presetOnlyFlags.join(", ")} appl${presetOnlyFlags.length === 1 ? "ies" : "y"} to provider preset setup only`,
+              nextActions: [
+                "Add a preset, for example: switchboard setup github-ci.",
+                "Or drop the provider flags to run machine setup."
+              ]
+            });
+            return;
+          }
+
+          await runMachineSetup({ options, setupCommand });
+          return;
+        }
+
+        if (options.rollback) {
+          writeCommandError({
+            json: options.json,
+            code: "conflicting_setup_modes",
+            message:
+              "--rollback undoes machine setup and cannot be combined with a provider preset",
+            nextActions: [
+              "Run switchboard setup --rollback to undo machine setup.",
+              `Run switchboard setup ${preset} for provider setup.`
+            ]
+          });
+          return;
+        }
+
+        // Preset mode: machine-only flags would be silently ignored, so
+        // refuse them the same way machine mode refuses preset flags.
+        const machineOnlyFlags = [
+          ...(options.skipImport ? ["--skip-import"] : []),
+          ...(setupCommand.getOptionValueSource("hooks") === "cli"
+            ? ["--no-hooks"]
+            : [])
+        ];
+        if (machineOnlyFlags.length > 0) {
+          writeCommandError({
+            json: options.json,
+            code: "invalid_setup_option",
+            message: `${machineOnlyFlags.join(", ")} appl${machineOnlyFlags.length === 1 ? "ies" : "y"} to machine setup only`,
+            nextActions: [
+              "Run switchboard setup (no preset) for machine setup.",
+              `Run switchboard setup ${preset} without machine flags for provider setup.`
+            ]
+          });
+          return;
+        }
+
         const template = getProviderSafetyTemplate(preset);
         if (!template) {
           writeCommandError({
@@ -4755,6 +4864,424 @@ export function createProgram(io: ProgramIo = {}): Command {
         writeOut(formatInstallSnippet(rendered));
       }
     );
+
+  async function runMachineSetup(context: {
+    options: {
+      json?: boolean;
+      rollback?: boolean;
+      hooks: boolean;
+      skipImport?: boolean;
+    };
+    setupCommand: Command;
+  }): Promise<void> {
+    const { options, setupCommand } = context;
+    const globalOptions = program.opts<{ cwd?: string }>();
+    const cwd = installTargetCwd(globalOptions.cwd);
+    const homeOptions = io.homeDir ? { homeDir: io.homeDir } : {};
+    const manifestPath = resolveSetupManifestPath(homeOptions);
+    const commandPrefix = switchboardCommandPrefixForRepo(cwd);
+    const rewrite = (command: string): string =>
+      rewriteSwitchboardCommand(command, commandPrefix);
+
+    // Fail closed on an unreadable manifest before anything is written or
+    // rolled back: quarantine it (so its record stays recoverable) and stop
+    // with the paths a human or agent needs to recover.
+    const manifestReadable = async (): Promise<boolean> => {
+      try {
+        await readSetupManifest(homeOptions);
+        return true;
+      } catch (error) {
+        if (!(error instanceof SetupManifestCorruptError)) {
+          throw error;
+        }
+
+        const quarantinedPath = await quarantineSetupManifest(
+          homeOptions
+        ).catch(() => null);
+        writeCommandError({
+          json: options.json,
+          code: "setup_manifest_corrupt",
+          message: quarantinedPath
+            ? `${error.message}; it was moved to ${quarantinedPath}`
+            : error.message,
+          nextActions: [
+            ...(quarantinedPath
+              ? [
+                  `Recover earlier setup writes by hand from ${quarantinedPath} if needed.`
+                ]
+              : []),
+            rewrite("switchboard setup")
+          ],
+          extra: {
+            manifestPath,
+            ...(quarantinedPath
+              ? { quarantinedManifestPath: quarantinedPath }
+              : {})
+          }
+        });
+        return false;
+      }
+    };
+
+    const acquireLock = async (): Promise<
+      Awaited<ReturnType<typeof acquireSetupRunLock>> | null
+    > => {
+      try {
+        return await acquireSetupRunLock(homeOptions);
+      } catch (error) {
+        if (!(error instanceof SetupLockHeldError)) {
+          throw error;
+        }
+
+        writeCommandError({
+          json: options.json,
+          code: "setup_already_running",
+          message: error.message,
+          nextActions: [
+            "Wait for the other setup run to finish, then rerun.",
+            `Delete ${error.path} if no setup is running.`
+          ],
+          extra: { manifestPath, lockPath: error.path }
+        });
+        return null;
+      }
+    };
+
+    if (options.rollback) {
+      if (!(await manifestReadable())) {
+        return;
+      }
+
+      const lock = await acquireLock();
+      if (lock === null) {
+        return;
+      }
+
+      let result: SetupRollbackResult;
+      try {
+        result = await rollbackSetupWrites(homeOptions);
+      } catch (error) {
+        writeCommandError({
+          json: options.json,
+          code: "setup_rollback_failed",
+          message: messageFromError(error),
+          nextActions: [
+            `Inspect the setup manifest before retrying: ${manifestPath}`
+          ],
+          extra: { manifestPath }
+        });
+        return;
+      } finally {
+        await lock.release();
+      }
+
+      const payload: MachineSetupRollbackPayload = {
+        ok: result.failures === 0,
+        schemaVersion: setupRollbackSchemaVersion,
+        mode: "rollback",
+        manifestPath: result.manifestPath,
+        rolledBack: result.rolledBack,
+        counts: {
+          items: result.items.length,
+          failures: result.failures
+        },
+        items: result.items,
+        nextActions:
+          result.failures > 0
+            ? [
+                "Restore the failed paths by hand from their recorded backups, then rerun switchboard setup --rollback."
+              ]
+            : []
+      };
+      writeOut(
+        options.json
+          ? JSON.stringify(payload, null, 2)
+          : formatMachineSetupRollback(payload)
+      );
+      if (result.failures > 0) {
+        process.exitCode = 1;
+      }
+      return;
+    }
+
+    const launch = resolveInstallLaunch({ commandArgs: [] });
+    let scanResult: SwitchboardScanResult;
+    try {
+      scanResult = await scanSwitchboardProject({
+        cwd,
+        ...homeOptions,
+        command: launch.command,
+        commandArgs: launch.commandArgs
+      });
+    } catch (error) {
+      writeCommandError({
+        json: options.json,
+        code: "setup_scan_failed",
+        message: messageFromError(error),
+        nextActions: ["Run switchboard scan for the full scan error."]
+      });
+      return;
+    }
+
+    if (!options.json) {
+      const confirmed = await confirmSetup(
+        "Set up Switchboard on this machine (consolidate repo config, route Codex/Claude user scope, init global config)?"
+      );
+      if (!confirmed) {
+        writeOut("Setup cancelled; nothing was written.");
+        return;
+      }
+    }
+
+    // Both guards run before the first write: a corrupt manifest would
+    // strand writes with no rollback record, and a concurrent run would
+    // race the manifest merge.
+    if (!(await manifestReadable())) {
+      return;
+    }
+
+    const lock = await acquireLock();
+    if (lock === null) {
+      return;
+    }
+
+    const changes: Omit<SetupManifestEntry, "recordedAt">[] = [];
+    // Each write lands in the manifest immediately, so a crash mid-run
+    // leaves nothing untracked and setup --rollback still unwinds it.
+    const recordChange = async (
+      entry: Omit<SetupManifestEntry, "recordedAt">
+    ): Promise<void> => {
+      changes.push(entry);
+      await recordSetupWrites([entry], homeOptions);
+    };
+    try {
+      // Step: repo import. Machine setup is repo-independent, so a repo
+      // with nothing to consolidate is a clean noop, and --skip-import
+      // skips the write entirely.
+      let importStep: MachineSetupImportStep;
+      if (options.skipImport) {
+        importStep = {
+          status: "skipped",
+          action: null,
+          targetPath: null,
+          backupPath: null,
+          createdProfiles: []
+        };
+      } else {
+        const written = await writeSwitchboardImportPlan({
+          cwd,
+          ...homeOptions
+        });
+        if (written.action !== "noop") {
+          await recordChange({
+            kind: "repo-config",
+            path: written.targetPath,
+            action: written.action,
+            backupPath: written.backupPath,
+            cwd
+          });
+        }
+        importStep = {
+          status: written.action === "noop" ? "noop" : "applied",
+          action: written.action,
+          targetPath: written.targetPath,
+          backupPath: written.backupPath,
+          createdProfiles: written.createdProfiles
+        };
+      }
+
+      // Step: secrets. Value-untouched by design: setup lists the
+      // secretRefs the consolidated config points at and the exact
+      // commands that store them; it never reads token values and never
+      // probes the secret store.
+      const loaded = loadSwitchboardConfig({ cwd, ...homeOptions });
+      const refUsages = new Map<
+        string,
+        { ref: string; profiles: string[]; envNames: string[] }
+      >();
+      for (const usage of collectSecretRefUsages(loaded.config)) {
+        const entry = refUsages.get(usage.ref) ?? {
+          ref: usage.ref,
+          profiles: [],
+          envNames: []
+        };
+        if (!entry.profiles.includes(usage.profileName)) {
+          entry.profiles.push(usage.profileName);
+        }
+        if (!entry.envNames.includes(usage.envName)) {
+          entry.envNames.push(usage.envName);
+        }
+        refUsages.set(usage.ref, entry);
+      }
+      const secretRefs = [...refUsages.values()].sort((a, b) =>
+        a.ref.localeCompare(b.ref)
+      );
+      const secretsStep = {
+        valuesRead: false as const,
+        refs: secretRefs,
+        commands: secretRefs.map((entry) =>
+          rewrite(`switchboard secrets set ${entry.ref} --value-stdin`)
+        ),
+        note:
+          "Setup never reads token values. Already-stored refs can be skipped; switchboard secrets doctor verifies them without printing values."
+      };
+
+      // Step: codex user scope. Repair-only: an entry that already routes
+      // through switchboard mcp is left untouched (no rewrite, no backup).
+      const codexOptions = {
+        client: "codex" as const,
+        serverName: "switchboard",
+        command: launch.command,
+        commandArgs: launch.commandArgs,
+        cwd,
+        scope: "user" as const,
+        ...homeOptions
+      };
+      const codexInspection = await inspectProjectClientConfig(codexOptions);
+      let codexStep: MachineSetupClientStep;
+      if (codexInspection.status === "installed") {
+        codexStep = {
+          scope: "user",
+          status: "already-installed",
+          targetPath: codexInspection.targetPath,
+          backupPath: null
+        };
+      } else {
+        const written = await writeSwitchboardClientConfig(codexOptions);
+        await recordChange({
+          kind: "client-config",
+          path: written.targetPath,
+          action: written.action,
+          backupPath: written.backupPath,
+          client: "codex",
+          scope: "user",
+          cwd
+        });
+        codexStep = {
+          scope: "user",
+          status: written.action,
+          targetPath: written.targetPath,
+          backupPath: written.backupPath
+        };
+      }
+
+      // Step: claude user scope. ~/.claude.json is owned by Claude Code,
+      // so setup only prints the one-time claude mcp add command.
+      const claudeInspection = await inspectProjectClientConfig({
+        ...codexOptions,
+        client: "claude"
+      });
+      const claudeUserScope = renderUserScopeInstall(
+        "claude",
+        "switchboard",
+        launch.command,
+        [...launch.commandArgs, "mcp"]
+      );
+      const claudeStep = {
+        scope: "user" as const,
+        status:
+          claudeInspection.status === "installed"
+            ? ("already-installed" as const)
+            : ("manual" as const),
+        targetPath: claudeInspection.targetPath,
+        addCommand: claudeUserScope.addCommand
+      };
+
+      // Step: global config init plus the recorded hooks choice. A plain
+      // re-run preserves a previously recorded choice; only an explicit
+      // --no-hooks (or explicit default) on this invocation overrides it.
+      const hooksExplicit =
+        setupCommand.getOptionValueSource("hooks") === "cli";
+      const globalConfig: WrittenGlobalConfig =
+        await writeGlobalSwitchboardConfig({
+          ...homeOptions,
+          ...(hooksExplicit
+            ? { hooks: options.hooks ? ("enabled" as const) : ("disabled" as const) }
+            : {})
+        });
+      if (globalConfig.action !== "noop") {
+        await recordChange({
+          kind: "global-config",
+          path: globalConfig.path,
+          action: globalConfig.action,
+          backupPath: globalConfig.backupPath
+        });
+      }
+
+      // Step: hooks. Reserved: nothing is installed until the machine
+      // denylist ships; the recorded choice above is what that release
+      // will respect.
+      const hooksStep = {
+        status: "pending" as const,
+        reason:
+          "Hook install is reserved until the machine denylist ships in a later release; nothing was installed.",
+        enabled: globalConfig.hooks === "enabled"
+      };
+
+      const auditLogPath = io.auditLogPath ?? resolveAuditLogPath(homeOptions);
+      const payload: MachineSetupPayload = {
+        ok: true,
+        schemaVersion: setupSchemaVersion,
+        mode: "setup",
+        repo: { cwd: scanResult.repo.cwd, name: scanResult.repo.name },
+        steps: {
+          scan: {
+            status: "ok",
+            clients: scanResult.clients,
+            counts: {
+              bypassFindings: scanResult.bypassFindings.length,
+              riskFindings: scanResult.riskFindings.length,
+              providers: scanResult.providers.length
+            },
+            providers: scanResult.providers.map((hint) => hint.provider),
+            warnings: scanResult.warnings
+          },
+          import: importStep,
+          secrets: secretsStep,
+          clients: { codex: codexStep, claude: claudeStep },
+          globalConfig: {
+            path: globalConfig.path,
+            action: globalConfig.action,
+            backupPath: globalConfig.backupPath,
+            hooks: globalConfig.hooks
+          },
+          hooks: hooksStep
+        },
+        changes,
+        manifestPath,
+        auditLogPath,
+        undo: { command: rewrite("switchboard setup --rollback") },
+        nextActions: [
+          ...secretsStep.commands,
+          ...(claudeStep.status === "manual"
+            ? [claudeStep.addCommand.map(shellQuoteCommandArg).join(" ")]
+            : []),
+          rewrite("switchboard doctor")
+        ]
+      };
+
+      writeOut(
+        options.json
+          ? JSON.stringify(payload, null, 2)
+          : formatMachineSetup(payload)
+      );
+    } catch (error) {
+      // Every completed write is already in the manifest, so a partial
+      // setup stays undoable with one rollback command.
+      writeCommandError({
+        json: options.json,
+        code: "setup_failed",
+        message: messageFromError(error),
+        nextActions: [
+          rewrite("switchboard setup --rollback"),
+          rewrite("switchboard doctor")
+        ],
+        extra: { manifestPath }
+      });
+    } finally {
+      await lock.release();
+    }
+  }
 
   configureParserErrorHandling(program, {
     writeOut,
@@ -9555,6 +10082,202 @@ function formatInstallSnippet(rendered: {
   ].join("\n");
 }
 
+interface MachineSetupImportStep {
+  status: "applied" | "noop" | "skipped";
+  action: "created" | "updated" | "noop" | null;
+  targetPath: string | null;
+  backupPath: string | null;
+  createdProfiles: string[];
+}
+
+interface MachineSetupClientStep {
+  scope: "user";
+  status: "created" | "updated" | "already-installed";
+  targetPath: string;
+  backupPath: string | null;
+}
+
+interface MachineSetupPayload {
+  ok: true;
+  schemaVersion: typeof setupSchemaVersion;
+  mode: "setup";
+  repo: { cwd: string; name: string };
+  steps: {
+    scan: {
+      status: "ok";
+      clients: SwitchboardScanResult["clients"];
+      counts: {
+        bypassFindings: number;
+        riskFindings: number;
+        providers: number;
+      };
+      providers: string[];
+      warnings: string[];
+    };
+    import: MachineSetupImportStep;
+    secrets: {
+      valuesRead: false;
+      refs: Array<{ ref: string; profiles: string[]; envNames: string[] }>;
+      commands: string[];
+      note: string;
+    };
+    clients: {
+      codex: MachineSetupClientStep;
+      claude: {
+        scope: "user";
+        status: "already-installed" | "manual";
+        targetPath: string;
+        addCommand: string[];
+      };
+    };
+    globalConfig: {
+      path: string;
+      action: "created" | "updated" | "noop";
+      backupPath: string | null;
+      hooks: "enabled" | "disabled";
+    };
+    hooks: { status: "pending"; reason: string; enabled: boolean };
+  };
+  changes: Omit<SetupManifestEntry, "recordedAt">[];
+  manifestPath: string;
+  auditLogPath: string;
+  undo: { command: string };
+  nextActions: string[];
+}
+
+interface MachineSetupRollbackPayload {
+  ok: boolean;
+  schemaVersion: typeof setupRollbackSchemaVersion;
+  mode: "rollback";
+  manifestPath: string;
+  rolledBack: boolean;
+  counts: { items: number; failures: number };
+  items: SetupRollbackResult["items"];
+  nextActions: string[];
+}
+
+function formatMachineSetup(payload: MachineSetupPayload): string {
+  const lines = ["Switchboard machine setup", ""];
+  const scan = payload.steps.scan;
+  lines.push(
+    `Scan: ${scan.clients.length} client config(s), ${scan.counts.bypassFindings} bypass finding(s), ${scan.counts.providers} provider hint(s)`
+  );
+
+  const importStep = payload.steps.import;
+  if (importStep.status === "skipped") {
+    lines.push("Repo import: skipped (--skip-import)");
+  } else if (importStep.status === "noop") {
+    lines.push("Repo import: no changes needed");
+  } else {
+    lines.push(
+      `Repo import: ${importStep.action} ${importStep.targetPath}` +
+        (importStep.backupPath ? ` (backup: ${importStep.backupPath})` : "")
+    );
+    if (importStep.createdProfiles.length > 0) {
+      lines.push(`  Profiles: ${importStep.createdProfiles.join(", ")}`);
+    }
+  }
+
+  const secrets = payload.steps.secrets;
+  if (secrets.refs.length === 0) {
+    lines.push("Secrets: no secretRefs are referenced by config");
+  } else {
+    lines.push(
+      `Secrets: ${secrets.refs.length} secretRef(s) referenced; store values with:`
+    );
+    for (const command of secrets.commands) {
+      lines.push(`  ${command}`);
+    }
+    lines.push("  (setup never reads token values)");
+  }
+
+  const codex = payload.steps.clients.codex;
+  lines.push(
+    codex.status === "already-installed"
+      ? `Codex (user scope): already routes through switchboard mcp (${codex.targetPath})`
+      : `Codex (user scope): ${codex.status} ${codex.targetPath}` +
+          (codex.backupPath ? ` (backup: ${codex.backupPath})` : "")
+  );
+
+  const claude = payload.steps.clients.claude;
+  if (claude.status === "already-installed") {
+    lines.push(
+      `Claude Code (user scope): already routes through switchboard mcp (${claude.targetPath})`
+    );
+  } else {
+    lines.push("Claude Code (user scope): run once:");
+    lines.push(
+      `  ${claude.addCommand.map(shellQuoteCommandArg).join(" ")}`
+    );
+  }
+
+  const globalConfig = payload.steps.globalConfig;
+  lines.push(
+    globalConfig.action === "noop"
+      ? `Global config: up to date (${globalConfig.path})`
+      : `Global config: ${globalConfig.action} ${globalConfig.path}` +
+          (globalConfig.backupPath
+            ? ` (backup: ${globalConfig.backupPath})`
+            : "")
+  );
+  lines.push(
+    `Hooks: pending, ${payload.steps.hooks.enabled ? "enabled" : "disabled"} when they ship (nothing installed yet)`
+  );
+
+  lines.push("");
+  lines.push(`Audit log: ${payload.auditLogPath}`);
+  lines.push(`Undo everything: ${payload.undo.command}`);
+  return lines.join("\n");
+}
+
+function formatMachineSetupRollback(
+  payload: MachineSetupRollbackPayload
+): string {
+  if (!payload.rolledBack) {
+    return "Nothing to roll back; machine setup has no recorded writes.";
+  }
+
+  const lines = ["Rolled back Switchboard machine setup"];
+  for (const item of payload.items) {
+    if (item.status === "restored") {
+      lines.push(`Restored ${item.path} from ${item.backupPath}`);
+    } else if (item.status === "removed") {
+      lines.push(`Removed ${item.path}`);
+    } else if (item.status === "already-removed") {
+      lines.push(`Already removed: ${item.path}`);
+    } else {
+      lines.push(`FAILED ${item.path}: ${item.message ?? "unknown error"}`);
+    }
+  }
+  if (payload.counts.failures > 0) {
+    lines.push(
+      `${payload.counts.failures} item(s) failed and stay recorded; fix them and rerun switchboard setup --rollback.`
+    );
+  }
+  return lines.join("\n");
+}
+
+// Machine setup's only interactive question. Prompts on a real TTY where
+// Enter accepts the default (yes); everywhere else it answers yes so
+// scripted and agent runs never block.
+async function confirmDefaultYes(question: string): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    return true;
+  }
+
+  const readline = await import("node:readline/promises");
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stderr
+  });
+  try {
+    const answer = (await rl.question(`${question} [Y/n] `)).trim().toLowerCase();
+    return answer === "" || answer === "y" || answer === "yes";
+  } finally {
+    rl.close();
+  }
+}
+
 function formatInstallWrite(result: WrittenClientConfig): string {
   const clientLabel = result.client === "claude" ? "Claude Code" : "Codex";
   return [
@@ -9974,7 +10697,8 @@ function commandErrorEnvelope(
     schemaVersion: errorSchemaVersion,
     code: options.code,
     message: options.message,
-    nextActions: options.nextActions ?? []
+    nextActions: options.nextActions ?? [],
+    ...(options.extra ?? {})
   };
 }
 
