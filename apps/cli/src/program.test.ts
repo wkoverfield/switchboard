@@ -10540,6 +10540,23 @@ describe("hooks command", () => {
     expect(existsSync(installed.targetPath)).toBe(false);
   });
 
+  it("installs the claude tripwire into an explicit --config-dir", async () => {
+    const homeDir = makeTempProject();
+    const configDir = makeTempProject();
+    const output: string[] = [];
+    await createProgram({
+      writeOut: (message) => output.push(message),
+      homeDir
+    }).parseAsync(
+      ["hooks", "install", "claude", "--config-dir", configDir, "--json"],
+      { from: "user" }
+    );
+    const installed = JSON.parse(output[0] ?? "{}") as { targetPath: string };
+    expect(installed.targetPath).toBe(join(configDir, "settings.json"));
+    expect(existsSync(installed.targetPath)).toBe(true);
+    expect(existsSync(join(homeDir, ".claude", "settings.json"))).toBe(false);
+  });
+
   it("rejects unsupported hook clients", async () => {
     const errors: string[] = [];
     const program = createProgram({
@@ -10733,6 +10750,43 @@ describe("attenuation command", () => {
     });
     expect(existsSync(installed.settingsPath)).toBe(false);
     expect(existsSync(installed.agentPath)).toBe(false);
+  });
+
+  it("honors --config-dir, targeting that dir and not the default home", async () => {
+    const homeDir = makeTempProject();
+    const configDir = makeTempProject();
+    const output: string[] = [];
+    await createProgram({
+      writeOut: (message) => output.push(message),
+      homeDir
+    }).parseAsync(
+      ["attenuation", "install", "claude", "--config-dir", configDir, "--json"],
+      { from: "user" }
+    );
+    const installed = JSON.parse(output[0] ?? "{}") as {
+      settingsPath: string;
+      agentPath: string;
+    };
+    // The explicit config dir wins over the injected sandbox home.
+    expect(installed.settingsPath).toBe(join(configDir, "settings.json"));
+    expect(installed.agentPath).toBe(
+      join(configDir, "agents", "scoped-worker.md")
+    );
+    expect(existsSync(installed.settingsPath)).toBe(true);
+    expect(existsSync(join(homeDir, ".claude", "settings.json"))).toBe(false);
+
+    const uninstallOutput: string[] = [];
+    await createProgram({
+      writeOut: (message) => uninstallOutput.push(message),
+      homeDir
+    }).parseAsync(
+      ["attenuation", "uninstall", "claude", "--config-dir", configDir, "--json"],
+      { from: "user" }
+    );
+    expect(JSON.parse(uninstallOutput[0] ?? "{}")).toMatchObject({
+      action: "removed"
+    });
+    expect(existsSync(installed.settingsPath)).toBe(false);
   });
 
   it("rejects unsupported attenuation clients", async () => {

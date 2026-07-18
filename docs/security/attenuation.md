@@ -123,13 +123,22 @@ switchboard attenuation status claude      # report install state
 switchboard attenuation uninstall claude   # remove, restoring prior settings
 ```
 
-Install merges the spawn hook into user-scope Claude Code settings
-(`~/.claude/settings.json`) with a timestamped backup and writes the
-`scoped-worker` agent to `~/.claude/agents/scoped-worker.md`. It never touches
-unrelated settings. Uninstall removes exactly what install added, restoring the
+Install merges the spawn hook into user-scope Claude Code settings and writes
+the `scoped-worker` agent to `agents/scoped-worker.md`, both under the Claude
+config directory, with a timestamped backup. It never touches unrelated
+settings. Uninstall removes exactly what install added, restoring the
 pre-install content. The agent definition is written to user scope because
 file-based agent definitions in an untrusted workspace do not reliably connect
 their MCP servers.
+
+The target directory is the one Claude Code itself reads: `CLAUDE_CONFIG_DIR`
+when that environment variable is set (its `settings.json` and `agents/` live
+directly under it, for example `~/.claude-b/settings.json`), falling back to
+`~/.claude`. Pass `--config-dir <path>` to target a specific directory, which
+overrides both the environment variable and the default. If your Claude runs
+under a nonstandard `CLAUDE_CONFIG_DIR`, install without it (the resolver reads
+the same variable) or pass `--config-dir` explicitly, or the hook will be
+written where Claude does not read it.
 
 ## Seeing the tree: `switchboard fleet`
 

@@ -26,8 +26,12 @@ message or a `grep`.
   pass policy: a pass can narrow further, but cannot allow its way past the
   seatbelt.
 - **Agent shell commands (Claude Code)** via `switchboard hooks install
-  claude`, which adds a PreToolUse Bash hook to `~/.claude/settings.json`
-  running `switchboard hooks check`. The shell surface does NOT substring-
+  claude`, which adds a PreToolUse Bash hook running `switchboard hooks check`
+  to the Claude config directory's `settings.json`. That directory is the one
+  Claude Code reads: `CLAUDE_CONFIG_DIR` when set (for example
+  `~/.claude-b/settings.json`), else `~/.claude/settings.json`. Pass
+  `--config-dir <path>` to target a specific directory (it overrides the
+  environment variable). The shell surface does NOT substring-
   match the command line. It splits the line into statements (on `&&`, `||`,
   `;`, `|`, `&`, newline), identifies the invoked command of each, and:
   - hard-excludes read-only and metadata commands from ever tripping (`cat`,

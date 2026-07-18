@@ -141,6 +141,40 @@ describe("claude spawn-time attenuation install", () => {
   });
 });
 
+describe("claude config dir for attenuation", () => {
+  it("resolves the scoped-worker agent under CLAUDE_CONFIG_DIR directly", () => {
+    const env = { CLAUDE_CONFIG_DIR: "/home/alex/.claude-b" } as NodeJS.ProcessEnv;
+    expect(resolveScopedWorkerAgentPath({ env })).toBe(
+      "/home/alex/.claude-b/agents/scoped-worker.md"
+    );
+  });
+
+  it("installs and uninstalls under an explicit config dir, never the env dir", async () => {
+    const configDir = sandboxHome();
+    const envDir = sandboxHome();
+    const installed = await installClaudeAttenuation({
+      claudeConfigDir: configDir,
+      env: { CLAUDE_CONFIG_DIR: envDir } as NodeJS.ProcessEnv
+    });
+    expect(installed.settingsPath).toBe(join(configDir, "settings.json"));
+    expect(installed.agentPath).toBe(
+      join(configDir, "agents", "scoped-worker.md")
+    );
+    expect(existsSync(installed.settingsPath)).toBe(true);
+    expect(existsSync(installed.agentPath)).toBe(true);
+    // The env-pointed dir was untouched (explicit override won).
+    expect(existsSync(join(envDir, "settings.json"))).toBe(false);
+    expect(existsSync(join(envDir, "agents", "scoped-worker.md"))).toBe(false);
+
+    const removed = await uninstallClaudeAttenuation({
+      claudeConfigDir: configDir
+    });
+    expect(removed.action).toBe("removed");
+    expect(existsSync(installed.settingsPath)).toBe(false);
+    expect(existsSync(installed.agentPath)).toBe(false);
+  });
+});
+
 describe("spawn-rewrite decision", () => {
   it("redirects a generic subagent spawn to the scoped worker", () => {
     const decision = attenuationRewriteSpawnDecision({

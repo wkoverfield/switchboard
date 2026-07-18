@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { PathResolutionOptions } from "../config/paths.js";
 
 /**
@@ -56,11 +56,42 @@ export const defaultClaudeHookCommand = "switchboard hooks check";
 // prefix (global binary, npx, source checkout) the install used.
 const hookCommandSuffix = " hooks check";
 
+/**
+ * Resolve the Claude Code user config directory, the directory that holds
+ * `settings.json` and `agents/`. Claude Code reads this from
+ * `CLAUDE_CONFIG_DIR` when set (that is how a user runs a nonstandard config,
+ * e.g. `~/.claude-b`), and the directory holds those files directly (no nested
+ * `.claude`), so the resolver mirrors that layout.
+ *
+ * Precedence:
+ *   1. `claudeConfigDir` (explicit `--config-dir`) — used directly.
+ *   2. `homeDir` (a sandbox/test injection) — `<homeDir>/.claude`. This wins
+ *      over the ambient `CLAUDE_CONFIG_DIR` on purpose: injecting a home means
+ *      "pretend HOME is here", so a test never escapes its sandbox into the
+ *      real config dir the environment happens to point at.
+ *   3. `CLAUDE_CONFIG_DIR` from the environment — used directly.
+ *   4. `<homedir()>/.claude` — the default.
+ */
+export function resolveClaudeConfigDir(
+  options: PathResolutionOptions = {}
+): string {
+  if (options.claudeConfigDir) {
+    return resolve(options.claudeConfigDir);
+  }
+  if (options.homeDir) {
+    return join(options.homeDir, ".claude");
+  }
+  const env = options.env ?? process.env;
+  if (env.CLAUDE_CONFIG_DIR && env.CLAUDE_CONFIG_DIR.trim().length > 0) {
+    return resolve(env.CLAUDE_CONFIG_DIR);
+  }
+  return join(homedir(), ".claude");
+}
+
 export function resolveClaudeUserSettingsPath(
   options: PathResolutionOptions = {}
 ): string {
-  const home = options.homeDir ?? homedir();
-  return join(home, ".claude", "settings.json");
+  return join(resolveClaudeConfigDir(options), "settings.json");
 }
 
 /** Quote one argv token for a POSIX shell command string. */

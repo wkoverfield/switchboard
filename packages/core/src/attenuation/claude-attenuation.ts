@@ -1,9 +1,9 @@
 import { constants } from "node:fs";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { PathResolutionOptions } from "../config/paths.js";
 import {
+  resolveClaudeConfigDir,
   resolveClaudeUserSettingsPath,
   shellQuoteHookArg
 } from "../hooks/claude-hooks.js";
@@ -96,8 +96,11 @@ export interface ClaudeAttenuationInspection {
 export function resolveScopedWorkerAgentPath(
   options: PathResolutionOptions = {}
 ): string {
-  const home = options.homeDir ?? homedir();
-  return join(home, ".claude", "agents", `${scopedWorkerAgentName}.md`);
+  return join(
+    resolveClaudeConfigDir(options),
+    "agents",
+    `${scopedWorkerAgentName}.md`
+  );
 }
 
 export function isAttenuationHookCommand(command: string): boolean {

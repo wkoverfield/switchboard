@@ -681,6 +681,15 @@ export function createProgram(io: ProgramIo = {}): Command {
   const readSecretFromStdin = io.readSecretFromStdin ?? readAllStdin;
   const readSecretFromPrompt = io.readSecretFromPrompt ?? readHiddenPrompt;
   const confirmSetup = io.confirmSetup ?? confirmDefaultYes;
+  // Resolution options for Claude config-dir writes (hooks + attenuation): an
+  // explicit --config-dir wins, else the injected sandbox home, else the
+  // resolver's CLAUDE_CONFIG_DIR / ~/.claude fallback.
+  const claudeConfigOptions = (
+    configDir?: string
+  ): { homeDir?: string; claudeConfigDir?: string } => ({
+    ...(io.homeDir ? { homeDir: io.homeDir } : {}),
+    ...(configDir ? { claudeConfigDir: configDir } : {})
+  });
   const program = new Command();
   let currentParseArgs: string[] = [];
   const writeCommandError = (options: CommandErrorOptions): void => {
@@ -5109,7 +5118,11 @@ export function createProgram(io: ProgramIo = {}): Command {
       "Install the PreToolUse Bash tripwire into user-scope Claude Code settings."
     )
     .option("--json", "print machine-readable JSON")
-    .action(async (client: string, options: { json?: boolean }) => {
+    .option(
+      "--config-dir <path>",
+      "Claude config dir to target (defaults to CLAUDE_CONFIG_DIR, then ~/.claude)"
+    )
+    .action(async (client: string, options: { json?: boolean; configDir?: string }) => {
       if (client !== "claude") {
         writeCommandError({
           json: options.json,
@@ -5124,7 +5137,7 @@ export function createProgram(io: ProgramIo = {}): Command {
       let installed: InstalledClaudeHooks;
       try {
         installed = await installClaudeHooks({
-          ...(io.homeDir ? { homeDir: io.homeDir } : {}),
+          ...claudeConfigOptions(options.configDir),
           hookCommand: claudeHookCommandFromLaunch(launch)
         });
       } catch (error) {
@@ -5177,7 +5190,11 @@ export function createProgram(io: ProgramIo = {}): Command {
       "Remove the Switchboard Bash tripwire from user-scope Claude Code settings."
     )
     .option("--json", "print machine-readable JSON")
-    .action(async (client: string, options: { json?: boolean }) => {
+    .option(
+      "--config-dir <path>",
+      "Claude config dir to target (defaults to CLAUDE_CONFIG_DIR, then ~/.claude)"
+    )
+    .action(async (client: string, options: { json?: boolean; configDir?: string }) => {
       if (client !== "claude") {
         writeCommandError({
           json: options.json,
@@ -5191,7 +5208,7 @@ export function createProgram(io: ProgramIo = {}): Command {
       let removed: Awaited<ReturnType<typeof uninstallClaudeHooks>>;
       try {
         removed = await uninstallClaudeHooks(
-          io.homeDir ? { homeDir: io.homeDir } : {}
+          claudeConfigOptions(options.configDir)
         );
       } catch (error) {
         writeCommandError({
@@ -5340,7 +5357,11 @@ export function createProgram(io: ProgramIo = {}): Command {
       "Install the spawn-rewrite hook and scoped-worker agent into user-scope Claude Code settings. Off by default; this is the explicit opt-in."
     )
     .option("--json", "print machine-readable JSON")
-    .action(async (client: string, options: { json?: boolean }) => {
+    .option(
+      "--config-dir <path>",
+      "Claude config dir to target (defaults to CLAUDE_CONFIG_DIR, then ~/.claude)"
+    )
+    .action(async (client: string, options: { json?: boolean; configDir?: string }) => {
       if (client !== "claude") {
         writeCommandError({
           json: options.json,
@@ -5355,7 +5376,7 @@ export function createProgram(io: ProgramIo = {}): Command {
       let installed: InstalledClaudeAttenuation;
       try {
         installed = await installClaudeAttenuation({
-          ...(io.homeDir ? { homeDir: io.homeDir } : {}),
+          ...claudeConfigOptions(options.configDir),
           launch: {
             command: launch.command,
             ...(launch.commandArgs.length > 0
@@ -5426,7 +5447,11 @@ export function createProgram(io: ProgramIo = {}): Command {
       "Remove the spawn-rewrite hook and scoped-worker agent from user-scope Claude Code settings."
     )
     .option("--json", "print machine-readable JSON")
-    .action(async (client: string, options: { json?: boolean }) => {
+    .option(
+      "--config-dir <path>",
+      "Claude config dir to target (defaults to CLAUDE_CONFIG_DIR, then ~/.claude)"
+    )
+    .action(async (client: string, options: { json?: boolean; configDir?: string }) => {
       if (client !== "claude") {
         writeCommandError({
           json: options.json,
@@ -5440,7 +5465,7 @@ export function createProgram(io: ProgramIo = {}): Command {
       let removed: Awaited<ReturnType<typeof uninstallClaudeAttenuation>>;
       try {
         removed = await uninstallClaudeAttenuation(
-          io.homeDir ? { homeDir: io.homeDir } : {}
+          claudeConfigOptions(options.configDir)
         );
       } catch (error) {
         writeCommandError({
@@ -5483,7 +5508,11 @@ export function createProgram(io: ProgramIo = {}): Command {
     .command("status <client>")
     .description("Report whether spawn-time auto-attenuation is installed.")
     .option("--json", "print machine-readable JSON")
-    .action(async (client: string, options: { json?: boolean }) => {
+    .option(
+      "--config-dir <path>",
+      "Claude config dir to target (defaults to CLAUDE_CONFIG_DIR, then ~/.claude)"
+    )
+    .action(async (client: string, options: { json?: boolean; configDir?: string }) => {
       if (client !== "claude") {
         writeCommandError({
           json: options.json,
@@ -5495,7 +5524,7 @@ export function createProgram(io: ProgramIo = {}): Command {
       }
 
       const inspection = await inspectClaudeAttenuation(
-        io.homeDir ? { homeDir: io.homeDir } : {}
+        claudeConfigOptions(options.configDir)
       );
       if (options.json) {
         writeOut(
