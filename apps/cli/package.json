@@ -1,7 +1,7 @@
 {
   "name": "@switchboard-mcp/cli",
   "mcpName": "io.github.wkoverfield/switchboard",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "description": "One firewall and password manager for all your AI coding agents' MCP servers and secrets.",
   "license": "MIT",
