@@ -438,15 +438,22 @@ function tripFromUserPattern(pattern: SeatbeltPattern): SeatbeltTrip {
   return { pattern, gateId: seatbeltGateId(pattern.name) };
 }
 
+// Depth cap for `sh -c "..."` recursion, so a pathologically nested payload
+// (bash -c "bash -c ...") cannot spin the evaluator.
+const maxShellRecursionDepth = 4;
+
 /**
  * Evaluate a raw shell command (the Claude Code Bash hook surface). The
  * command is split into statements; each statement's invoked command is
  * identified; read-only and metadata commands never trip; deploy/push rules
- * fire only when the invoked command actually is that tool. First match wins.
+ * fire only when the invoked command actually is that tool. A `sh -c`/
+ * `bash -c` payload string is evaluated as its own nested command through the
+ * same matcher. First match wins.
  */
 export function evaluateSeatbeltShell(
   command: string,
-  policy: SeatbeltPolicy
+  policy: SeatbeltPolicy,
+  depth = 0
 ): SeatbeltTrip | undefined {
   if (!policy.enabled) {
     return undefined;
@@ -455,6 +462,19 @@ export function evaluateSeatbeltShell(
   const rules = activeRules(policy);
   for (const statement of splitStatements(command)) {
     const ctx = statementContext(statement);
+
+    // Recurse into a shell-c payload so `bash -c "vercel --prod"` is evaluated
+    // as the command it runs. The wrapper statement itself is not a
+    // catastrophe, so a non-tripping payload just falls through.
+    const payload = depth < maxShellRecursionDepth ? shellDashCPayload(ctx) : undefined;
+    if (payload !== undefined) {
+      const nested = evaluateSeatbeltShell(payload, policy, depth + 1);
+      if (nested) {
+        return nested;
+      }
+      continue;
+    }
+
     if (ctx.argv.length === 0 || isReadOnlyStatement(ctx)) {
       continue;
     }
@@ -473,6 +493,25 @@ export function evaluateSeatbeltShell(
       if (regex?.test(ctx.text)) {
         return tripFromUserPattern(pattern);
       }
+    }
+  }
+
+  return undefined;
+}
+
+const shellInterpreters = new Set(["sh", "bash", "zsh", "dash", "ash", "ksh"]);
+
+// The string argument of `sh -c <payload>` (and combined short flags like
+// `-lc`), or undefined when the statement is not a shell -c invocation.
+function shellDashCPayload(ctx: StatementContext): string | undefined {
+  if (!shellInterpreters.has(ctx.verb)) {
+    return undefined;
+  }
+
+  for (let i = 1; i < ctx.argv.length; i += 1) {
+    const token = ctx.argv[i];
+    if (token === "-c" || /^-[a-z]*c$/.test(token ?? "")) {
+      return ctx.argv[i + 1];
     }
   }
 
@@ -647,10 +686,20 @@ function tokenize(statement: string): string[] {
 }
 
 // Drop leading `VAR=value` env assignments and pass-through prefixes so the
-// invoked command is the real one: `NODE_ENV=production pnpm build` -> pnpm.
+// invoked command is the real one: `NODE_ENV=production pnpm build` -> pnpm,
+// `env FOO=bar vercel --prod` -> vercel. Once a prefix has been consumed,
+// its own option flags are skipped too (e.g. `env -i`, `sudo -E`).
 function stripLeadingEnvAndPrefixes(tokens: string[]): string[] {
   let index = 0;
-  const prefixes = new Set(["sudo", "command", "nohup", "nice", "time"]);
+  let strippedPrefix = false;
+  const prefixes = new Set([
+    "sudo",
+    "command",
+    "nohup",
+    "nice",
+    "time",
+    "env"
+  ]);
 
   while (index < tokens.length) {
     const token = tokens[index];
@@ -662,6 +711,13 @@ function stripLeadingEnvAndPrefixes(tokens: string[]): string[] {
       continue;
     }
     if (prefixes.has(baseName(token))) {
+      index += 1;
+      strippedPrefix = true;
+      continue;
+    }
+    // A flag after a consumed prefix belongs to that prefix (env -i, sudo -E),
+    // not to the real command; real commands never start with a dash.
+    if (strippedPrefix && token.startsWith("-")) {
       index += 1;
       continue;
     }
@@ -805,7 +861,9 @@ function tripsVercelProd(ctx: StatementContext): boolean {
   if (sub === "alias") {
     return positionalAfter(ctx.toolArgs, "alias") === "set";
   }
-  if (sub === undefined || sub === "deploy") {
+  // `redeploy` re-runs an existing deployment; a production target makes it a
+  // prod deploy, so it is gated exactly like `deploy`.
+  if (sub === undefined || sub === "deploy" || sub === "redeploy") {
     return hasProductionFlag(ctx.toolArgs);
   }
 

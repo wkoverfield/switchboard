@@ -97,7 +97,15 @@ const shellMustNotTrip: string[] = [
   "pnpm run deploy:preview",
   "ng build --production",
   // Read-only DNS/domain commands.
-  "aws route53 list-resource-record-sets --hosted-zone-id Z123"
+  "aws route53 list-resource-record-sets --hosted-zone-id Z123",
+  // Non-prod vercel redeploy forms.
+  "vercel redeploy dpl_x",
+  "vercel redeploy",
+  // sh -c payloads whose inner command is read-only.
+  'bash -c "grep vercel --prod file"',
+  "sh -c 'cat scripts/deploy-prod.sh'",
+  // env prefix carrying a read-only command.
+  "env FOO=bar grep convex-deploy ."
 ];
 
 // MUST-TRIP (shell): real irreversible, externally-visible actions.
@@ -117,6 +125,18 @@ const shellMustTrip: Array<{ text: string; pattern: string }> = [
   {
     text: "vercel alias set my-preview sendthemove.com",
     pattern: "vercel-prod"
+  },
+  { text: "vercel redeploy --target production", pattern: "vercel-prod" },
+  { text: "vercel redeploy dpl_x --prod", pattern: "vercel-prod" },
+  // env prefix (with and without assignments) must resolve the real command.
+  { text: "env vercel --prod", pattern: "vercel-prod" },
+  { text: "env FOO=bar vercel --prod", pattern: "vercel-prod" },
+  { text: "env -i vercel --prod", pattern: "vercel-prod" },
+  // sh -c / bash -c payload is evaluated as its own command.
+  { text: 'bash -c "vercel --prod"', pattern: "vercel-prod" },
+  {
+    text: "sh -c 'git push --force origin main'",
+    pattern: "force-push-default-branch"
   },
   // Convex prod deploy.
   { text: "npx convex deploy", pattern: "convex-prod-deploy" },

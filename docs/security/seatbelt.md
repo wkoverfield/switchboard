@@ -47,9 +47,19 @@ secret keys in arguments. Both surfaces share one denylist source of truth
 
 Honesty note: the hook is harness-level, not OS enforcement. It guards
 commands issued through Claude Code's Bash tool. It does not sandbox the
-machine, a process outside the harness is not covered, and a sufficiently
-obfuscated shell line (unusual quoting, indirection through a wrapper script)
-can evade the parser. It is defense-in-depth, not a boundary. If the
+machine, and a process outside the harness is not covered. It is
+defense-in-depth, not a boundary.
+
+Because the hook inspects the invoked command by static parsing, it does not
+see into everything a shell line can run. It evaluates `sh -c`/`bash -c`
+payload strings, but it does NOT resolve command substitution (`vercel --prod`
+hidden inside `$(...)` or backticks) or opaque wrapper scripts (a `./ship.sh`
+that internally deploys): the invoked command there is the substitution or
+the script, not the deploy tool. There is also one known bare-form gap:
+`git push --force origin` with no explicit refspec is not tripped, because the
+hook has no current-branch context to know whether the pushed branch is the
+default one. These are properties of a static, harness-level check; the MCP
+surface (which sees the actual tool call) is not affected by them. If the
 `switchboard` binary is missing at hook time, the hook fails open.
 
 ## The v1 list
