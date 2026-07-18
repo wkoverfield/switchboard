@@ -52,6 +52,8 @@ export interface GenericMcpRouterOptions {
     repoPath?: string;
     worktreePath?: string;
     branch?: string;
+    resolvedRepoPath?: string;
+    resolutionSource?: "call-path" | "session-cwd" | "global-default";
   };
   toolPolicy?: MandateToolPolicy;
   seatbelt?: SeatbeltRouterOptions;
@@ -365,6 +367,12 @@ export class GenericMcpRouter {
         ? { worktreePath: this.auditContext.worktreePath }
         : {}),
       ...(this.auditContext?.branch ? { branch: this.auditContext.branch } : {}),
+      ...(this.auditContext?.resolvedRepoPath
+        ? { resolvedRepoPath: this.auditContext.resolvedRepoPath }
+        : {}),
+      ...(this.auditContext?.resolutionSource
+        ? { resolutionSource: this.auditContext.resolutionSource }
+        : {}),
       ...(namespace ? { namespace } : {}),
       ...(this.mandateId ? { mandateId: this.mandateId } : {})
     };

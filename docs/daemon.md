@@ -116,6 +116,36 @@ provider-specific policy or secret access yet.
 Use `switchboard mcp --no-auto-start` to fail fast unless a daemon is already
 running.
 
+## Per-Call Repo Resolution
+
+A user-scoped MCP entry launches `switchboard mcp` with no `--cwd`, so one
+daemon serves a session that may have started at `~` and then work across
+several repos. Scope resolves per call from what the call is about to touch,
+not from where the session started, with this precedence:
+
+1. **Explicit call path.** When a routed call's arguments carry a filesystem
+   path (a `path`, `file`, `dir`, `cwd`, `repo`, or `root`-style field whose
+   value is an absolute or explicitly-relative path), the call resolves against
+   the governing repo of that path: the nearest ancestor `.switchboard.yaml`,
+   else the nearest git root. That repo's config, profiles, and pass apply to
+   this call. Only path-shaped values under those keys count; a bare token
+   (`main`, `owner/repo`) is never treated as a checkout on disk.
+2. **Session cwd.** A call with no path argument resolves against the session's
+   launch directory, so a session opened inside a repo keeps binding that repo.
+3. **Global default.** A call with no derivable path in a session that is not
+   inside any repo resolves to the machine-level global config. The seatbelt
+   floor still applies; repo-specific profiles are simply not bound. This path
+   never prompts and never denies for lack of context.
+
+The seatbelt floor is read only from the machine-level global config, so a
+per-call repo binding can add repo restrictions but a repo `.switchboard.yaml`
+can never remove or weaken the floor, even when a call resolves to that repo.
+
+Each routed audit entry records `resolvedRepoPath` (absent for a global-default
+resolution) and `resolutionSource` (`call-path`, `session-cwd`, or
+`global-default`), so which repo governed a given call, and why, is
+inspectable.
+
 ## Current Limits
 
 - The daemon supports heartbeat, tool discovery, and tool-call routing over its

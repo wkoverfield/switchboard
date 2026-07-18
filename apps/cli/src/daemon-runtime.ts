@@ -18,6 +18,7 @@ import {
   markPendingApprovalRequestsStale,
   removeDaemonState,
   resolveActiveMandate,
+  resolveCallRepo,
   resolveDaemonPaths,
   resolveSeatbeltPolicy,
   safeAuditLog,
@@ -28,6 +29,7 @@ import {
   type DaemonState,
   type DaemonStatus,
   type ApprovalRequestWithStatus,
+  type CallRepoResolution,
   type MandateWithStatus,
   type SecretStore
 } from "@switchboard-mcp/core";
@@ -589,7 +591,15 @@ async function listConfiguredTools(
   nextActions?: string[];
   mcpError?: StructuredMcpError;
 }> {
-  const routerResult = await routerForConfiguredProfiles(context, mandateId);
+  // Discovery has no call arguments, so it resolves against the session cwd
+  // (or the global default when the session is not in a repo). No call-path
+  // override applies to a tools/list.
+  const resolution = resolveCallRepo({ sessionCwd: context.cwd });
+  const routerResult = await routerForConfiguredProfiles(
+    resolvedContext(context, resolution),
+    mandateId,
+    resolution
+  );
   if (!routerResult.ok) {
     return {
       id,
@@ -650,7 +660,18 @@ async function callConfiguredTool(
   mcpError?: StructuredMcpError;
   approvalRequired?: DaemonApprovalRequired;
 }> {
-  const routerResult = await routerForConfiguredProfiles(context, mandateId);
+  // Lazy per-call resolution: derive the governing repo from the call's own
+  // path arguments (precedence: call path > session cwd > global default), so
+  // a session launched at ~ that touches different repos gets each repo's
+  // config/profiles/pass per call. The seatbelt floor is global-only and is
+  // unaffected by this binding (see resolveSeatbeltPolicy).
+  const resolution = resolveCallRepo({ args, sessionCwd: context.cwd });
+  const callContext = resolvedContext(context, resolution);
+  const routerResult = await routerForConfiguredProfiles(
+    callContext,
+    mandateId,
+    resolution
+  );
   if (!routerResult.ok) {
     return {
       id,
@@ -758,7 +779,8 @@ async function callConfiguredTool(
                 approvalRequestId: request.id,
                 approvalGateId: policyDecision.approvalGate.id,
                 approvalGatePattern: policyDecision.approvalGate.toolPattern,
-                error
+                error,
+                resolution
               });
               return {
                 id,
@@ -792,7 +814,8 @@ async function callConfiguredTool(
                 approvalRequestId: request.id,
                 approvalGateId: policyDecision.approvalGate.id,
                 approvalGatePattern: policyDecision.approvalGate.toolPattern,
-                error
+                error,
+                resolution
               });
               return {
                 id,
@@ -815,7 +838,8 @@ async function callConfiguredTool(
                 approvalRequestId: request.id,
                 approvalGateId: policyDecision.approvalGate.id,
                 approvalGatePattern: policyDecision.approvalGate.toolPattern,
-                error
+                error,
+                resolution
               });
               return {
                 id,
@@ -838,7 +862,8 @@ async function callConfiguredTool(
                 approvalRequestId: request.id,
                 approvalGateId: policyDecision.approvalGate.id,
                 approvalGatePattern: policyDecision.approvalGate.toolPattern,
-                error
+                error,
+                resolution
               });
               return {
                 id,
@@ -867,6 +892,7 @@ async function callConfiguredTool(
           repoPath: routerResult.mandate.repoPath,
           worktreePath: routerResult.mandate.worktreePath,
           branch: routerResult.mandate.branch,
+          ...resolutionAuditFields(resolution),
           ...(approvalRequestId ? { approvalRequestId } : {}),
           ...("approvalRequired" in policyDecision
             ? {
@@ -1120,6 +1146,7 @@ async function auditApprovalBlockedCall(options: {
   approvalGateId: string;
   approvalGatePattern: string;
   error: string;
+  resolution?: CallRepoResolution;
 }): Promise<void> {
   await safeAuditLog(createJsonlAuditLogger(), {
     action: "tool_call",
@@ -1132,6 +1159,7 @@ async function auditApprovalBlockedCall(options: {
     repoPath: options.mandate.repoPath,
     worktreePath: options.mandate.worktreePath,
     branch: options.mandate.branch,
+    ...resolutionAuditFields(options.resolution),
     approvalRequestId: options.approvalRequestId,
     approvalGateId: options.approvalGateId,
     approvalGatePattern: options.approvalGatePattern,
@@ -1210,7 +1238,8 @@ async function resolveAutoGrantPass(
 
 async function routerForConfiguredProfiles(
   context: DaemonSocketContext,
-  mandateId?: string
+  mandateId?: string,
+  resolution?: CallRepoResolution
 ): Promise<
   | { ok: true; router: GenericMcpRouter; mandate: MandateWithStatus | undefined }
   | { ok: false; error: string; nextActions?: string[] }
@@ -1267,7 +1296,8 @@ async function routerForConfiguredProfiles(
       mandate: undefined,
       router: new GenericMcpRouter([], {
         auditLogger: createJsonlAuditLogger(),
-        denyAll: { reason: strictNoPassReason }
+        denyAll: { reason: strictNoPassReason },
+        auditContext: resolutionAuditFields(resolution)
       })
     };
   }
@@ -1313,15 +1343,20 @@ async function routerForConfiguredProfiles(
     router: new GenericMcpRouter(profiles, {
       auditLogger: createJsonlAuditLogger(),
       ...(seatbelt ? { seatbelt } : {}),
-      ...(mandate
-        ? {
-            mandateId: mandate.id,
-            auditContext: {
-              ...(mandate.mandateUid ? { mandateUid: mandate.mandateUid } : {}),
+      auditContext: {
+        ...(mandate?.mandateUid ? { mandateUid: mandate.mandateUid } : {}),
+        ...(mandate
+          ? {
               repoPath: mandate.repoPath,
               worktreePath: mandate.worktreePath,
               branch: mandate.branch
-            },
+            }
+          : {}),
+        ...resolutionAuditFields(resolution)
+      },
+      ...(mandate
+        ? {
+            mandateId: mandate.id,
             toolPolicy: {
               allowedTools: mandate.allowedTools,
               deniedTools: mandate.deniedTools,
@@ -1443,6 +1478,37 @@ async function stdioProfilesFromConfig(
 
 function optionsFromCwd(cwd: string | undefined): { cwd?: string } {
   return cwd ? { cwd } : {};
+}
+
+// Apply a lazy resolution to a connection context: a call-path resolution
+// overrides the cwd config/profiles/pass load against, so the call binds the
+// repo it touches rather than the session's launch dir. Session-cwd and
+// global-default resolutions leave the cwd as the session's.
+function resolvedContext(
+  context: DaemonSocketContext,
+  resolution: CallRepoResolution
+): DaemonSocketContext {
+  return resolution.effectiveCwd !== undefined
+    ? { ...context, cwd: resolution.effectiveCwd }
+    : context;
+}
+
+// The two additive audit fields recording how a call resolved. Spread into an
+// audit entry or an audit context. `resolvedRepoPath` is omitted for a
+// global-default resolution (no repo bound).
+function resolutionAuditFields(resolution: CallRepoResolution | undefined): {
+  resolvedRepoPath?: string;
+  resolutionSource?: CallRepoResolution["source"];
+} {
+  if (!resolution) {
+    return {};
+  }
+  return {
+    ...(resolution.resolvedRepoPath
+      ? { resolvedRepoPath: resolution.resolvedRepoPath }
+      : {}),
+    resolutionSource: resolution.source
+  };
 }
 
 function requestIdFromRaw(raw: string): string {
