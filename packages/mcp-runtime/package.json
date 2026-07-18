@@ -1,6 +1,6 @@
 {
   "name": "@switchboard-mcp/mcp-runtime",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "description": "MCP runtime, routing, daemon client, and stdio server helpers for Switchboard.",
   "license": "MIT",

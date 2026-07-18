@@ -5311,7 +5311,8 @@ export function createProgram(io: ProgramIo = {}): Command {
         });
         const reason = seatbeltDenialMessage({
           pattern: trip.pattern,
-          approvalRequestId: request.id
+          approvalRequestId: request.id,
+          configPath: policy.configPath
         });
         await safeAuditLog(
           createJsonlAuditLogger(

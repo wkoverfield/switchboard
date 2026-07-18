@@ -19,6 +19,7 @@ const docsManifest = [
   { section: "Start", slug: "install-cursor", source: "docs/install/cursor.md", title: "Cursor" },
   { section: "Start", slug: "install-vscode", source: "docs/install/vscode.md", title: "VS Code" },
   { section: "Security", slug: "security-seatbelt", source: "docs/security/seatbelt.md", title: "The Seatbelt" },
+  { section: "Security", slug: "security-attenuation", source: "docs/security/attenuation.md", title: "Spawn Attenuation" },
   { section: "Security", slug: "security-threat-model", source: "docs/security/threat-model.md", title: "Threat Model" },
   { section: "Security", slug: "security-trust-model", source: "docs/security/trust-model.md", title: "Trust Model" },
   { section: "Security", slug: "security-audit-logs", source: "docs/security/audit-logs.md", title: "Audit Logs" },
