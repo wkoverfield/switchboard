@@ -557,6 +557,7 @@ export function evaluateSeatbeltMcp(
 export function seatbeltDenialMessage(options: {
   pattern: SeatbeltPattern;
   approvalRequestId?: string;
+  configPath?: string;
 }): string {
   const parts = [
     `switchboard seatbelt: ${options.pattern.name}`,
@@ -570,7 +571,7 @@ export function seatbeltDenialMessage(options: {
     );
   }
   parts.push(
-    'or disable the seatbelt with "seatbelt: off" in ~/.config/switchboard/config.yaml'
+    `or disable the seatbelt with "seatbelt: off" in ${options.configPath ?? "~/.config/switchboard/config.yaml"}`
   );
   return parts.join("; ");
 }

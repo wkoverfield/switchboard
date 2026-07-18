@@ -316,7 +316,8 @@ export class GenericMcpRouter {
     });
     const message = seatbeltDenialMessage({
       pattern: trip.pattern,
-      approvalRequestId: request.id
+      approvalRequestId: request.id,
+      configPath: this.seatbelt.policy.configPath
     });
     await safeAuditLog(
       this.auditLogger,

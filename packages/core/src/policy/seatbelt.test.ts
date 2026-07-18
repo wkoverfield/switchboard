@@ -506,6 +506,22 @@ describe("seatbeltDenialMessage", () => {
       'switchboard approve approval-7 --reason "<why this is safe>"'
     );
     expect(message).toContain('"seatbelt: off"');
+    expect(message).toContain("~/.config/switchboard/config.yaml");
+  });
+
+  it("uses the resolved config path in the opt-out hint when provided", () => {
+    const message = seatbeltDenialMessage({
+      pattern: {
+        name: "vercel-prod",
+        pattern: "vercel deploy --prod",
+        reason: "Vercel production deploy"
+      },
+      configPath: "/custom/xdg/switchboard/config.yaml"
+    });
+    expect(message).toContain(
+      'seatbelt: off" in /custom/xdg/switchboard/config.yaml'
+    );
+    expect(message).not.toContain("~/.config/switchboard/config.yaml");
   });
 });
 
