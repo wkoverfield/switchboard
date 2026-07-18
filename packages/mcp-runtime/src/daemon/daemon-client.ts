@@ -76,6 +76,9 @@ export type DaemonRequest =
       approvalWaitMs?: number;
       cwd?: string;
       strict?: boolean;
+      // Per-connection seatbelt opt-out (`--no-seatbelt`): only ever sent as
+      // false; absent means the daemon's default (seatbelt on) applies.
+      seatbelt?: boolean;
     };
 
 export interface DaemonClientOptions {
@@ -88,6 +91,8 @@ export interface DaemonClientOptions {
   cwd?: string;
   // Per-connection strict override: deny all routed calls when no pass is bound.
   strict?: boolean;
+  // Set false to disable the ambient seatbelt for this connection.
+  seatbelt?: boolean;
 }
 
 export async function pingDaemon(
@@ -176,6 +181,9 @@ export async function callDaemonTool(
   }
   if (options.strict) {
     request.strict = true;
+  }
+  if (options.seatbelt === false) {
+    request.seatbelt = false;
   }
   const response = await requestDaemon(socketPath, request, {
     timeoutMs: options.timeoutMs ?? daemonToolCallTimeoutMs(options)

@@ -55,10 +55,13 @@ What it does, in order:
    written directly with a backup. Claude Code owns `~/.claude.json`, so setup
    prints the one-time `claude mcp add --scope user` command instead.
 5. **Initialize the global config** at `~/.config/switchboard/config.yaml`
-   (respecting `XDG_CONFIG_HOME`) with an empty machine-level policy stanza.
-6. **Record the hooks choice.** Agent-client hook installation is reserved
-   for a later release; `--no-hooks` records an opt-out in the global config
-   now, and nothing is installed today.
+   (respecting `XDG_CONFIG_HOME`) with the machine-level policy stanza. This
+   is where the default-on seatbelt denylist lives and can be tuned; see
+   [The Seatbelt](../security/seatbelt.md).
+6. **Install the Claude Code tripwire hook.** A PreToolUse Bash hook in
+   `~/.claude/settings.json` denies catastrophe-class shell commands using
+   the same seatbelt denylist. `--no-hooks` records an opt-out instead, and
+   `switchboard hooks uninstall claude` removes the hook later.
 
 Setup is idempotent: re-running it repairs what drifted, never duplicates
 entries, and never re-backs-up unchanged files. It never starts or leaves a
@@ -94,6 +97,12 @@ switchboard secrets set <ref> --value-stdin   # once per ref setup printed
 claude mcp add --scope user switchboard -- switchboard mcp
 switchboard doctor
 ```
+
+After setup, the seatbelt is on: catastrophe-class calls (production
+deploys, live payment keys, DNS mutations, force-pushes to the default
+branch) are denied with an approvable retry, and everything else feels
+exactly the same. [The Seatbelt](../security/seatbelt.md) has the exact
+list, the approval flow, and the `seatbelt: off` opt-out.
 
 `switchboard doctor` reports one top-level readiness status:
 

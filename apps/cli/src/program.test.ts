@@ -9927,7 +9927,12 @@ describe("switchboard CLI program", () => {
             claude: { status: string; addCommand: string[] };
           };
           globalConfig: { path: string; action: string; hooks: string };
-          hooks: { status: string; reason: string; enabled: boolean };
+          hooks: {
+            status: string;
+            enabled: boolean;
+            targetPath: string;
+            hookCommand: string | null;
+          };
         };
         changes: unknown[];
         manifestPath: string;
@@ -9978,11 +9983,20 @@ describe("switchboard CLI program", () => {
         "default: {}"
       );
       expect(payload.steps.hooks).toMatchObject({
-        status: "pending",
-        enabled: true
+        status: "installed",
+        enabled: true,
+        targetPath: join(homeDir, ".claude", "settings.json")
       });
-      expect(payload.steps.hooks.reason.length).toBeGreaterThan(0);
-      expect(payload.changes).toHaveLength(3);
+      expect(payload.steps.hooks.hookCommand).toContain("hooks check");
+      const claudeSettings = JSON.parse(
+        readFileSync(join(homeDir, ".claude", "settings.json"), "utf8")
+      ) as {
+        hooks: { PreToolUse: Array<{ matcher: string }> };
+      };
+      expect(claudeSettings.hooks.PreToolUse).toMatchObject([
+        { matcher: "Bash" }
+      ]);
+      expect(payload.changes).toHaveLength(4);
       expect(payload.manifestPath).toBe(
         join(stateHome, "switchboard", "setup", "manifest.json")
       );
@@ -10052,7 +10066,7 @@ describe("switchboard CLI program", () => {
       };
       expect(rollback.ok).toBe(true);
       expect(rollback.schemaVersion).toBe("switchboard.setup-rollback.v1");
-      expect(rollback.counts).toEqual({ items: 3, failures: 0 });
+      expect(rollback.counts).toEqual({ items: 4, failures: 0 });
       expect(readFileSync(join(root, ".switchboard.yaml"), "utf8")).toBe(
         repoConfigBefore
       );
@@ -10060,6 +10074,9 @@ describe("switchboard CLI program", () => {
       expect(
         existsSync(join(configHome, "switchboard", "config.yaml"))
       ).toBe(false);
+      expect(existsSync(join(homeDir, ".claude", "settings.json"))).toBe(
+        false
+      );
       expect(existsSync(payload.manifestPath)).toBe(false);
 
       // A second rollback is a clean noop.
@@ -10145,7 +10162,7 @@ describe("switchboard CLI program", () => {
       const text = output.join("\n");
       expect(text).toContain("Switchboard machine setup");
       expect(text).toContain("Undo everything: switchboard setup --rollback");
-      expect(text).toContain("Hooks: pending");
+      expect(text).toContain("Hooks: installed Bash tripwire");
     } finally {
       sandbox.restore();
     }
@@ -10473,6 +10490,291 @@ describe("switchboard CLI program", () => {
     } finally {
       sandbox.restore();
     }
+  });
+});
+
+describe("hooks command", () => {
+  it("installs and uninstalls the claude Bash tripwire round-trip", async () => {
+    const homeDir = makeTempProject();
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      homeDir
+    });
+    await program.parseAsync(["hooks", "install", "claude", "--json"], {
+      from: "user"
+    });
+    const installed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      schemaVersion: string;
+      action: string;
+      targetPath: string;
+      hookCommand: string;
+    };
+    expect(installed.ok).toBe(true);
+    expect(installed.schemaVersion).toBe("switchboard.hooks.v1");
+    expect(installed.action).toBe("created");
+    expect(installed.targetPath).toBe(
+      join(homeDir, ".claude", "settings.json")
+    );
+    expect(installed.hookCommand).toContain("hooks check");
+    const settings = JSON.parse(
+      readFileSync(installed.targetPath, "utf8")
+    ) as { hooks: { PreToolUse: Array<{ matcher: string }> } };
+    expect(settings.hooks.PreToolUse).toMatchObject([{ matcher: "Bash" }]);
+
+    const uninstallOutput: string[] = [];
+    const uninstallProgram = createProgram({
+      writeOut: (message) => uninstallOutput.push(message),
+      homeDir
+    });
+    await uninstallProgram.parseAsync(
+      ["hooks", "uninstall", "claude", "--json"],
+      { from: "user" }
+    );
+    expect(JSON.parse(uninstallOutput[0] ?? "{}")).toMatchObject({
+      ok: true,
+      action: "removed"
+    });
+    // Pre-install there was no settings file; the round trip restores that.
+    expect(existsSync(installed.targetPath)).toBe(false);
+  });
+
+  it("rejects unsupported hook clients", async () => {
+    const errors: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message)
+    });
+    await program.parseAsync(["hooks", "install", "codex"], { from: "user" });
+    expect(errors.join("\n")).toContain(
+      'hooks are supported for claude only, not "codex"'
+    );
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+  });
+
+  it("denies catastrophe commands via hooks check, audits, and honors approval", async () => {
+    const homeDir = makeTempProject();
+    const stateDir = makeTempProject();
+    const cwd = makeTempProject();
+    // Sandbox the global config so a real machine-level seatbelt stanza can
+    // never change what this test evaluates.
+    const previousConfigHome = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = makeTempProject();
+    try {
+    const auditLogPath = join(stateDir, "switchboard.jsonl");
+    const approvalStorePath = join(stateDir, "approvals.json");
+    const hookInput = JSON.stringify({
+      tool_name: "Bash",
+      tool_input: { command: "git push --force origin main" },
+      cwd
+    });
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      homeDir,
+      auditLogPath,
+      approvalStorePath,
+      readSecretFromStdin: async () => hookInput
+    });
+    await program.parseAsync(["hooks", "check"], { from: "user" });
+
+    const decision = JSON.parse(output[0] ?? "{}") as {
+      hookSpecificOutput: {
+        hookEventName: string;
+        permissionDecision: string;
+        permissionDecisionReason: string;
+      };
+    };
+    expect(decision.hookSpecificOutput.hookEventName).toBe("PreToolUse");
+    expect(decision.hookSpecificOutput.permissionDecision).toBe("deny");
+    expect(decision.hookSpecificOutput.permissionDecisionReason).toContain(
+      "switchboard seatbelt: force-push-default-branch"
+    );
+    expect(decision.hookSpecificOutput.permissionDecisionReason).toContain(
+      'switchboard approve approval-1 --reason "<why this is safe>"'
+    );
+
+    const auditLines = readFileSync(auditLogPath, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(auditLines).toMatchObject([
+      {
+        action: "hook_denial",
+        status: "error",
+        toolName: "Bash",
+        source: "claude-hook",
+        command: "git push --force origin main",
+        mandateId: "seatbelt",
+        approvalRequestId: "approval-1",
+        approvalGateId: "seatbelt:force-push-default-branch"
+      }
+    ]);
+
+    // A safe command passes silently.
+    const safeOutput: string[] = [];
+    const safeProgram = createProgram({
+      writeOut: (message) => safeOutput.push(message),
+      homeDir,
+      auditLogPath,
+      approvalStorePath,
+      readSecretFromStdin: async () =>
+        JSON.stringify({
+          tool_name: "Bash",
+          tool_input: { command: "git push --force origin feat/x" },
+          cwd
+        })
+    });
+    await safeProgram.parseAsync(["hooks", "check"], { from: "user" });
+    expect(safeOutput).toEqual([]);
+
+    // Approving the request lets the retry through (no deny output).
+    const approveOutput: string[] = [];
+    const approveProgram = createProgram({
+      writeOut: (message) => approveOutput.push(message),
+      homeDir,
+      auditLogPath,
+      approvalStorePath
+    });
+    await approveProgram.parseAsync(
+      ["approve", "approval-1", "--reason", "intended history rewrite"],
+      { from: "user" }
+    );
+
+    const retryOutput: string[] = [];
+    const retryProgram = createProgram({
+      writeOut: (message) => retryOutput.push(message),
+      homeDir,
+      auditLogPath,
+      approvalStorePath,
+      readSecretFromStdin: async () => hookInput
+    });
+    await retryProgram.parseAsync(["hooks", "check"], { from: "user" });
+    expect(retryOutput).toEqual([]);
+    } finally {
+      restoreEnvValue("XDG_CONFIG_HOME", previousConfigHome);
+    }
+  });
+
+  it("fails open on malformed hook input", async () => {
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      readSecretFromStdin: async () => "{not json"
+    });
+    await program.parseAsync(["hooks", "check"], { from: "user" });
+    expect(output).toEqual([]);
+  });
+});
+
+describe("audit append", () => {
+  it("appends a hook-layer event to the audit log", async () => {
+    const stateDir = makeTempProject();
+    const auditLogPath = join(stateDir, "switchboard.jsonl");
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      auditLogPath
+    });
+    await program.parseAsync(
+      [
+        "audit",
+        "append",
+        "--action",
+        "hook_denial",
+        "--status",
+        "error",
+        "--tool",
+        "Bash",
+        "--command",
+        "vercel --prod",
+        "--reason",
+        "seatbelt trip",
+        "--source",
+        "claude-hook",
+        "--json"
+      ],
+      { from: "user" }
+    );
+    expect(JSON.parse(output[0] ?? "{}")).toMatchObject({
+      ok: true,
+      path: auditLogPath
+    });
+    const lines = readFileSync(auditLogPath, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines).toMatchObject([
+      {
+        action: "hook_denial",
+        status: "error",
+        toolName: "Bash",
+        command: "vercel --prod",
+        source: "claude-hook",
+        error: "seatbelt trip"
+      }
+    ]);
+  });
+
+  it("rejects unknown actions", async () => {
+    const errors: string[] = [];
+    const program = createProgram({
+      writeErr: (message) => errors.push(message)
+    });
+    await program.parseAsync(
+      ["audit", "append", "--action", "made_up"],
+      { from: "user" }
+    );
+    expect(errors.join("\n")).toContain("--action must be one of");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+  });
+});
+
+describe("approval decisions in the audit stream", () => {
+  it("records approve and deny decisions", async () => {
+    const stateDir = makeTempProject();
+    const auditLogPath = join(stateDir, "switchboard.jsonl");
+    const approvalStorePath = join(stateDir, "approvals.json");
+    await createApprovalRequest({
+      mandateId: "seatbelt",
+      repoPath: stateDir,
+      branch: "-",
+      toolName: "Bash",
+      approvalGateId: "seatbelt:vercel-prod",
+      approvalGatePattern: "pattern",
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      path: approvalStorePath
+    });
+
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      auditLogger: createJsonlAuditLogger({ path: auditLogPath }),
+      approvalStorePath
+    });
+    await program.parseAsync(
+      ["approve", "approval-1", "--reason", "safe", "--json"],
+      { from: "user" }
+    );
+
+    const lines = readFileSync(auditLogPath, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines).toMatchObject([
+      {
+        action: "approval_decision",
+        status: "ok",
+        approvalDecision: "approved",
+        approvalRequestId: "approval-1",
+        approvalGateId: "seatbelt:vercel-prod",
+        toolName: "Bash",
+        mandateId: "seatbelt"
+      }
+    ]);
   });
 });
 

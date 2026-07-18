@@ -1,10 +1,16 @@
 import {
+  createApprovalRequest,
   evaluateMandateToolPolicy,
+  evaluateSeatbeltMcp,
+  findApprovedApprovalRequest,
   noopAuditLogger,
   safeAuditLog,
+  seatbeltApprovalWindowMs,
+  seatbeltDenialMessage,
   type AuditLogger,
   type MandateApprovalGate,
-  type MandateToolPolicy
+  type MandateToolPolicy,
+  type SeatbeltPolicy
 } from "@switchboard-mcp/core";
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import {
@@ -19,6 +25,25 @@ import {
   type UpstreamToolResult
 } from "./stdio-upstream.js";
 
+// The ambient seatbelt floor: a catastrophe denylist evaluated on every
+// routed call, with no pass bound (approvals keyed under the synthetic
+// "seatbelt" mandate id) and as an un-removable layer under an active pass
+// (approvals keyed under that pass). A trip denies immediately, queues an
+// approval request, and an approved request lets a retry of the same
+// pattern and tool through until the approval expires.
+export interface SeatbeltRouterOptions {
+  policy: SeatbeltPolicy;
+  approvals: {
+    mandateId: string;
+    mandateUid?: string;
+    repoPath: string;
+    branch: string;
+    /** Approval expiry; defaults to now + seatbeltApprovalWindowMs. */
+    expiresAt?: string;
+    storePath?: string;
+  };
+}
+
 export interface GenericMcpRouterOptions {
   auditLogger?: AuditLogger;
   mandateId?: string;
@@ -29,6 +54,7 @@ export interface GenericMcpRouterOptions {
     branch?: string;
   };
   toolPolicy?: MandateToolPolicy;
+  seatbelt?: SeatbeltRouterOptions;
   // Strict-mode short circuit: when set, no upstream is discovered or called.
   // tools/list is empty and every call is rejected with `reason`. Used when
   // enforcement is strict and no pass is bound, so "no pass" means "nothing
@@ -43,6 +69,7 @@ export class GenericMcpRouter {
   private readonly mandateId: string | undefined;
   private readonly auditContext: GenericMcpRouterOptions["auditContext"];
   private readonly toolPolicy: MandateToolPolicy;
+  private readonly seatbelt: SeatbeltRouterOptions | undefined;
   private readonly denyAll: { reason: string } | undefined;
 
   constructor(
@@ -53,6 +80,7 @@ export class GenericMcpRouter {
     this.mandateId = options.mandateId;
     this.auditContext = options.auditContext;
     this.toolPolicy = options.toolPolicy ?? {};
+    this.seatbelt = options.seatbelt;
     this.denyAll = options.denyAll;
 
     for (const profile of profiles) {
@@ -154,6 +182,9 @@ export class GenericMcpRouter {
       (item) => item.profileName === route.profileName
     );
     const startedAt = Date.now();
+    // Ambient seatbelt floor: evaluated before any pass policy so a pass can
+    // never allow its way past it; an approved request lets the retry through.
+    await this.enforceSeatbelt(route, args, profile?.namespace, startedAt);
     const policyDecision = evaluateMandateToolPolicy(
       route.namespacedName,
       this.toolPolicy
@@ -228,6 +259,85 @@ export class GenericMcpRouter {
     await Promise.all(
       [...this.connections.values()].map((connection) => connection.close())
     );
+  }
+
+  private async enforceSeatbelt(
+    route: ToolRoute,
+    args: Record<string, unknown> | undefined,
+    namespace: string | undefined,
+    startedAt: number
+  ): Promise<void> {
+    if (!this.seatbelt) {
+      return;
+    }
+
+    const trip = evaluateSeatbeltMcp(
+      route.namespacedName,
+      args,
+      this.seatbelt.policy
+    );
+    if (!trip) {
+      return;
+    }
+
+    const context = this.seatbelt.approvals;
+    const storePath = context.storePath
+      ? { path: context.storePath }
+      : {};
+    const approved = await findApprovedApprovalRequest({
+      mandateId: context.mandateId,
+      ...(context.mandateUid ? { mandateUid: context.mandateUid } : {}),
+      repoPath: context.repoPath,
+      toolName: route.namespacedName,
+      approvalGateId: trip.gateId,
+      ...storePath
+    });
+    if (approved) {
+      return;
+    }
+
+    const request = await createApprovalRequest({
+      mandateId: context.mandateId,
+      ...(context.mandateUid ? { mandateUid: context.mandateUid } : {}),
+      repoPath: context.repoPath,
+      branch: context.branch,
+      toolName: route.namespacedName,
+      approvalGateId: trip.gateId,
+      approvalGatePattern: trip.pattern.pattern,
+      approvalGateReason: trip.pattern.reason,
+      approvalGateRisk: "critical",
+      approvalGateLabels: ["seatbelt"],
+      expiresAt:
+        context.expiresAt ??
+        new Date(Date.now() + seatbeltApprovalWindowMs).toISOString(),
+      ...storePath
+    });
+    const message = seatbeltDenialMessage({
+      pattern: trip.pattern,
+      approvalRequestId: request.id
+    });
+    await safeAuditLog(
+      this.auditLogger,
+      this.auditEntry(
+        {
+          action: "tool_call",
+          status: "error",
+          profileName: route.profileName,
+          toolName: route.namespacedName,
+          upstreamName: route.upstreamName,
+          mandateId: context.mandateId,
+          repoPath: context.repoPath,
+          branch: context.branch,
+          approvalRequestId: request.id,
+          approvalGateId: trip.gateId,
+          approvalGatePattern: trip.pattern.pattern,
+          durationMs: Date.now() - startedAt,
+          error: message
+        },
+        namespace
+      )
+    );
+    throw new Error(message);
   }
 
   private connectionForProfile(profileName: string): StdioUpstreamConnection {

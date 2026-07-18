@@ -7,18 +7,28 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   allowUnsafeSecretBackendsEnv,
   createApprovalRequest,
+  createDaemonState,
   createMandate,
   decideApprovalRequest,
+  getDaemonStatus,
   listApprovalRequests,
   markApprovalRequestStale,
   readAuditLogEntries,
   resolveAuditLogPath,
-  strictNoPassReason
+  resolveDaemonPaths,
+  strictNoPassReason,
+  writeDaemonState
 } from "@switchboard-mcp/core";
 import {
+  createIdleMonitor,
+  daemonIdleTimeoutMs,
+  detectOrphanedDaemons,
   handleDaemonRequest,
-  invalidatePendingApprovalRequestsForDaemon
+  invalidatePendingApprovalRequestsForDaemon,
+  orphanedDaemonMaxAgeMs,
+  resolveDaemonIdleTimeoutMs
 } from "./daemon-runtime.js";
+import { startTestDaemon } from "./daemon-test-harness.js";
 
 const fixtureServerPath = fileURLToPath(
   new URL("../../../packages/mcp-runtime/fixtures/echo-server.mjs", import.meta.url)
@@ -1171,4 +1181,407 @@ async function makePolicyRepo(): Promise<string> {
   });
 
   return root;
+}
+
+describe("daemon runtime ambient seatbelt", () => {
+  const previousStateHome = process.env.XDG_STATE_HOME;
+  const previousConfigHome = process.env.XDG_CONFIG_HOME;
+
+  afterEach(() => {
+    restoreEnv("XDG_STATE_HOME", previousStateHome);
+    restoreEnv("XDG_CONFIG_HOME", previousConfigHome);
+  });
+
+  it("denies a catastrophe-shaped call with no pass, then allows the approved retry", async () => {
+    const root = await makeSeatbeltRepo();
+
+    const denied = await handleDaemonRequest(
+      JSON.stringify({
+        id: "call",
+        type: "call_tool",
+        name: "github_findu_deploy_prod",
+        arguments: { message: "ship it" }
+      }),
+      { cwd: root }
+    );
+    expect(denied).toMatchObject({
+      id: "call",
+      ok: false,
+      error: expect.stringContaining("switchboard seatbelt: prod-deploy-tool"),
+      mcpError: {
+        code: "approval_required",
+        message: expect.stringContaining(
+          'switchboard approve approval-1 --reason "<why this is safe>"'
+        )
+      }
+    });
+    expect(denied.error).toContain("production deploy tool call");
+
+    await expect(
+      listApprovalRequests({ repoPath: root, mandateId: "seatbelt" })
+    ).resolves.toMatchObject([
+      {
+        id: "approval-1",
+        mandateId: "seatbelt",
+        toolName: "github_findu_deploy_prod",
+        approvalGateId: "seatbelt:prod-deploy-tool",
+        approvalGateRisk: "critical",
+        approvalGateLabels: ["seatbelt"],
+        runtimeStatus: "pending"
+      }
+    ]);
+
+    await decideApprovalRequest({ id: "approval-1", status: "approved" });
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "retry",
+          type: "call_tool",
+          name: "github_findu_deploy_prod",
+          arguments: { message: "ship it" }
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({ id: "retry", ok: true, type: "tool_result" });
+
+    const entries = await readAuditLogEntries({ path: resolveAuditLogPath() });
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "tool_call",
+          status: "error",
+          toolName: "github_findu_deploy_prod",
+          mandateId: "seatbelt",
+          approvalRequestId: "approval-1",
+          approvalGateId: "seatbelt:prod-deploy-tool",
+          error: expect.stringContaining(
+            "switchboard seatbelt: prod-deploy-tool"
+          )
+        }),
+        expect.objectContaining({
+          action: "tool_call",
+          status: "ok",
+          toolName: "github_findu_deploy_prod"
+        })
+      ])
+    );
+  });
+
+  it("leaves safe calls untouched with no pass bound", async () => {
+    const root = await makeSeatbeltRepo();
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "safe",
+          type: "call_tool",
+          name: "github_findu_echo",
+          arguments: { message: "deploy the app later" }
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({ id: "safe", ok: true, type: "tool_result" });
+  });
+
+  it("stays under an active pass as an un-removable floor", async () => {
+    const root = await makeSeatbeltRepo();
+    await createMandate({
+      task: "ship",
+      repoPath: root,
+      worktreePath: root,
+      branch: "feat/ship",
+      agentRole: "implementer",
+      profiles: ["github_findu"],
+      allowedTools: ["github_findu_*"],
+      lease: "2h"
+    });
+
+    const denied = await handleDaemonRequest(
+      JSON.stringify({
+        id: "call",
+        type: "call_tool",
+        name: "github_findu_deploy_prod",
+        mandateId: "ship",
+        arguments: {}
+      }),
+      { cwd: root }
+    );
+    expect(denied).toMatchObject({
+      id: "call",
+      ok: false,
+      error: expect.stringContaining("switchboard seatbelt: prod-deploy-tool")
+    });
+    await expect(
+      listApprovalRequests({ repoPath: root, mandateId: "ship" })
+    ).resolves.toMatchObject([
+      {
+        id: "approval-1",
+        mandateId: "ship",
+        approvalGateId: "seatbelt:prod-deploy-tool",
+        runtimeStatus: "pending"
+      }
+    ]);
+
+    await decideApprovalRequest({ id: "approval-1", status: "approved" });
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "retry",
+          type: "call_tool",
+          name: "github_findu_deploy_prod",
+          mandateId: "ship",
+          arguments: {}
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({ id: "retry", ok: true, type: "tool_result" });
+  });
+
+  it("respects seatbelt: off in the global config", async () => {
+    const root = await makeSeatbeltRepo();
+    await writeGlobalSeatbeltConfig(root, "version: 1\nseatbelt: off\n");
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "off",
+          type: "call_tool",
+          name: "github_findu_deploy_prod",
+          arguments: {}
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({ id: "off", ok: true, type: "tool_result" });
+  });
+
+  it("ignores a repo-level seatbelt: off (the floor is machine-scoped)", async () => {
+    const root = await makeSeatbeltRepo({ repoSeatbeltOff: true });
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "repo-off",
+          type: "call_tool",
+          name: "github_findu_deploy_prod",
+          arguments: {}
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({
+      id: "repo-off",
+      ok: false,
+      error: expect.stringContaining("switchboard seatbelt:")
+    });
+  });
+
+  it("respects the per-request --no-seatbelt opt-out", async () => {
+    const root = await makeSeatbeltRepo();
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "flag",
+          type: "call_tool",
+          name: "github_findu_deploy_prod",
+          seatbelt: false,
+          arguments: {}
+        }),
+        { cwd: root }
+      )
+    ).resolves.toMatchObject({ id: "flag", ok: true, type: "tool_result" });
+  });
+
+  it("rejects a non-boolean seatbelt flag", async () => {
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "bad",
+          type: "call_tool",
+          name: "x",
+          seatbelt: "off"
+        }),
+        {}
+      )
+    ).resolves.toMatchObject({
+      id: "bad",
+      ok: false,
+      error: "Daemon request seatbelt must be a boolean."
+    });
+  });
+});
+
+describe("daemon idle self-termination", () => {
+  it("names the idle timeout at sixty minutes", () => {
+    expect(daemonIdleTimeoutMs).toBe(60 * 60_000);
+    expect(resolveDaemonIdleTimeoutMs({})).toBe(daemonIdleTimeoutMs);
+    expect(
+      resolveDaemonIdleTimeoutMs({ SWITCHBOARD_DAEMON_IDLE_TIMEOUT_MS: "250" })
+    ).toBe(250);
+    expect(
+      resolveDaemonIdleTimeoutMs({ SWITCHBOARD_DAEMON_IDLE_TIMEOUT_MS: "nope" })
+    ).toBe(daemonIdleTimeoutMs);
+  });
+
+  it("tracks idleness against an injected clock", () => {
+    let nowMs = 1_000;
+    const monitor = createIdleMonitor({ timeoutMs: 100, now: () => nowMs });
+    expect(monitor.isIdle()).toBe(false);
+    nowMs += 99;
+    expect(monitor.isIdle()).toBe(false);
+    nowMs += 1;
+    expect(monitor.isIdle()).toBe(true);
+    monitor.touch();
+    expect(monitor.isIdle()).toBe(false);
+    nowMs += 100;
+    expect(monitor.isIdle()).toBe(true);
+  });
+
+  it("exits cleanly and removes its state after the idle timeout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-daemon-idle-"));
+    process.env.XDG_STATE_HOME = join(root, "state");
+    const runtimeDir = join(root, "runtime");
+    const daemon = await startTestDaemon({
+      runtimeDir,
+      cwd: root,
+      idleTimeoutMs: 100
+    });
+
+    await daemon.done;
+    const paths = resolveDaemonPaths({ runtimeDir });
+    expect(getDaemonStatus(paths).state).toBe("not-running");
+  });
+});
+
+describe("orphaned daemon detection", () => {
+  it("flags a tracked daemon whose repo path was deleted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-daemon-orphan-"));
+    const runtimeDir = join(root, "runtime");
+    const paths = resolveDaemonPaths({ runtimeDir });
+    await writeDaemonState(
+      createDaemonState({
+        pid: process.pid,
+        socketPath: paths.socketPath,
+        cwd: join(root, "deleted-repo")
+      }),
+      paths
+    );
+    await writeFile(paths.socketPath, "");
+
+    const findings = await detectOrphanedDaemons({
+      runtimeDir,
+      listProcesses: () => []
+    });
+    expect(findings).toMatchObject([
+      { pid: process.pid, reason: "repo-path-missing" }
+    ]);
+  });
+
+  it("flags a tracked daemon running past the age limit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-daemon-orphan-"));
+    const runtimeDir = join(root, "runtime");
+    const paths = resolveDaemonPaths({ runtimeDir });
+    await writeDaemonState(
+      createDaemonState({
+        pid: process.pid,
+        socketPath: paths.socketPath,
+        cwd: root,
+        startedAt: new Date(Date.now() - orphanedDaemonMaxAgeMs - 60_000)
+      }),
+      paths
+    );
+    await writeFile(paths.socketPath, "");
+
+    const findings = await detectOrphanedDaemons({
+      runtimeDir,
+      listProcesses: () => []
+    });
+    expect(findings).toMatchObject([
+      { pid: process.pid, reason: "over-max-age" }
+    ]);
+  });
+
+  it("flags daemon processes whose runtime dir no longer exists", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-daemon-orphan-"));
+    const runtimeDir = join(root, "runtime");
+
+    const findings = await detectOrphanedDaemons({
+      runtimeDir,
+      listProcesses: () => [
+        {
+          pid: 4242,
+          command:
+            "node /repo/apps/cli/dist/index.js daemon run --runtime-dir /tmp/deleted-sandbox/runtime"
+        },
+        {
+          pid: 4243,
+          command: `node /repo/apps/cli/dist/index.js daemon run --runtime-dir ${root}`
+        }
+      ]
+    });
+    expect(findings).toMatchObject([
+      {
+        pid: 4242,
+        reason: "runtime-dir-missing",
+        runtimeDir: "/tmp/deleted-sandbox/runtime"
+      }
+    ]);
+  });
+
+  it("reports nothing for a healthy state", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-daemon-orphan-"));
+    const runtimeDir = join(root, "runtime");
+    await expect(
+      detectOrphanedDaemons({ runtimeDir, listProcesses: () => [] })
+    ).resolves.toEqual([]);
+  });
+});
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}
+
+async function makeSeatbeltRepo(options: {
+  repoSeatbeltOff?: boolean;
+} = {}): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "switchboard-daemon-seatbelt-"));
+  process.env.XDG_STATE_HOME = join(root, "state");
+  // An empty sandboxed config home isolates the test from any real machine
+  // config; the built-in seatbelt defaults apply.
+  process.env.XDG_CONFIG_HOME = join(root, "config");
+  await mkdir(join(root, "config"), { recursive: true });
+  await writeFile(
+    join(root, ".switchboard.yaml"),
+    [
+      "version: 1",
+      ...(options.repoSeatbeltOff ? ["seatbelt: off"] : []),
+      "profiles:",
+      "  github_findu:",
+      "    provider: generic",
+      "    namespace: github_findu",
+      "    upstream:",
+      "      type: stdio",
+      `      command: ${JSON.stringify(process.execPath)}`,
+      "      args:",
+      `        - ${JSON.stringify(fixtureServerPath)}`,
+      "        - github-findu",
+      '        - ""',
+      '        - ""',
+      "        - deploy_prod"
+    ].join("\n")
+  );
+  return root;
+}
+
+async function writeGlobalSeatbeltConfig(
+  root: string,
+  content: string
+): Promise<void> {
+  const configDir = join(root, "config", "switchboard");
+  await mkdir(configDir, { recursive: true });
+  await writeFile(join(configDir, "config.yaml"), content);
 }

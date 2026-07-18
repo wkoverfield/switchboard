@@ -41,6 +41,8 @@ export interface DaemonBackedMcpServerOptions extends SwitchboardMcpServerOption
   cwd?: string;
   // Per-connection strict override: deny all routed calls when no pass is bound.
   strict?: boolean;
+  // Set false to disable the ambient seatbelt for this connection.
+  seatbelt?: boolean;
   listTools?: () => Promise<NamespacedTool[]>;
   callTool?: (
     name: string,
@@ -124,7 +126,8 @@ export function createDaemonBackedSwitchboardMcpServer(
             ? { approvalWaitMs: options.approvalWaitMs }
             : {}),
           ...(options.cwd ? { cwd: options.cwd } : {}),
-          ...(options.strict ? { strict: true } : {})
+          ...(options.strict ? { strict: true } : {}),
+          ...(options.seatbelt === false ? { seatbelt: false } : {})
         }
       );
       return response.result;
