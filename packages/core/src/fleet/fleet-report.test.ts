@@ -127,6 +127,56 @@ describe("fleet delegation report", () => {
     expect(report.totals.calls).toBe(1);
   });
 
+  it("correlates a uid-less legacy/hook entry to the node bearing its id", () => {
+    const mandates = [mandate({ id: "root", mandateUid: "root:0" })];
+    // A hook_denial entry that carries only mandateId (no uid) must still land.
+    const legacyEntry: AuditLogEntry = {
+      version: 1,
+      timestamp: "2026-07-18T00:30:00.000Z",
+      action: "hook_denial",
+      status: "error",
+      toolName: "Bash",
+      mandateId: "root",
+      error: "switchboard seatbelt: force-push-main"
+    };
+    const report = buildFleetReport({
+      mandates,
+      auditEntries: [legacyEntry]
+    });
+    expect(report.totals.calls).toBe(1);
+    expect(report.totals.denied).toBe(1);
+    expect(report.roots[0]?.calls[0]?.toolName).toBe("Bash");
+  });
+
+  it("surfaces nodes caught in a parentage cycle instead of dropping them", () => {
+    // A corrupted store where two mandates name each other as parent. Neither
+    // is a natural root; the render must still show both (and not loop).
+    const mandates = [
+      mandate({
+        id: "a",
+        mandateUid: "a:0",
+        parentMandateId: "b",
+        parentMandateUid: "b:0"
+      }),
+      mandate({
+        id: "b",
+        mandateUid: "b:0",
+        parentMandateId: "a",
+        parentMandateUid: "a:0"
+      })
+    ];
+    const report = buildFleetReport({
+      mandates,
+      auditEntries: [toolCall("a:0", "echo", "ok")]
+    });
+    expect(report.totals.mandates).toBe(2);
+    // Both nodes are reachable from the rendered roots (cycle edge broken).
+    const rendered = renderFleetReport(report);
+    expect(rendered).toContain("a");
+    expect(rendered).toContain("b");
+    expect(rendered).not.toContain("No mandates found");
+  });
+
   it("renders an empty tree cleanly", () => {
     const report = buildFleetReport({ mandates: [], auditEntries: [] });
     expect(renderFleetReport(report)).toContain("No mandates found");

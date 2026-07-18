@@ -26,8 +26,14 @@ const fixtureServerPath = fileURLToPath(
 // is null, and the fixture profile carries no secretRef. It drives the proven
 // mechanism directly (mint child mandates, route real tool calls through the
 // in-process daemon handler, render the fleet tree, cascade-revoke) instead of
-// spawning a real headless `claude`. See docs/security/attenuation.md for the
-// exact real-claude gap this proxy does not cover.
+// spawning a real headless `claude`.
+//
+// What this proxy does NOT prove: that a parent id propagates across a real
+// Claude spawn boundary. Single-level attenuation (each worker a direct child
+// of the root it was spawned under) is the shipped guarantee; deep nesting
+// (a worker's sub-workers scoped under that worker) is roadmap because the
+// harness launches every MCP server flat from the host. See
+// docs/security/attenuation.md ("Honest limitations").
 
 describe("spawn-time attenuation ship gate (sandboxed proxy)", () => {
   const previous = {
@@ -115,8 +121,11 @@ describe("spawn-time attenuation ship gate (sandboxed proxy)", () => {
     await expect(call(root, "github_findu_echo", "root", { message: "root" }))
       .resolves.toMatchObject({ ok: true, type: "tool_result" });
 
-    // Nested spawn: a worker mints a grandchild that is a subset of the CHILD,
-    // not the root. Route a call as the grandchild to prove it works.
+    // ENGINE nesting invariant: minting with parent = the child produces a
+    // grandchild that is a subset of the CHILD, not the root, and it routes.
+    // This proves the child-pass engine, NOT that a parent id propagates
+    // across a real Claude spawn boundary (it does not; see the mint-child
+    // verb test note and docs/security/attenuation.md "Honest limitations").
     const grandchild = await createChildMandate({
       parentId: childA.id,
       task: "worker-a-sub",
@@ -233,11 +242,19 @@ describe("mcp --mint-child verb", () => {
 
     const childId = served[0];
     expect(childId).toMatch(/^scoped-root-/);
-    // The minted child is bound to the served endpoint and exported for nesting.
+    // The minted child is bound to the served endpoint and exported into THIS
+    // process's environment.
     expect(process.env.SWITCHBOARD_PARENT_MANDATE).toBe(childId);
 
-    // A second spawn with no --parent nests under the child via the env the
-    // first mint exported (grandchild subset of child, not root).
+    // NOTE: this asserts the in-process env-propagation contract only, within a
+    // single OS process (a worker that shells out to mint within its own
+    // process tree). It does NOT model real Claude Code: the harness spawns
+    // each subagent's `mcp --mint-child` server flat from the host, so this
+    // env var never reaches a nested spawn and a real nested worker falls
+    // through to the root. Deep nesting through the harness is roadmap; see
+    // docs/security/attenuation.md ("Honest limitations"). The real engine
+    // nesting invariant (grandchild subset of child) is proven separately via
+    // createChildMandate in the ship-gate test above.
     await program.parseAsync(["--cwd", root, "mcp", "--mint-child"], {
       from: "user"
     });

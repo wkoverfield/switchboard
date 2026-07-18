@@ -52,14 +52,14 @@ function mandateKey(
   return mandate.mandateUid ?? `id:${mandate.id}`;
 }
 
-function entryKey(entry: AuditLogEntry): string | null {
-  if (entry.mandateUid) {
-    return entry.mandateUid;
-  }
-  if (entry.mandateId) {
-    return `id:${entry.mandateId}`;
-  }
-  return null;
+function pushEntry(
+  map: Map<string, AuditLogEntry[]>,
+  key: string,
+  entry: AuditLogEntry
+): void {
+  const list = map.get(key) ?? [];
+  list.push(entry);
+  map.set(key, list);
 }
 
 function summarizeCalls(entries: AuditLogEntry[]): {
@@ -104,23 +104,32 @@ export function buildFleetReport(
   const now = options.now?.() ?? new Date();
   const repoPath = options.repoPath ?? null;
 
-  const entriesByKey = new Map<string, AuditLogEntry[]>();
+  // Entries carry a uid (the common case) or, for legacy/hook entries, only a
+  // mandateId. Bucket them separately so an id-only entry still correlates to
+  // the node bearing that id instead of being dropped against a uid key.
+  const entriesByUid = new Map<string, AuditLogEntry[]>();
+  const entriesByIdOnly = new Map<string, AuditLogEntry[]>();
   for (const entry of options.auditEntries) {
-    const key = entryKey(entry);
-    if (key === null) {
-      continue;
+    if (entry.mandateUid) {
+      pushEntry(entriesByUid, entry.mandateUid, entry);
+    } else if (entry.mandateId) {
+      pushEntry(entriesByIdOnly, entry.mandateId, entry);
     }
-    const list = entriesByKey.get(key) ?? [];
-    list.push(entry);
-    entriesByKey.set(key, list);
   }
 
   const nodesByKey = new Map<string, FleetNode>();
   const nodesById = new Map<string, FleetNode>();
   const allNodes: FleetNode[] = [];
   for (const mandate of options.mandates) {
-    const key = mandateKey(mandate);
-    const { calls, totals } = summarizeCalls(entriesByKey.get(key) ?? []);
+    // A uid'd mandate claims its uid entries; the FIRST node for an id also
+    // claims that id's uid-less legacy entries (so they are never dropped and
+    // never double-counted across two same-id mandates).
+    const firstForId = !nodesById.has(mandate.id);
+    const relevant = [
+      ...(mandate.mandateUid ? (entriesByUid.get(mandate.mandateUid) ?? []) : []),
+      ...(firstForId ? (entriesByIdOnly.get(mandate.id) ?? []) : [])
+    ];
+    const { calls, totals } = summarizeCalls(relevant);
     const node: FleetNode = {
       mandateId: mandate.id,
       mandateUid: mandate.mandateUid ?? null,
@@ -133,12 +142,12 @@ export function buildFleetReport(
       children: []
     };
     allNodes.push(node);
-    nodesByKey.set(key, node);
+    nodesByKey.set(mandateKey(mandate), node);
     if (mandate.mandateUid) {
       nodesByKey.set(mandate.mandateUid, node);
     }
     // First mandate for an id wins as the id-fallback parent target.
-    if (!nodesById.has(mandate.id)) {
+    if (firstForId) {
       nodesById.set(mandate.id, node);
     }
   }
@@ -163,7 +172,18 @@ export function buildFleetReport(
     }
   }
 
+  // Break any parentage cycle in the recorded store: walk from the roots,
+  // dropping a child edge that points back at an already-visited node, then
+  // surface any node still unreached (a pure cycle with no real root) as a
+  // root of its own. Without this a 2-cycle leaves roots empty and those
+  // nodes vanish from the render though they are still counted in totals.
+  const reachable = new Set<FleetNode>();
   const assignDepth = (node: FleetNode, depth: number): void => {
+    if (reachable.has(node)) {
+      return;
+    }
+    reachable.add(node);
+    node.children = node.children.filter((child) => !reachable.has(child));
     node.depth = depth;
     for (const child of node.children) {
       assignDepth(child, depth + 1);
@@ -171,6 +191,12 @@ export function buildFleetReport(
   };
   for (const root of roots) {
     assignDepth(root, 0);
+  }
+  for (const node of allNodes) {
+    if (!reachable.has(node)) {
+      roots.push(node);
+      assignDepth(node, 0);
+    }
   }
 
   let calls = 0;

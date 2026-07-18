@@ -40,6 +40,33 @@ seatbelt floor and the harness Bash tripwire (`switchboard hooks install
 claude`), which apply to every actor regardless of pass. Treat attenuation as
 defense in depth for legibility and revocation, not as containment.
 
+## Honest limitations
+
+Beyond the policy-not-a-sandbox limit above, v1 owns three specific gaps. None
+blocks the single-root opt-in default, but each is a real property of the
+current build.
+
+1. **Deep nesting does not propagate through Claude.** A worker's sub-workers
+   are scoped under the root, not under that worker, because the harness
+   launches MCP servers flat from the host. Single-level attenuation is the
+   guarantee; deep nesting is roadmap. See "What nesting is guaranteed" below.
+2. **`mint-child` does not check parent entitlement.** The verb trusts the
+   parent id it is handed (`--parent` or `SWITCHBOARD_PARENT_MANDATE`); it does
+   not verify the caller is entitled to parent from that mandate. In a repo
+   with a single active root pass (the default) this is moot. In a repo running
+   MULTIPLE differently-scoped active root passes, an agent that can set that
+   env var could mint a child of the broader root. Cross-repo parents are
+   already rejected (a child must match the parent's repo, worktree, and
+   branch); the open case is same-repo multi-root. An entitlement check is
+   future work.
+3. **Routing checks a pass's own status, not its ancestors' liveness.** A
+   routed call verifies the bound pass is active; it does not walk the
+   delegation chain to confirm every ancestor is still open. Cascading
+   revocation is what guarantees no live orphans: revoking a parent cancels the
+   whole subtree in one write. A hand-corrupted store (a child left open under
+   a cancelled parent) could produce a live orphan, but that state is not
+   reachable through the normal revoke path.
+
 ## How it works
 
 Two mechanisms layer:
@@ -54,7 +81,7 @@ Two mechanisms layer:
    the parent and serves the scoped `mcp --mandate <childId>` endpoint, so
    every spawn connects to its own freshly-minted, floored, audited mandate.
 
-### Parent resolution and nesting
+### Parent resolution
 
 `switchboard mcp --mint-child` resolves the parent pass in this order:
 
@@ -63,11 +90,30 @@ Two mechanisms layer:
 3. the repo's single active root pass (the one with no parent), when exactly
    one exists.
 
-When the launcher serves a child it exports `SWITCHBOARD_PARENT_MANDATE=<the
-child id>` into its environment. A deeper spawn that inherits that environment
-then mints under the child, so a grandchild is a subset of the child, not the
-root (`grandchild ⊆ child ⊆ root`). The child-pass engine validates that chain:
-a child's profiles, tools, and lease can never exceed its immediate parent's.
+### What nesting is guaranteed (and what is not)
+
+**Single-level attenuation is the shipped guarantee.** Through real Claude Code,
+every subagent the top-level agent spawns becomes a direct child of the root
+pass: its own pass id, its own audit identity, the seatbelt floor, a lease no
+later than the root, and death when the root is revoked. The default resolution
+(one active root pass per repo) delivers this with nothing to configure.
+
+**Deep nesting is roadmap, not shipped.** A worker's own sub-workers being
+scoped under that worker (rather than under the root) does NOT happen through
+real Claude today. Claude launches every subagent's `mcp --mint-child` server
+flat from the host process, so a nested spawn does not inherit the immediate
+parent's id: `SWITCHBOARD_PARENT_MANDATE` set by one worker lives in that
+worker's sibling MCP-server process, never in the host that launches the next
+one. A nested mint therefore falls through to the repo's root pass, and the
+delegation tree flattens to one level. Propagating a parent id across the
+harness's flat spawn boundary (for example, an `agent_id` to mandate map in the
+spawn hook) is future work.
+
+The child-pass ENGINE does enforce the full chain: when a parent id IS supplied
+(`--parent`, or an inherited env var within a single process tree), the minted
+child's profiles, tools, and lease can never exceed that immediate parent's,
+so `grandchild ⊆ child ⊆ root` holds wherever the id actually reaches the
+launcher. The gap is propagation through Claude, not the engine.
 
 ## Install and remove
 
