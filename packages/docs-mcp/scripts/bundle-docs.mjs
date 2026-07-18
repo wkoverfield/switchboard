@@ -21,6 +21,7 @@ const manifest = [
   { source: "docs/install/cursor.md", path: "install/cursor.md", title: "Cursor Install", description: "Routing Cursor through Switchboard." },
   { source: "docs/install/vscode.md", path: "install/vscode.md", title: "VS Code Install", description: "Routing VS Code through Switchboard." },
   { source: "docs/security/seatbelt.md", path: "security/seatbelt.md", title: "The Seatbelt", description: "The default-on catastrophe denylist: v1 patterns, approvable retries, opt-out." },
+  { source: "docs/security/attenuation.md", path: "security/attenuation.md", title: "Spawn Attenuation", description: "Opt-in per-subagent child passes: single-level guarantee, nesting roadmap, limits." },
   { source: "docs/security/threat-model.md", path: "security/threat-model.md", title: "Threat Model", description: "STRIDE analysis: what enforcement binds, what it cannot, accepted risks." },
   { source: "docs/security/trust-model.md", path: "security/trust-model.md", title: "Trust Model", description: "Short posture summary of the security model." },
   { source: "docs/security/audit-logs.md", path: "security/audit-logs.md", title: "Audit Logs", description: "The hash-chained local audit log and switchboard audit verify." },
