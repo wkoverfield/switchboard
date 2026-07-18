@@ -15,6 +15,7 @@ import {
   renewMandate,
   resolveActiveMandate,
   resolveMandateStorePath,
+  revokeMandateCascade,
   updateMandateHandoff
 } from "./mandates.js";
 
@@ -1071,5 +1072,167 @@ describe("mandates", () => {
         new Date("2026-06-19T18:00:00.000Z")
       )
     ).toBe("expired");
+  });
+
+  it("passes the full parent tool set to a child when allowedTools is omitted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+    const repoPath = join(root, "repo");
+
+    await createMandate({
+      path,
+      now: () => new Date("2026-07-18T16:00:00.000Z"),
+      task: "root",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "main",
+      agentRole: "orchestrator",
+      profiles: ["github_findu"],
+      lease: "2h",
+      allowedTools: ["github_findu_*"],
+      deniedTools: ["*_deploy_prod"]
+    });
+
+    // v1 default child scope: same tools as parent, own id + audit identity.
+    const child = await createChildMandate({
+      path,
+      now: () => new Date("2026-07-18T16:30:00.000Z"),
+      parentId: "root",
+      task: "worker",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "main",
+      agentRole: "worker",
+      profiles: ["github_findu"],
+      lease: "30m"
+    });
+
+    expect(child.allowedTools).toEqual(["github_findu_*"]);
+    expect(child.deniedTools).toEqual(["*_deploy_prod"]);
+    expect(child.parentMandateId).toBe("root");
+    expect(child.mandateUid).not.toBe("root");
+    // Lease is bound no later than the parent.
+    expect(Date.parse(child.expiresAt)).toBeLessThanOrEqual(
+      Date.parse("2026-07-18T18:00:00.000Z")
+    );
+  });
+
+  it("nests a grandchild as a subset of the child, not the root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+    const repoPath = join(root, "repo");
+
+    await createMandate({
+      path,
+      now: () => new Date("2026-07-18T16:00:00.000Z"),
+      task: "root",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "main",
+      agentRole: "orchestrator",
+      profiles: ["github_findu"],
+      lease: "4h"
+    });
+    const child = await createChildMandate({
+      path,
+      now: () => new Date("2026-07-18T16:30:00.000Z"),
+      parentId: "root",
+      task: "child",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "main",
+      agentRole: "worker",
+      profiles: ["github_findu"],
+      lease: "1h"
+    });
+    const grandchild = await createChildMandate({
+      path,
+      now: () => new Date("2026-07-18T16:45:00.000Z"),
+      parentId: "child",
+      task: "grandchild",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "main",
+      agentRole: "worker",
+      profiles: ["github_findu"],
+      lease: "10m"
+    });
+
+    // The chain is grandchild -> child -> root, and the grandchild's lease is
+    // bound by the child's max lease, which is itself bound by the root.
+    expect(grandchild.parentMandateId).toBe("child");
+    expect(grandchild.delegationPath).toEqual(["root", "child", "grandchild"]);
+    expect(grandchild.parentMandateUid).toBe(child.mandateUid);
+    expect(Date.parse(grandchild.expiresAt)).toBeLessThanOrEqual(
+      Date.parse(child.expiresAt)
+    );
+  });
+
+  it("cascades revocation from a parent to its whole subtree", async () => {
+    const root = await mkdtemp(join(tmpdir(), "switchboard-mandates-"));
+    const path = join(root, "mandates.json");
+    const repoPath = join(root, "repo");
+
+    await createMandate({
+      path,
+      now: () => new Date("2026-07-18T16:00:00.000Z"),
+      task: "root",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "main",
+      agentRole: "orchestrator",
+      profiles: ["github_findu"],
+      lease: "4h"
+    });
+    await createChildMandate({
+      path,
+      now: () => new Date("2026-07-18T16:10:00.000Z"),
+      parentId: "root",
+      task: "child",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "main",
+      agentRole: "worker",
+      profiles: ["github_findu"],
+      lease: "1h"
+    });
+    await createChildMandate({
+      path,
+      now: () => new Date("2026-07-18T16:20:00.000Z"),
+      parentId: "child",
+      task: "grandchild",
+      repoPath,
+      worktreePath: repoPath,
+      branch: "main",
+      agentRole: "worker",
+      profiles: ["github_findu"],
+      lease: "10m"
+    });
+
+    const result = await revokeMandateCascade({
+      path,
+      id: "root",
+      repoPath,
+      reason: "session ended",
+      now: () => new Date("2026-07-18T16:25:00.000Z")
+    });
+
+    expect(result.revoked.map((mandate) => mandate.id).sort()).toEqual([
+      "child",
+      "grandchild",
+      "root"
+    ]);
+
+    // Every mandate in the subtree now resolves as closed/invalid.
+    for (const id of ["root", "child", "grandchild"]) {
+      await expect(
+        resolveActiveMandate({
+          path,
+          id,
+          repoPath,
+          now: () => new Date("2026-07-18T16:25:00.000Z")
+        })
+      ).rejects.toThrow(/closed with handoff state "cancelled"/);
+    }
   });
 });
