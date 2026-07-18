@@ -1393,6 +1393,213 @@ describe("daemon runtime lazy repo resolution", () => {
       ])
     );
   });
+
+  it("keeps a strict session's floor when a path arg redirects to a permissive repo", async () => {
+    // The session is in a strict repo with no pass, so every call is denied.
+    // An agent adds a path arg pointing into a permissive repo to try to escape
+    // that; the only-strengthen gate keeps the strict floor.
+    await setupGlobalConfigEnv();
+    const strictRepo = await makeLazyRepo({
+      namespace: "svc",
+      label: "svc",
+      strict: true
+    });
+    const permissiveRepo = await makeLazyRepo({
+      namespace: "svc",
+      label: "PERMISSIVE"
+    });
+
+    const control = await handleDaemonRequest(
+      JSON.stringify({
+        id: "ctl",
+        type: "call_tool",
+        name: "svc_echo",
+        arguments: { message: "hi" }
+      }),
+      { cwd: strictRepo }
+    );
+    expect(control).toMatchObject({ id: "ctl", ok: false });
+    expect(control.error).toBe(strictNoPassReason);
+
+    const attack = await handleDaemonRequest(
+      JSON.stringify({
+        id: "atk",
+        type: "call_tool",
+        name: "svc_echo",
+        arguments: { message: "hi", path: join(permissiveRepo, "x.ts") }
+      }),
+      { cwd: strictRepo }
+    );
+    expect(attack).toMatchObject({ id: "atk", ok: false });
+    expect(attack.error).toBe(strictNoPassReason);
+  });
+
+  it("keeps a session pass's tool scope when a path arg redirects to a permissive repo", async () => {
+    // Session pass allows only svc_echo; svc_whoami is out of scope. A path arg
+    // into a permissive repo (no pass) must not lift the pass scope.
+    await setupGlobalConfigEnv();
+    const passRepo = await makeLazyRepo({ namespace: "svc", label: "svc" });
+    await createMandate({
+      task: "scoped",
+      repoPath: passRepo,
+      worktreePath: passRepo,
+      branch: "-",
+      agentRole: "implementer",
+      profiles: ["svc"],
+      allowedTools: ["svc_echo"],
+      lease: "2h"
+    });
+    const permissiveRepo = await makeLazyRepo({
+      namespace: "svc",
+      label: "PERMISSIVE"
+    });
+
+    const control = await handleDaemonRequest(
+      JSON.stringify({
+        id: "pc",
+        type: "call_tool",
+        name: "svc_whoami",
+        arguments: {}
+      }),
+      { cwd: passRepo }
+    );
+    expect(control).toMatchObject({
+      id: "pc",
+      ok: false,
+      error: 'tool "svc_whoami" is not allowed by pass policy'
+    });
+
+    const attack = await handleDaemonRequest(
+      JSON.stringify({
+        id: "pa",
+        type: "call_tool",
+        name: "svc_whoami",
+        arguments: { path: join(permissiveRepo, "x.ts") }
+      }),
+      { cwd: passRepo }
+    );
+    expect(attack).toMatchObject({
+      id: "pa",
+      ok: false,
+      error: 'tool "svc_whoami" is not allowed by pass policy'
+    });
+
+    // A tool the session pass DOES allow still routes through the redirect.
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "pe",
+          type: "call_tool",
+          name: "svc_echo",
+          arguments: { message: "hi", path: join(permissiveRepo, "x.ts") }
+        }),
+        { cwd: passRepo }
+      )
+    ).resolves.toMatchObject({ id: "pe", ok: true, type: "tool_result" });
+  });
+
+  it("applies the resolved repo's own pass when a permissive session redirects into it (not a downgrade)", async () => {
+    // The legitimate case: a session opened at ~ (no pass, permissive floor)
+    // makes a call into a repo whose pass allows only its echo tool. That pass
+    // fully governs the call; the permissive session adds nothing to lift.
+    await setupGlobalConfigEnv();
+    const home = await mkdtemp(join(tmpdir(), "switchboard-lazy-home-"));
+    const repoA = await makeLazyRepo({
+      namespace: "repo_a",
+      label: "repo-a",
+      strict: true
+    });
+    await createMandate({
+      task: "scoped-a",
+      repoPath: repoA,
+      worktreePath: repoA,
+      branch: "-",
+      agentRole: "implementer",
+      profiles: ["repo_a"],
+      allowedTools: ["repo_a_echo"],
+      lease: "2h"
+    });
+
+    // repo A's pass allows echo: the call runs against repo A.
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "ok",
+          type: "call_tool",
+          name: "repo_a_echo",
+          arguments: { message: "hi", path: join(repoA, "x.ts") }
+        }),
+        { cwd: home }
+      )
+    ).resolves.toMatchObject({
+      id: "ok",
+      ok: true,
+      type: "tool_result",
+      result: { content: [{ type: "text", text: "repo-a:hi" }] }
+    });
+
+    // repo A's pass denies whoami: the call is denied by A's pass, not the
+    // permissive session.
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "no",
+          type: "call_tool",
+          name: "repo_a_whoami",
+          arguments: { path: join(repoA, "x.ts") }
+        }),
+        { cwd: home }
+      )
+    ).resolves.toMatchObject({
+      id: "no",
+      ok: false,
+      error: 'tool "repo_a_whoami" is not allowed by pass policy'
+    });
+  });
+
+  it("resolves multi-repo path args deterministically regardless of key order", async () => {
+    // Two path args into two different repos are ambiguous. Resolution must not
+    // depend on argument key order (an agent could otherwise steer to the
+    // weaker repo); it refuses to redirect and falls back to the session, whose
+    // strict floor then denies both orderings identically.
+    await setupGlobalConfigEnv();
+    const strictSession = await makeLazyRepo({
+      namespace: "svc",
+      label: "svc",
+      strict: true
+    });
+    const repoP = await makeLazyRepo({ namespace: "svc", label: "P" });
+    const repoR = await makeLazyRepo({ namespace: "svc", label: "R" });
+
+    const order1 = await handleDaemonRequest(
+      JSON.stringify({
+        id: "o1",
+        type: "call_tool",
+        name: "svc_echo",
+        arguments: {
+          repository: join(repoR, "a.ts"),
+          path: join(repoP, "b.ts")
+        }
+      }),
+      { cwd: strictSession }
+    );
+    const order2 = await handleDaemonRequest(
+      JSON.stringify({
+        id: "o2",
+        type: "call_tool",
+        name: "svc_echo",
+        arguments: {
+          path: join(repoP, "b.ts"),
+          repository: join(repoR, "a.ts")
+        }
+      }),
+      { cwd: strictSession }
+    );
+    expect(order1).toMatchObject({ id: "o1", ok: false });
+    expect(order2).toMatchObject({ id: "o2", ok: false });
+    expect(order1.error).toBe(strictNoPassReason);
+    expect(order2.error).toBe(order1.error);
+  });
 });
 
 describe("daemon runtime ambient seatbelt", () => {
@@ -1820,6 +2027,7 @@ async function makeLazyRepo(options: {
   label: string;
   seatbeltOff?: boolean;
   deployTool?: boolean;
+  strict?: boolean;
 }): Promise<string> {
   const root = await mkdtemp(
     join(tmpdir(), `switchboard-lazy-${options.namespace}-`)
@@ -1833,9 +2041,11 @@ function lazyProfileConfig(options: {
   label: string;
   seatbeltOff?: boolean;
   deployTool?: boolean;
+  strict?: boolean;
 }): string {
   return [
     "version: 1",
+    ...(options.strict ? ["enforcement: strict"] : []),
     ...(options.seatbeltOff ? ["seatbelt: off"] : []),
     "profiles:",
     `  ${options.namespace}:`,

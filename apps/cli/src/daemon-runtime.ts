@@ -8,6 +8,7 @@ import {
   createJsonlAuditLogger,
   createDaemonState,
   createKeychainSecretStore,
+  deriveRepoDirFromPath,
   findApprovedApprovalRequest,
   getDaemonStatus,
   evaluateMandateToolPolicy,
@@ -667,6 +668,55 @@ async function callConfiguredTool(
   // unaffected by this binding (see resolveSeatbeltPolicy).
   const resolution = resolveCallRepo({ args, sessionCwd: context.cwd });
   const callContext = resolvedContext(context, resolution);
+
+  // Only-strengthen composition. The call's arguments are agent-controlled, so
+  // a call-path redirect must never drop authority below the session's own
+  // governance: an agent cannot supply a path argument to escape its session's
+  // strict enforcement or pass scope. When a redirect binds a DIFFERENT repo
+  // than the session, evaluate the session context too and deny if it denies.
+  // Per-call resolution may only ADD restrictions (the resolved repo's pass,
+  // profiles, and enforcement still apply through routerForConfiguredProfiles);
+  // it can never remove the session's floor. The seatbelt catastrophe floor
+  // composes the same way (global-only) one layer down.
+  const sessionGate = await evaluateSessionGovernanceGate({
+    context,
+    resolution,
+    mandateId,
+    toolName: name
+  });
+  if (sessionGate.kind === "deny") {
+    await safeAuditLog(createJsonlAuditLogger(), {
+      action: "tool_call",
+      status: "error",
+      toolName: name,
+      ...(sessionGate.mandate
+        ? {
+            mandateId: sessionGate.mandate.id,
+            ...(sessionGate.mandate.mandateUid
+              ? { mandateUid: sessionGate.mandate.mandateUid }
+              : {}),
+            repoPath: sessionGate.mandate.repoPath,
+            worktreePath: sessionGate.mandate.worktreePath,
+            branch: sessionGate.mandate.branch
+          }
+        : {}),
+      ...resolutionAuditFields(resolution),
+      error: sessionGate.reason
+    });
+    return {
+      id,
+      ok: false,
+      error: mandateMessageInPassVocabulary(sessionGate.reason),
+      nextActions: sessionGate.nextActions ?? [],
+      mcpError: createStructuredMcpError({
+        message: sessionGate.reason,
+        nextActions: sessionGate.nextActions ?? [],
+        ...(sessionGate.mandate ? { mandateId: sessionGate.mandate.id } : {}),
+        toolName: name
+      })
+    };
+  }
+
   const routerResult = await routerForConfiguredProfiles(
     callContext,
     mandateId,
@@ -1234,6 +1284,108 @@ async function resolveAutoGrantPass(
       ? active
       : active.filter((mandate) => mandate.branch === branch);
   return matches.length === 1 ? matches[0] : undefined;
+}
+
+type SessionGovernanceGate =
+  | { kind: "allow"; mandate?: MandateWithStatus }
+  | {
+      kind: "deny";
+      reason: string;
+      nextActions?: string[];
+      mandate?: MandateWithStatus;
+    };
+
+/**
+ * Evaluate the session's own governance for a routed call, independent of the
+ * repo a path argument redirects to. Returns a denial when the session context
+ * would refuse the call, so a call-path redirect can only ever ADD
+ * restrictions, never lift the session's strict enforcement or pass scope.
+ *
+ * Only cross-repo call-path redirects are gated: a session-cwd or
+ * global-default resolution already routes against the session context, and a
+ * call-path resolution that lands on the session's own repo cannot downgrade
+ * anything, so both short-circuit to allow (no behavior change, no extra work).
+ */
+async function evaluateSessionGovernanceGate(options: {
+  context: DaemonSocketContext;
+  resolution: CallRepoResolution;
+  mandateId: string | undefined;
+  toolName: string;
+}): Promise<SessionGovernanceGate> {
+  const { context, resolution, mandateId, toolName } = options;
+  if (resolution.source !== "call-path") {
+    return { kind: "allow" };
+  }
+
+  const sessionRepoDir = context.cwd
+    ? deriveRepoDirFromPath(resolve(context.cwd))
+    : undefined;
+  if (sessionRepoDir && sessionRepoDir === resolution.resolvedRepoPath) {
+    // The call resolved to the session's own repo: routing against it enforces
+    // the same governance the session already has, so there is nothing to add.
+    return { kind: "allow" };
+  }
+
+  const loaded = loadSwitchboardConfig(optionsFromCwd(context.cwd));
+  const configError = loadedConfigError(loaded);
+  if (configError) {
+    // A session whose own config will not load cannot be shown to permit the
+    // call; fail closed rather than letting the redirect serve it ungoverned.
+    return {
+      kind: "deny",
+      reason: configError,
+      nextActions: ["Run switchboard doctor."]
+    };
+  }
+
+  const sessionRepoPath = configCwdBase(loaded, context.cwd);
+  let mandate: MandateWithStatus | undefined;
+  if (mandateId) {
+    try {
+      mandate = await resolveActiveMandate({
+        id: mandateId,
+        repoPath: sessionRepoPath
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        kind: "deny",
+        reason: message,
+        nextActions: daemonRecoveryNextActions(message)
+      };
+    }
+  } else {
+    mandate = await resolveAutoGrantPass(sessionRepoPath);
+  }
+
+  // Strict enforcement (repo `enforcement: strict`, which includes a global
+  // floor, or the per-connection `--strict`) with no bound session pass denies
+  // everything. A path-arg redirect to a permissive repo cannot change that.
+  const strict =
+    context.strict === true || loaded.config.enforcement === "strict";
+  if (!mandate && strict) {
+    return { kind: "deny", reason: strictNoPassReason };
+  }
+
+  if (mandate) {
+    const decision = evaluateMandateToolPolicy(toolName, {
+      allowedTools: mandate.allowedTools,
+      deniedTools: mandate.deniedTools,
+      approvalGates: mandate.approvalGates,
+      approvedApprovalRequests: await approvedApprovalRequestsForMandate(mandate)
+    });
+    if (!decision.allowed) {
+      // An approval gate on the session pass cannot be satisfied by pointing
+      // the call at a different repo, so a redirect around it is a denial.
+      const reason =
+        "approvalRequired" in decision
+          ? `${decision.reason}; a call redirected to another repo by a path argument cannot satisfy the session pass approval gate`
+          : decision.reason;
+      return { kind: "deny", reason, mandate };
+    }
+  }
+
+  return mandate ? { kind: "allow", mandate } : { kind: "allow" };
 }
 
 async function routerForConfiguredProfiles(

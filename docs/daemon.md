@@ -137,6 +137,17 @@ not from where the session started, with this precedence:
    floor still applies; repo-specific profiles are simply not bound. This path
    never prompts and never denies for lack of context.
 
+Per-call resolution can only ever add restrictions, never remove them. A call's
+arguments are agent-controlled, so a path argument that redirects a call to a
+different repo is composed under an only-strengthen rule: when the resolved repo
+differs from the session's repo, the call is evaluated against both, and denied
+if either denies. A session that is strict or bound to a pass keeps that
+governance no matter what path argument is supplied (an agent cannot point a
+call at a permissive repo to escape its session's strict enforcement or pass
+scope); the resolved repo can only make the call more restrictive. When path
+arguments point into two different repos, the call refuses to redirect and falls
+back to the session context rather than picking a repo by argument order.
+
 The seatbelt floor is read only from the machine-level global config, so a
 per-call repo binding can add repo restrictions but a repo `.switchboard.yaml`
 can never remove or weaken the floor, even when a call resolves to that repo.

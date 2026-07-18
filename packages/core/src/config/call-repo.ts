@@ -84,16 +84,18 @@ export const callPathArgKeys: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Return the first allowlisted, path-shaped argument value (raw, unresolved),
- * or undefined when the call carries no filesystem path. Arrays are supported
- * (the first path-shaped element wins) so tools that take `paths`/`files`
- * still resolve.
+ * Return every allowlisted, path-shaped argument value (raw, unresolved).
+ * Arrays are expanded so tools that take `paths`/`files` contribute each
+ * element. The full set (not just the first) is collected so ambiguous
+ * multi-repo calls can be detected rather than silently resolved by argument
+ * key order.
  */
-export function pathFromCallArgs(
+export function pathsFromCallArgs(
   args: Record<string, unknown> | undefined
-): string | undefined {
+): string[] {
+  const paths: string[] = [];
   if (!args) {
-    return undefined;
+    return paths;
   }
 
   for (const [key, value] of Object.entries(args)) {
@@ -103,23 +105,32 @@ export function pathFromCallArgs(
 
     if (typeof value === "string") {
       if (pathLikeValue(value)) {
-        return value;
+        paths.push(value);
       }
       continue;
     }
 
     if (Array.isArray(value)) {
-      const first = value.find(
-        (item): item is string =>
-          typeof item === "string" && pathLikeValue(item)
-      );
-      if (first !== undefined) {
-        return first;
+      for (const item of value) {
+        if (typeof item === "string" && pathLikeValue(item)) {
+          paths.push(item);
+        }
       }
     }
   }
 
-  return undefined;
+  return paths;
+}
+
+/**
+ * The first allowlisted, path-shaped argument value, or undefined when the
+ * call carries none. Retained for callers that only need presence; repo
+ * resolution itself uses the full set from `pathsFromCallArgs`.
+ */
+export function pathFromCallArgs(
+  args: Record<string, unknown> | undefined
+): string | undefined {
+  return pathsFromCallArgs(args)[0];
 }
 
 /**
@@ -247,20 +258,29 @@ export function resolveCallRepo(
   const now = options.now ?? Date.now;
   const sessionCwd = options.sessionCwd;
 
-  // 1. Explicit call path wins. A path arg that resolves to no repo (walked to
-  // the filesystem root with neither `.switchboard.yaml` nor `.git`) falls
-  // through rather than guessing, so an out-of-tree path never mis-binds.
-  const rawPath = pathFromCallArgs(options.args);
-  if (rawPath !== undefined) {
+  // 1. Explicit call path wins, but only when the call's path arguments name a
+  // single governing repo. A path arg that resolves to no repo (walked to the
+  // filesystem root with neither `.switchboard.yaml` nor `.git`) falls through
+  // rather than guessing. Multiple path args that resolve to DIFFERENT repos
+  // are ambiguous: an agent could otherwise steer to the weaker repo by
+  // argument key order, so we refuse to redirect and fall through to the
+  // session context (deterministic regardless of key order). The only-strengthen
+  // gate on the enforcement path then governs that fall-through.
+  const repoDirs = new Set<string>();
+  for (const rawPath of pathsFromCallArgs(options.args)) {
     const absPath = toAbsolutePath(rawPath, sessionCwd, homeDir);
     const repoDir = deriveRepoDirFromPath(absPath, now);
     if (repoDir !== undefined) {
-      return {
-        effectiveCwd: repoDir,
-        resolvedRepoPath: repoDir,
-        source: "call-path"
-      };
+      repoDirs.add(repoDir);
     }
+  }
+  if (repoDirs.size === 1) {
+    const repoDir = repoDirs.values().next().value as string;
+    return {
+      effectiveCwd: repoDir,
+      resolvedRepoPath: repoDir,
+      source: "call-path"
+    };
   }
 
   // 2. Session cwd, when the session was launched inside a repo.

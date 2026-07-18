@@ -6,6 +6,7 @@ import {
   clearCallRepoCache,
   deriveRepoDirFromPath,
   pathFromCallArgs,
+  pathsFromCallArgs,
   resolveCallRepo
 } from "./call-repo.js";
 
@@ -53,6 +54,13 @@ describe("pathFromCallArgs allowlist", () => {
   it("reads the first path-shaped entry from an array value", () => {
     expect(pathFromCallArgs({ paths: ["bare", "/abs/x"] })).toBe("/abs/x");
     expect(pathFromCallArgs({ files: ["a", "b"] })).toBeUndefined();
+  });
+
+  it("collects every path-shaped value across keys and arrays", () => {
+    expect(
+      pathsFromCallArgs({ path: "/a", repository: "/b", files: ["/c", "bare"] })
+    ).toEqual(["/a", "/b", "/c"]);
+    expect(pathsFromCallArgs({ repo: "owner/name" })).toEqual([]);
   });
 });
 
@@ -153,6 +161,42 @@ describe("resolveCallRepo precedence", () => {
       effectiveCwd: repoC,
       resolvedRepoPath: repoC,
       source: "session-cwd"
+    });
+  });
+
+  it("refuses to redirect when path args resolve to different repos (deterministic across key order)", async () => {
+    const repoP = await makeRepo({ switchboard: true });
+    const repoR = await makeRepo({ switchboard: true });
+    const session = await makeRepo({ switchboard: true });
+
+    const order1 = resolveCallRepo({
+      args: { repository: join(repoR, "a.ts"), path: join(repoP, "b.ts") },
+      sessionCwd: session
+    });
+    const order2 = resolveCallRepo({
+      args: { path: join(repoP, "b.ts"), repository: join(repoR, "a.ts") },
+      sessionCwd: session
+    });
+    // Ambiguous multi-repo call falls back to the session, identically for
+    // either argument ordering.
+    expect(order1).toEqual({
+      effectiveCwd: session,
+      resolvedRepoPath: session,
+      source: "session-cwd"
+    });
+    expect(order2).toEqual(order1);
+  });
+
+  it("still binds a single repo when several path args share it", async () => {
+    const repo = await makeRepo({ switchboard: true });
+    const resolution = resolveCallRepo({
+      args: { path: join(repo, "a.ts"), file: join(repo, "b.ts") },
+      sessionCwd: undefined
+    });
+    expect(resolution).toEqual({
+      effectiveCwd: repo,
+      resolvedRepoPath: repo,
+      source: "call-path"
     });
   });
 
