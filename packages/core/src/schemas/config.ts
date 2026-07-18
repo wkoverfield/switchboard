@@ -110,11 +110,33 @@ export const workspaceSchema = z
   })
   .passthrough();
 
+// One seatbelt denylist entry: a case-insensitive regular expression matched
+// against the routed call text (tool name plus JSON arguments) and against
+// harness shell commands, with a human reason surfaced on denial.
+export const seatbeltPatternSchema = z
+  .object({
+    name: z.string().min(1, "seatbelt pattern name is required"),
+    pattern: z.string().min(1, "seatbelt pattern regex is required"),
+    reason: z.string().min(1, "seatbelt pattern reason is required")
+  })
+  .passthrough();
+
+// Seatbelt tuning under `policies.default.seatbelt`: `add` appends custom
+// patterns, `remove` drops built-in patterns by name. The on/off switch is
+// the top-level `seatbelt` key, not this stanza.
+export const seatbeltSettingsSchema = z
+  .object({
+    add: z.array(seatbeltPatternSchema).default([]),
+    remove: z.array(z.string().min(1)).default([])
+  })
+  .passthrough();
+
 export const policySchema = z
   .object({
     defaultMode: operatingModeSchema.optional(),
     requireConfirmation: z.array(z.string()).default([]),
-    hideTools: z.array(z.string()).default([])
+    hideTools: z.array(z.string()).default([]),
+    seatbelt: seatbeltSettingsSchema.optional()
   })
   .passthrough();
 
@@ -133,10 +155,21 @@ export const acceptedRisksSchema = z
   })
   .passthrough();
 
+// Top-level seatbelt switch. "off" (or boolean false, for YAML 1.1 files
+// where a bare `off` parses as a boolean) disables the ambient catastrophe
+// denylist; anything else leaves it on. Only the machine-level global config
+// is consulted for this switch: a repo-level `seatbelt: off` is ignored so a
+// writable repo file cannot silently disable the floor.
+export const seatbeltModeSchema = z.union([
+  z.enum(["on", "off"]),
+  z.boolean()
+]);
+
 export const switchboardConfigSchema = z
   .object({
     version: z.literal(1).default(1),
     enforcement: enforcementModeSchema.default("default"),
+    seatbelt: seatbeltModeSchema.optional(),
     defaults: z.record(z.string(), z.unknown()).default({}),
     profiles: z.record(z.string(), profileSchema).default({}),
     workspaces: z.record(z.string(), workspaceSchema).default({}),
@@ -175,6 +208,9 @@ export type UpstreamEnvValue = z.infer<typeof upstreamEnvValueSchema>;
 export type WorkspaceConfig = z.infer<typeof workspaceSchema>;
 export type PolicyConfig = z.infer<typeof policySchema>;
 export type AcceptedRisksConfig = z.infer<typeof acceptedRisksSchema>;
+export type SeatbeltPattern = z.infer<typeof seatbeltPatternSchema>;
+export type SeatbeltSettings = z.infer<typeof seatbeltSettingsSchema>;
+export type SeatbeltMode = z.infer<typeof seatbeltModeSchema>;
 
 function canNormalizeNamespace(input: string): boolean {
   return (

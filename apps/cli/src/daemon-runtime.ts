@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, resolve } from "node:path";
@@ -18,10 +19,13 @@ import {
   removeDaemonState,
   resolveActiveMandate,
   resolveDaemonPaths,
+  resolveSeatbeltPolicy,
   safeAuditLog,
+  seatbeltAmbientMandateId,
   strictNoPassReason,
   writeDaemonState,
   type DaemonPaths,
+  type DaemonState,
   type DaemonStatus,
   type ApprovalRequestWithStatus,
   type MandateWithStatus,
@@ -33,12 +37,59 @@ import {
   profileConfigToStdioUpstreamWithSecrets,
   type DaemonApprovalRequired,
   type NamespacedTool,
+  type SeatbeltRouterOptions,
   type StdioUpstreamProfile
 } from "@switchboard-mcp/mcp-runtime";
 
 export interface DaemonCommandOptions {
   runtimeDir?: string;
   cwd?: string;
+}
+
+/**
+ * A daemon with no requests for this long exits cleanly, removing its own
+ * state and socket. Every `switchboard mcp` request auto-starts a fresh
+ * daemon, so self-termination costs one startup on the next call while
+ * preventing orphaned daemons from surviving long after their session.
+ * Override for tests with SWITCHBOARD_DAEMON_IDLE_TIMEOUT_MS.
+ */
+export const daemonIdleTimeoutMs = 60 * 60_000;
+
+export function resolveDaemonIdleTimeoutMs(
+  env: NodeJS.ProcessEnv = process.env
+): number {
+  const raw = env.SWITCHBOARD_DAEMON_IDLE_TIMEOUT_MS;
+  if (raw !== undefined) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return daemonIdleTimeoutMs;
+}
+
+export interface IdleMonitor {
+  touch(): void;
+  isIdle(): boolean;
+}
+
+/** Timer-free idle tracking so tests can drive it with an injected clock. */
+export function createIdleMonitor(options: {
+  timeoutMs: number;
+  now?: () => number;
+}): IdleMonitor {
+  const now = options.now ?? Date.now;
+  let lastActivityAt = now();
+
+  return {
+    touch() {
+      lastActivityAt = now();
+    },
+    isIdle() {
+      return now() - lastActivityAt >= options.timeoutMs;
+    }
+  };
 }
 
 export interface StartDaemonResult {
@@ -157,16 +208,30 @@ function isMissingProcessError(error: unknown): boolean {
 }
 
 export async function runDaemon(
-  options: DaemonCommandOptions = {}
+  options: DaemonCommandOptions & {
+    idleTimeoutMs?: number;
+    /** Test hook: aborting triggers the same clean shutdown as SIGTERM. */
+    signal?: AbortSignal;
+  } = {}
 ): Promise<void> {
   const paths = resolveDaemonPaths(options);
   const daemonCwd = resolve(options.cwd ?? process.cwd());
+  const idleTimeoutMs = options.idleTimeoutMs ?? resolveDaemonIdleTimeoutMs();
   await mkdir(paths.runtimeDir, { recursive: true, mode: 0o700 });
   await rm(paths.socketPath, { force: true });
   await invalidatePendingApprovalRequestsForDaemon(daemonCwd);
 
-  const socketContext = { cwd: daemonCwd };
-  const server = createServer((socket) => handleDaemonSocket(socket, socketContext));
+  const idleMonitor = createIdleMonitor({ timeoutMs: idleTimeoutMs });
+  const socketContext: DaemonSocketContext = {
+    cwd: daemonCwd,
+    onActivity: () => {
+      idleMonitor.touch();
+    }
+  };
+  const server = createServer((socket) => {
+    idleMonitor.touch();
+    handleDaemonSocket(socket, socketContext);
+  });
   await listen(server, paths.socketPath);
   await writeDaemonState(
     createDaemonState({
@@ -178,11 +243,24 @@ export async function runDaemon(
   );
 
   await new Promise<void>((resolve) => {
+    let shuttingDown = false;
     const shutdown = async () => {
+      if (shuttingDown) {
+        return;
+      }
+      shuttingDown = true;
+      clearInterval(idleInterval);
       await closeServer(server);
       await removeDaemonState(paths);
       resolve();
     };
+
+    const idleInterval = setInterval(() => {
+      if (idleMonitor.isIdle()) {
+        void shutdown();
+      }
+    }, Math.min(idleTimeoutMs, 30_000));
+    idleInterval.unref();
 
     process.once("SIGTERM", () => {
       void shutdown();
@@ -190,6 +268,17 @@ export async function runDaemon(
     process.once("SIGINT", () => {
       void shutdown();
     });
+    if (options.signal?.aborted) {
+      void shutdown();
+    } else {
+      options.signal?.addEventListener(
+        "abort",
+        () => {
+          void shutdown();
+        },
+        { once: true }
+      );
+    }
   });
 }
 
@@ -244,6 +333,10 @@ export interface DaemonSocketContext {
   // the repo's `enforcement` config: strict only ever strengthens, so a client
   // can request default-deny but never weaken a repo that already enforces it.
   strict?: boolean;
+  // Per-connection seatbelt opt-out (from `switchboard mcp --no-seatbelt`).
+  noSeatbelt?: boolean;
+  // Called on daemon activity so the idle self-termination clock resets.
+  onActivity?: () => void;
 }
 
 function handleDaemonSocket(socket: Socket, context: DaemonSocketContext): void {
@@ -277,6 +370,7 @@ function handleDaemonSocket(socket: Socket, context: DaemonSocketContext): void 
         return;
       }
       answered = true;
+      context.onActivity?.();
 
       if (request === "ping") {
         socket.write(
@@ -341,6 +435,7 @@ export async function handleDaemonRequest(
       approvalWaitMs?: unknown;
       cwd?: unknown;
       strict?: unknown;
+      seatbelt?: unknown;
     };
     const id = typeof request.id === "string" ? request.id : "unknown";
     if (request.type === "ping") {
@@ -376,12 +471,26 @@ export async function handleDaemonRequest(
         error: "Daemon request strict must be a boolean."
       };
     }
+    if (
+      request.seatbelt !== undefined &&
+      typeof request.seatbelt !== "boolean"
+    ) {
+      return {
+        id,
+        ok: false,
+        error: "Daemon request seatbelt must be a boolean."
+      };
+    }
     const baseContext: DaemonSocketContext =
       typeof request.cwd === "string"
         ? { ...context, cwd: resolve(request.cwd) }
         : context;
-    const requestContext: DaemonSocketContext =
+    const strictContext: DaemonSocketContext =
       request.strict === true ? { ...baseContext, strict: true } : baseContext;
+    const requestContext: DaemonSocketContext =
+      request.seatbelt === false
+        ? { ...strictContext, noSeatbelt: true }
+        : strictContext;
     if (request.type === "list_tools") {
       if (
         request.mandateId !== undefined &&
@@ -891,6 +1000,9 @@ function mandateMessageInPassVocabulary(message: string): string {
 }
 
 function inferMcpErrorCode(message: string): StructuredMcpError["code"] {
+  if (/^switchboard seatbelt:/.test(message)) {
+    return "approval_required";
+  }
   if (/^mandate "[^"]+" is expired$/.test(message)) {
     return "expired";
   }
@@ -1189,11 +1301,18 @@ async function routerForConfiguredProfiles(
     };
   }
 
+  const seatbelt = seatbeltRouterOptions({
+    repoPath: configCwdBase(loaded, context.cwd),
+    mandate,
+    disabled: context.noSeatbelt === true
+  });
+
   return {
     ok: true,
     mandate,
     router: new GenericMcpRouter(profiles, {
       auditLogger: createJsonlAuditLogger(),
+      ...(seatbelt ? { seatbelt } : {}),
       ...(mandate
         ? {
             mandateId: mandate.id,
@@ -1214,6 +1333,54 @@ async function routerForConfiguredProfiles(
           }
         : {})
     })
+  };
+}
+
+/**
+ * Build the router's seatbelt options for one request. With a pass bound,
+ * trips queue approvals under that pass (expiring with it); with no pass
+ * they queue under the synthetic "seatbelt" id with the default window. The
+ * policy itself always comes from the machine-level global config.
+ */
+export function seatbeltRouterOptions(options: {
+  repoPath: string;
+  mandate: MandateWithStatus | undefined;
+  disabled: boolean;
+}): SeatbeltRouterOptions | undefined {
+  const policy = resolveSeatbeltPolicy({ disabled: options.disabled });
+  if (!policy.enabled) {
+    return undefined;
+  }
+
+  if (options.mandate) {
+    return {
+      policy,
+      approvals: {
+        mandateId: options.mandate.id,
+        ...(options.mandate.mandateUid
+          ? { mandateUid: options.mandate.mandateUid }
+          : {}),
+        repoPath: options.mandate.repoPath,
+        branch: options.mandate.branch,
+        expiresAt: options.mandate.expiresAt
+      }
+    };
+  }
+
+  let branch: string | undefined;
+  try {
+    branch = resolveGitWorktreeBinding(options.repoPath)?.branch;
+  } catch {
+    branch = undefined;
+  }
+
+  return {
+    policy,
+    approvals: {
+      mandateId: seatbeltAmbientMandateId,
+      repoPath: options.repoPath,
+      branch: branch ?? "-"
+    }
   };
 }
 
@@ -1346,6 +1513,135 @@ function runGit(args: string[], cwd: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** A daemon older than this is reported as orphaned by doctor. */
+export const orphanedDaemonMaxAgeMs = 7 * 86_400_000;
+
+export interface OrphanedDaemonFinding {
+  pid: number;
+  reason: "repo-path-missing" | "over-max-age" | "runtime-dir-missing";
+  detail: string;
+  runtimeDir?: string;
+  startedAt?: string;
+}
+
+export interface DetectOrphanedDaemonsOptions extends DaemonCommandOptions {
+  now?: () => Date;
+  /** Injectable for tests; defaults to a `ps` scan of this user's processes. */
+  listProcesses?: () => Array<{ pid: number; command: string }>;
+  pathExists?: (path: string) => boolean;
+}
+
+/**
+ * Heuristics for daemons that outlived their session: the tracked daemon's
+ * recorded repo path no longer exists, the tracked daemon has been running
+ * past the age limit, or a `daemon run` process points at a runtime dir
+ * (e.g. a deleted test sandbox) that no longer exists.
+ */
+export async function detectOrphanedDaemons(
+  options: DetectOrphanedDaemonsOptions = {}
+): Promise<OrphanedDaemonFinding[]> {
+  const now = options.now ?? (() => new Date());
+  const pathExists = options.pathExists ?? existsSync;
+  const listProcesses = options.listProcesses ?? listDaemonRunProcesses;
+  const findings: OrphanedDaemonFinding[] = [];
+  const paths = resolveDaemonPaths(options);
+  const status = getDaemonStatus(paths);
+
+  if (status.state === "running") {
+    findings.push(...trackedDaemonFindings(status.daemon, now(), pathExists));
+  }
+
+  let processes: Array<{ pid: number; command: string }>;
+  try {
+    processes = listProcesses();
+  } catch {
+    processes = [];
+  }
+  for (const processInfo of processes) {
+    const match = /daemon\s+run\s+--runtime-dir\s+(\S+)/.exec(
+      processInfo.command
+    );
+    if (!match?.[1]) {
+      continue;
+    }
+
+    const runtimeDir = match[1];
+    if (pathExists(runtimeDir)) {
+      continue;
+    }
+    if (findings.some((finding) => finding.pid === processInfo.pid)) {
+      continue;
+    }
+
+    findings.push({
+      pid: processInfo.pid,
+      reason: "runtime-dir-missing",
+      runtimeDir,
+      detail: `daemon pid ${processInfo.pid} serves runtime dir ${runtimeDir}, which no longer exists (likely a deleted test sandbox)`
+    });
+  }
+
+  return findings;
+}
+
+function trackedDaemonFindings(
+  daemon: DaemonState,
+  now: Date,
+  pathExists: (path: string) => boolean
+): OrphanedDaemonFinding[] {
+  const findings: OrphanedDaemonFinding[] = [];
+  if (daemon.cwd && !pathExists(daemon.cwd)) {
+    findings.push({
+      pid: daemon.pid,
+      reason: "repo-path-missing",
+      startedAt: daemon.startedAt,
+      detail: `daemon pid ${daemon.pid} was started for ${daemon.cwd}, which no longer exists`
+    });
+  }
+
+  const startedAtMs = Date.parse(daemon.startedAt);
+  if (
+    Number.isFinite(startedAtMs) &&
+    now.getTime() - startedAtMs > orphanedDaemonMaxAgeMs
+  ) {
+    findings.push({
+      pid: daemon.pid,
+      reason: "over-max-age",
+      startedAt: daemon.startedAt,
+      detail: `daemon pid ${daemon.pid} has been running since ${daemon.startedAt}, past the ${Math.round(orphanedDaemonMaxAgeMs / 86_400_000)}-day limit`
+    });
+  }
+
+  return findings;
+}
+
+// Fixed argv through execFileSync (no shell): the scan reads this user's
+// process table and never interpolates input.
+function listDaemonRunProcesses(): Array<{ pid: number; command: string }> {
+  const output = execFileSync("ps", ["-axo", "pid=,command="], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+
+  const processes: Array<{ pid: number; command: string }> = [];
+  for (const line of output.split("\n")) {
+    const match = /^\s*(\d+)\s+(.*)$/.exec(line);
+    if (!match?.[1] || !match[2]) {
+      continue;
+    }
+    const pid = Number(match[1]);
+    if (!Number.isSafeInteger(pid) || pid === process.pid) {
+      continue;
+    }
+    if (!match[2].includes("daemon run --runtime-dir")) {
+      continue;
+    }
+    processes.push({ pid, command: match[2] });
+  }
+
+  return processes;
 }
 
 async function listen(server: Server, socketPath: string): Promise<void> {

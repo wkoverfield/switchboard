@@ -65,6 +65,20 @@ import {
   type SetupRollbackResult,
   writeGlobalSwitchboardConfig,
   type WrittenGlobalConfig,
+  claudeHookCommandFromLaunch,
+  createApprovalRequest,
+  createJsonlAuditLogger,
+  evaluateSeatbelt,
+  findApprovedApprovalRequest,
+  installClaudeHooks,
+  resolveClaudeUserSettingsPath,
+  resolveSeatbeltPolicy,
+  seatbeltAmbientMandateId,
+  seatbeltApprovalWindowMs,
+  seatbeltDenialMessage,
+  uninstallClaudeHooks,
+  type AuditAction,
+  type InstalledClaudeHooks,
   createProviderAddPlan,
   createKeychainSecretStore,
   describeSecretBackendError,
@@ -124,13 +138,16 @@ import {
   serveSwitchboardMcpStdio,
   testStdioUpstreamProfile,
   type NamespacedTool,
+  type SeatbeltRouterOptions,
   type StdioProfileTestOptions,
   type StdioProfileTestResult,
   type StdioUpstreamProfile
 } from "@switchboard-mcp/mcp-runtime";
 import {
   daemonStatus,
+  detectOrphanedDaemons,
   runDaemon,
+  seatbeltRouterOptions,
   startDaemon,
   stopDaemon,
   type StartDaemonResult,
@@ -163,6 +180,7 @@ const providerPresetSchemaVersion = "switchboard.provider-preset.v1";
 const providerPresetCheckSchemaVersion = "switchboard.provider-preset-check.v1";
 const providerAddSchemaVersion = "switchboard.provider-add.v1";
 const setupSchemaVersion = "switchboard.setup.v1";
+const hooksSchemaVersion = "switchboard.hooks.v1";
 const setupRollbackSchemaVersion = "switchboard.setup-rollback.v1";
 const errorSchemaVersion = "switchboard.error.v1";
 
@@ -555,6 +573,7 @@ export interface ProgramIo {
         branch?: string;
       };
       toolPolicy?: MandateToolPolicy;
+      seatbelt?: SeatbeltRouterOptions;
       denyAll?: { reason: string };
     }
   ) => Promise<void>;
@@ -586,6 +605,7 @@ export interface ProgramIo {
       approvalWaitMs?: number;
       cwd?: string;
       strict?: boolean;
+      seatbelt?: boolean;
     }
   ) => Promise<void>;
   secretStore?: SecretStore;
@@ -715,6 +735,22 @@ export function createProgram(io: ProgramIo = {}): Command {
         id,
         status,
         ...(options.reason ? { reason: options.reason } : {})
+      });
+      await safeAuditLog(auditLogger, {
+        action: "approval_decision",
+        status: status === "approved" ? "ok" : "error",
+        approvalDecision: status,
+        approvalRequestId: request.id,
+        approvalGateId: request.approvalGateId,
+        approvalGatePattern: request.approvalGatePattern,
+        toolName: request.toolName,
+        mandateId: request.mandateId,
+        ...(request.mandateUid ? { mandateUid: request.mandateUid } : {}),
+        repoPath: request.repoPath,
+        branch: request.branch,
+        ...(status === "denied" && options.reason
+          ? { error: options.reason }
+          : {})
       });
       if (options.json) {
         writeOut(JSON.stringify({ path, request }, null, 2));
@@ -890,6 +926,76 @@ export function createProgram(io: ProgramIo = {}): Command {
         process.exitCode = 1;
       }
     });
+
+  auditCommand
+    .command("append")
+    .description("Append one event to the local audit log (used by harness hooks).")
+    .requiredOption(
+      "--action <action>",
+      "event action: hook_denial, command_run, or tool_call"
+    )
+    .option("--status <status>", "ok or error", "error")
+    .option("--tool <name>", "tool the event is about, like Bash")
+    .option("--command <text>", "command text the event is about")
+    .option("--reason <text>", "human reason recorded as the entry error")
+    .option("--source <text>", "enforcement surface, like claude-hook")
+    .option("--json", "print machine-readable JSON")
+    .action(
+      async (options: {
+        action: string;
+        status: string;
+        tool?: string;
+        command?: string;
+        reason?: string;
+        source?: string;
+        json?: boolean;
+      }) => {
+        // Commander hands a repeated flag to the parent command, so accept
+        // --json from either `audit append --json` or `audit --json append`.
+        const json =
+          options.json ?? auditCommand.opts<{ json?: boolean }>().json;
+        const allowedActions: AuditAction[] = [
+          "hook_denial",
+          "command_run",
+          "tool_call"
+        ];
+        const action = allowedActions.find((item) => item === options.action);
+        if (!action) {
+          writeCommandError({
+            json,
+            code: "invalid_audit_action",
+            message: `--action must be one of: ${allowedActions.join(", ")}`,
+            nextActions: []
+          });
+          return;
+        }
+        if (options.status !== "ok" && options.status !== "error") {
+          writeCommandError({
+            json,
+            code: "invalid_audit_status",
+            message: "--status must be ok or error",
+            nextActions: []
+          });
+          return;
+        }
+
+        const path = io.auditLogPath ?? resolveAuditLogPath();
+        const entry = {
+          action,
+          status: options.status,
+          ...(options.tool ? { toolName: options.tool } : {}),
+          ...(options.command ? { command: options.command } : {}),
+          ...(options.reason ? { error: options.reason } : {}),
+          ...(options.source ? { source: options.source } : {})
+        } as const;
+        await createJsonlAuditLogger({ path }).log(entry);
+        if (json) {
+          writeOut(JSON.stringify({ ok: true, path, entry }, null, 2));
+        } else {
+          writeOut(`Appended ${action} entry to ${path}`);
+        }
+      }
+    );
 
   program
     .command("run")
@@ -2732,6 +2838,10 @@ export function createProgram(io: ProgramIo = {}): Command {
       "--strict",
       "deny all routed calls when no pass is bound (default-deny)"
     )
+    .option(
+      "--no-seatbelt",
+      "disable the ambient catastrophe denylist for this session"
+    )
     .action(
       async (options: {
         runtimeDir?: string;
@@ -2739,6 +2849,7 @@ export function createProgram(io: ProgramIo = {}): Command {
         approvalWait?: string;
         autoStart?: boolean;
         strict?: boolean;
+        seatbelt?: boolean;
       }) => {
         const globalOptions = program.opts<{ cwd?: string }>();
         const daemonOptions = {
@@ -2795,7 +2906,8 @@ export function createProgram(io: ProgramIo = {}): Command {
             cwd: desiredCwd,
             ...(mandate ? { mandateId: mandate.id } : {}),
             ...(approvalWaitMs > 0 ? { approvalWaitMs } : {}),
-            ...(options.strict ? { strict: true } : {})
+            ...(options.strict ? { strict: true } : {}),
+            ...(options.seatbelt === false ? { seatbelt: false } : {})
           }
         );
       }
@@ -2809,7 +2921,15 @@ export function createProgram(io: ProgramIo = {}): Command {
       "--strict",
       "deny all routed calls when no pass is bound (default-deny)"
     )
-    .action(async (options: { mandate?: string; strict?: boolean }) => {
+    .option(
+      "--no-seatbelt",
+      "disable the ambient catastrophe denylist for this session"
+    )
+    .action(async (options: {
+      mandate?: string;
+      strict?: boolean;
+      seatbelt?: boolean;
+    }) => {
       const globalOptions = program.opts<{ cwd?: string }>();
       const loaded = loadSwitchboardConfig(optionsFromCwd(globalOptions.cwd));
 
@@ -2861,8 +2981,26 @@ export function createProgram(io: ProgramIo = {}): Command {
         return;
       }
 
+      const seatbelt = seatbeltRouterOptions({
+        repoPath: configCwdBase(loaded, globalOptions.cwd),
+        mandate,
+        disabled: options.seatbelt === false
+      });
       await serveMcp(profiles, {
         auditLogger,
+        ...(seatbelt
+          ? {
+              seatbelt: {
+                ...seatbelt,
+                approvals: {
+                  ...seatbelt.approvals,
+                  ...(io.approvalStorePath
+                    ? { storePath: io.approvalStorePath }
+                    : {})
+                }
+              }
+            }
+          : {}),
         ...(mandate
           ? {
               mandateId: mandate.id,
@@ -4865,6 +5003,237 @@ export function createProgram(io: ProgramIo = {}): Command {
       }
     );
 
+  const hooksCommand = program
+    .command("hooks")
+    .description(
+      "Manage harness-level tripwire hooks that mirror the seatbelt denylist."
+    );
+
+  hooksCommand
+    .command("install <client>")
+    .description(
+      "Install the PreToolUse Bash tripwire into user-scope Claude Code settings."
+    )
+    .option("--json", "print machine-readable JSON")
+    .action(async (client: string, options: { json?: boolean }) => {
+      if (client !== "claude") {
+        writeCommandError({
+          json: options.json,
+          code: "unsupported_hooks_client",
+          message: `hooks are supported for claude only, not "${client}"`,
+          nextActions: ["switchboard hooks install claude"]
+        });
+        return;
+      }
+
+      const launch = resolveInstallLaunch({ commandArgs: [] });
+      let installed: InstalledClaudeHooks;
+      try {
+        installed = await installClaudeHooks({
+          ...(io.homeDir ? { homeDir: io.homeDir } : {}),
+          hookCommand: claudeHookCommandFromLaunch(launch)
+        });
+      } catch (error) {
+        writeCommandError({
+          json: options.json,
+          code: "hooks_install_failed",
+          message: messageFromError(error),
+          nextActions: []
+        });
+        return;
+      }
+
+      if (options.json) {
+        writeOut(
+          JSON.stringify(
+            {
+              ok: true,
+              schemaVersion: hooksSchemaVersion,
+              client: "claude",
+              action: installed.action,
+              targetPath: installed.targetPath,
+              backupPath: installed.backupPath,
+              hookCommand: installed.hookCommand
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
+
+      if (installed.action === "noop") {
+        writeOut(
+          `Claude Code Bash tripwire is already installed (${installed.targetPath}).`
+        );
+      } else {
+        writeOut(
+          `${installed.action === "created" ? "Created" : "Updated"} ${installed.targetPath} with the Switchboard Bash tripwire.` +
+            (installed.backupPath ? `\nBackup: ${installed.backupPath}` : "")
+        );
+        writeOut(
+          "The hook denies catastrophe-class shell commands using the seatbelt denylist. It is harness-level, not OS enforcement."
+        );
+      }
+    });
+
+  hooksCommand
+    .command("uninstall <client>")
+    .description(
+      "Remove the Switchboard Bash tripwire from user-scope Claude Code settings."
+    )
+    .option("--json", "print machine-readable JSON")
+    .action(async (client: string, options: { json?: boolean }) => {
+      if (client !== "claude") {
+        writeCommandError({
+          json: options.json,
+          code: "unsupported_hooks_client",
+          message: `hooks are supported for claude only, not "${client}"`,
+          nextActions: ["switchboard hooks uninstall claude"]
+        });
+        return;
+      }
+
+      let removed: Awaited<ReturnType<typeof uninstallClaudeHooks>>;
+      try {
+        removed = await uninstallClaudeHooks(
+          io.homeDir ? { homeDir: io.homeDir } : {}
+        );
+      } catch (error) {
+        writeCommandError({
+          json: options.json,
+          code: "hooks_uninstall_failed",
+          message: messageFromError(error),
+          nextActions: []
+        });
+        return;
+      }
+
+      if (options.json) {
+        writeOut(
+          JSON.stringify(
+            {
+              ok: true,
+              schemaVersion: hooksSchemaVersion,
+              client: "claude",
+              action: removed.action,
+              targetPath: removed.targetPath,
+              backupPath: removed.backupPath
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
+
+      writeOut(
+        removed.action === "noop"
+          ? `No Switchboard tripwire is installed (${removed.targetPath}).`
+          : `Removed the Switchboard Bash tripwire from ${removed.targetPath}.` +
+              (removed.backupPath ? `\nBackup: ${removed.backupPath}` : "")
+      );
+    });
+
+  hooksCommand
+    .command("check")
+    .description(
+      "Hook runtime: read a PreToolUse event on stdin and deny seatbelt trips."
+    )
+    .action(async () => {
+      // Fail open on every internal error: a broken hook must never block
+      // normal commands. Denials are the only output; anything else is
+      // silence plus exit 0, which defers to the harness's own permission
+      // flow.
+      try {
+        const raw = await readSecretFromStdin();
+        const input = JSON.parse(raw) as {
+          tool_name?: unknown;
+          tool_input?: { command?: unknown };
+          cwd?: unknown;
+        };
+        const command = input.tool_input?.command;
+        if (typeof command !== "string" || command.trim().length === 0) {
+          return;
+        }
+
+        const policy = resolveSeatbeltPolicy(
+          io.homeDir ? { homeDir: io.homeDir } : {}
+        );
+        const trip = evaluateSeatbelt(command, policy);
+        if (!trip) {
+          return;
+        }
+
+        const repoPath =
+          typeof input.cwd === "string" && input.cwd.length > 0
+            ? resolve(input.cwd)
+            : process.cwd();
+        const storePath = io.approvalStorePath
+          ? { path: io.approvalStorePath }
+          : {};
+        const approved = await findApprovedApprovalRequest({
+          mandateId: seatbeltAmbientMandateId,
+          repoPath,
+          toolName: "Bash",
+          approvalGateId: trip.gateId,
+          ...storePath
+        });
+        if (approved) {
+          return;
+        }
+
+        const request = await createApprovalRequest({
+          mandateId: seatbeltAmbientMandateId,
+          repoPath,
+          branch: "-",
+          toolName: "Bash",
+          approvalGateId: trip.gateId,
+          approvalGatePattern: trip.pattern.pattern,
+          approvalGateReason: trip.pattern.reason,
+          approvalGateRisk: "critical",
+          approvalGateLabels: ["seatbelt"],
+          expiresAt: new Date(
+            Date.now() + seatbeltApprovalWindowMs
+          ).toISOString(),
+          ...storePath
+        });
+        const reason = seatbeltDenialMessage({
+          pattern: trip.pattern,
+          approvalRequestId: request.id
+        });
+        await safeAuditLog(
+          createJsonlAuditLogger(
+            io.auditLogPath ? { path: io.auditLogPath } : {}
+          ),
+          {
+            action: "hook_denial",
+            status: "error",
+            toolName: "Bash",
+            source: "claude-hook",
+            command,
+            cwd: repoPath,
+            mandateId: seatbeltAmbientMandateId,
+            approvalRequestId: request.id,
+            approvalGateId: trip.gateId,
+            approvalGatePattern: trip.pattern.pattern,
+            error: reason
+          }
+        );
+        writeOut(
+          JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: "PreToolUse",
+              permissionDecision: "deny",
+              permissionDecisionReason: reason
+            }
+          })
+        );
+      } catch {
+        // Swallowed by design; see above.
+      }
+    });
+
   async function runMachineSetup(context: {
     options: {
       json?: boolean;
@@ -5208,15 +5577,39 @@ export function createProgram(io: ProgramIo = {}): Command {
         });
       }
 
-      // Step: hooks. Reserved: nothing is installed until the machine
-      // denylist ships; the recorded choice above is what that release
-      // will respect.
-      const hooksStep = {
-        status: "pending" as const,
-        reason:
-          "Hook install is reserved until the machine denylist ships in a later release; nothing was installed.",
-        enabled: globalConfig.hooks === "enabled"
-      };
+      // Step: hooks. Installs the Claude Code Bash tripwire that mirrors the
+      // seatbelt denylist, unless --no-hooks was recorded for this machine.
+      let hooksStep: MachineSetupHooksStep;
+      if (globalConfig.hooks === "enabled") {
+        const installedHooks = await installClaudeHooks({
+          ...homeOptions,
+          hookCommand: claudeHookCommandFromLaunch(launch)
+        });
+        if (installedHooks.action !== "noop") {
+          await recordChange({
+            kind: "claude-settings",
+            path: installedHooks.targetPath,
+            action: installedHooks.action,
+            backupPath: installedHooks.backupPath
+          });
+        }
+        hooksStep = {
+          status:
+            installedHooks.action === "noop" ? "already-installed" : "installed",
+          enabled: true,
+          targetPath: installedHooks.targetPath,
+          backupPath: installedHooks.backupPath,
+          hookCommand: installedHooks.hookCommand
+        };
+      } else {
+        hooksStep = {
+          status: "disabled",
+          enabled: false,
+          targetPath: resolveClaudeUserSettingsPath(homeOptions),
+          backupPath: null,
+          hookCommand: null
+        };
+      }
 
       const auditLogPath = io.auditLogPath ?? resolveAuditLogPath(homeOptions);
       const payload: MachineSetupPayload = {
@@ -6613,6 +7006,9 @@ async function createDoctorResult(options: {
     ...(options.homeDir ? { homeDir: options.homeDir } : {})
   });
   const bypassFindings = importPlan.bypassFindings;
+  const orphanedDaemons = await detectOrphanedDaemons().catch(
+    () => [] as Awaited<ReturnType<typeof detectOrphanedDaemons>>
+  );
   const checks = [
     {
       name: "config-schema",
@@ -6648,6 +7044,16 @@ async function createDoctorResult(options: {
       name: "direct-mcp-bypass",
       ok: bypassFindings.every((finding) => finding.status === "accepted"),
       message: bypassCheckSummary(bypassFindings)
+    },
+    {
+      name: "daemon-hygiene",
+      ok: orphanedDaemons.length === 0,
+      message:
+        orphanedDaemons.length === 0
+          ? "No orphaned Switchboard daemons were found."
+          : `${orphanedDaemons.length} orphaned daemon(s): ${orphanedDaemons
+              .map((finding) => finding.detail)
+              .join("; ")}. Stop the tracked daemon with switchboard daemon stop; kill stray pids with kill <pid>.`
     }
   ];
   const ok = checks.every((check) => check.ok);
@@ -10097,6 +10503,14 @@ interface MachineSetupClientStep {
   backupPath: string | null;
 }
 
+interface MachineSetupHooksStep {
+  status: "installed" | "already-installed" | "disabled";
+  enabled: boolean;
+  targetPath: string;
+  backupPath: string | null;
+  hookCommand: string | null;
+}
+
 interface MachineSetupPayload {
   ok: true;
   schemaVersion: typeof setupSchemaVersion;
@@ -10136,7 +10550,7 @@ interface MachineSetupPayload {
       backupPath: string | null;
       hooks: "enabled" | "disabled";
     };
-    hooks: { status: "pending"; reason: string; enabled: boolean };
+    hooks: MachineSetupHooksStep;
   };
   changes: Omit<SetupManifestEntry, "recordedAt">[];
   manifestPath: string;
@@ -10220,9 +10634,19 @@ function formatMachineSetup(payload: MachineSetupPayload): string {
             ? ` (backup: ${globalConfig.backupPath})`
             : "")
   );
-  lines.push(
-    `Hooks: pending, ${payload.steps.hooks.enabled ? "enabled" : "disabled"} when they ship (nothing installed yet)`
-  );
+  const hooks = payload.steps.hooks;
+  if (hooks.status === "disabled") {
+    lines.push(
+      "Hooks: disabled on this machine (enable with switchboard hooks install claude)"
+    );
+  } else if (hooks.status === "already-installed") {
+    lines.push(`Hooks: Bash tripwire already installed (${hooks.targetPath})`);
+  } else {
+    lines.push(
+      `Hooks: installed Bash tripwire in ${hooks.targetPath}` +
+        (hooks.backupPath ? ` (backup: ${hooks.backupPath})` : "")
+    );
+  }
 
   lines.push("");
   lines.push(`Audit log: ${payload.auditLogPath}`);
@@ -11718,6 +12142,7 @@ async function serveProfilesOverStdio(
       branch?: string;
     };
     toolPolicy?: MandateToolPolicy;
+    seatbelt?: SeatbeltRouterOptions;
     denyAll?: { reason: string };
   } = {}
 ): Promise<void> {
@@ -11728,6 +12153,7 @@ async function serveProfilesOverStdio(
       ...(options.mandateId ? { mandateId: options.mandateId } : {}),
       ...(options.auditContext ? { auditContext: options.auditContext } : {}),
       ...(options.toolPolicy ? { toolPolicy: options.toolPolicy } : {}),
+      ...(options.seatbelt ? { seatbelt: options.seatbelt } : {}),
       ...(options.denyAll ? { denyAll: options.denyAll } : {})
     }
   );

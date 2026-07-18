@@ -20,7 +20,11 @@ import {
 
 export const setupManifestSchemaVersion = "switchboard.setup-manifest.v1";
 
-export type SetupWriteKind = "repo-config" | "client-config" | "global-config";
+export type SetupWriteKind =
+  | "repo-config"
+  | "client-config"
+  | "global-config"
+  | "claude-settings";
 
 export interface SetupManifestEntry {
   kind: SetupWriteKind;

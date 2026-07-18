@@ -49,6 +49,14 @@ daemon.json
 `daemon.json` stores the PID, socket path, and start time with private file
 permissions. `switchboard daemon stop` removes stale or invalid state.
 
+A daemon that receives no requests for 60 minutes exits cleanly and removes
+its own socket and state. The next `switchboard mcp` call auto-starts a
+fresh daemon, so idle self-termination costs one startup instead of leaving
+orphaned processes behind. `switchboard doctor` additionally reports
+daemons that look orphaned: a recorded repo path that no longer exists, a
+daemon running past a 7-day age limit, or a `daemon run` process whose
+runtime directory was deleted.
+
 ## Daemon Tool Discovery
 
 `switchboard daemon tools` asks the running daemon to load the active

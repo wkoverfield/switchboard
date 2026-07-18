@@ -18,7 +18,14 @@ export type AuditAction =
   | "profile_test"
   | "tool_call"
   | "approval_elicitation"
-  | "command_run";
+  | "command_run"
+  // A harness-level tripwire (e.g. the Claude Code Bash hook) denied a
+  // command before it ran. Appended through the CLI so hook-layer and
+  // daemon-layer denials land in one stream.
+  | "hook_denial"
+  // A human decided an approval request through the CLI, so denial and
+  // approval sit in the same stream as the tool calls they gate.
+  | "approval_decision";
 export type AuditStatus = "ok" | "error";
 
 export interface AuditLogEntry {
@@ -42,6 +49,8 @@ export interface AuditLogEntry {
   command?: string;
   args?: string[];
   cwd?: string;
+  /** Which enforcement surface produced the entry, e.g. "claude-hook". */
+  source?: string;
   envKeys?: string[];
   exitCode?: number | null;
   stdoutSnippet?: string;
@@ -533,6 +542,7 @@ function redactAuditEntry(
 ): Omit<AuditLogEntry, "version" | "timestamp"> {
   return {
     ...entry,
+    ...(entry.command ? { command: redactSecretLikeText(entry.command) } : {}),
     ...(entry.args
       ? { args: entry.args.map((arg) => redactSecretLikeText(arg)) }
       : {}),
@@ -550,6 +560,7 @@ function redactSecretLikeText(value: string): string {
   return value
     .replace(/https?:\/\/([^/\s:@]+):([^/\s@]+)@/gi, "https://[redacted]@")
     .replace(/\b(sk-[A-Za-z0-9_-]{8,})\b/g, "[redacted]")
+    .replace(/\b([rs]k_(?:live|test)_[A-Za-z0-9]{8,})\b/g, "[redacted]")
     .replace(/\b(gh[pousr]_[A-Za-z0-9_]{8,})\b/g, "[redacted]")
     .replace(/\b(xox[baprs]-[A-Za-z0-9-]{8,})\b/g, "[redacted]")
     .replace(

@@ -28,9 +28,17 @@ export interface WrittenGlobalConfig {
 
 const policiesBlock = [
   "# Machine-level policy stanzas (policySchema: defaultMode,",
-  '# requireConfirmation, hideTools). The "default" stanza is reserved for',
-  "# the machine-wide agent policy; it stays empty and inert until it",
-  "# carries rules.",
+  '# requireConfirmation, hideTools, seatbelt). The "default" stanza is the',
+  "# machine-wide agent policy. Empty means the built-in seatbelt",
+  "# catastrophe denylist applies unchanged; tune it with, for example:",
+  "#   default:",
+  "#     seatbelt:",
+  "#       add:",
+  "#         - name: my-pattern",
+  '#           pattern: "\\\\bmy-cli\\\\s+launch-prod\\\\b"',
+  '#           reason: "launches production"',
+  "#       remove: [route53-record-change]",
+  '# Turn the seatbelt off entirely with a top-level "seatbelt: off" line.',
   "policies:",
   "  default: {}"
 ].join("\n");
