@@ -551,6 +551,82 @@ export async function updateMandateHandoff(
   });
 }
 
+export interface RevokeMandateCascadeOptions {
+  id: string;
+  repoPath: string;
+  reason?: string | undefined;
+  handoffBy?: string | undefined;
+  path?: string;
+  now?: () => Date;
+}
+
+export interface RevokeMandateCascadeResult {
+  /** The target plus every open descendant, all now cancelled, root first. */
+  revoked: MandateWithStatus[];
+}
+
+/**
+ * Cancel a mandate and every open descendant in one pass (cascading
+ * revocation). Killing a parent invalidates its whole subtree: each affected
+ * mandate is set to handoff state "cancelled", so it resolves as closed and
+ * can no longer bind a routed call. Unlike a single handoff, this does not
+ * refuse when children are open; the whole tree is the point. Already-closed
+ * descendants are left as they are.
+ */
+export async function revokeMandateCascade(
+  options: RevokeMandateCascadeOptions
+): Promise<RevokeMandateCascadeResult> {
+  const id = normalizeMandateId(options.id);
+  if (!id) {
+    throw new Error("mandate id is required");
+  }
+  const repoPath = resolve(options.repoPath);
+  const now = options.now ?? (() => new Date());
+  const revokedAt = now();
+  if (!Number.isFinite(revokedAt.getTime())) {
+    throw new Error("mandate revocation time is invalid");
+  }
+  const path = options.path ?? resolveMandateStorePath();
+  const reason = normalizeOptionalText(options.reason, "revocation reason");
+  const handoffBy = normalizeOptionalText(options.handoffBy, "revoked by");
+
+  return withMandateStoreLock(path, async () => {
+    const store = await readMandateStore({ path });
+    const targetIndex = findLatestMandateIndex(store.mandates, id, repoPath);
+    if (targetIndex === -1) {
+      throw new Error(`mandate "${id}" was not found for ${resolve(repoPath)}`);
+    }
+    const target = store.mandates[targetIndex];
+    if (!target) {
+      throw new Error(`mandate "${id}" was not found for ${resolve(repoPath)}`);
+    }
+
+    const affected = [target, ...descendantMandates(store.mandates, target)];
+    const revoked: MandateWithStatus[] = [];
+    for (const mandate of affected) {
+      const index = store.mandates.indexOf(mandate);
+      if (index === -1 || mandate.handoffState !== "open") {
+        continue;
+      }
+      const cancelled: Mandate = {
+        ...mandate,
+        handoffState: "cancelled",
+        ...(reason ? { handoffSummary: reason } : {}),
+        ...(handoffBy ? { handoffBy } : {}),
+        handoffAt: revokedAt.toISOString()
+      };
+      store.mandates[index] = cancelled;
+      revoked.push(withRuntimeStatus(cancelled, revokedAt));
+    }
+
+    if (revoked.length > 0) {
+      await writeMandateStore(store, { path });
+    }
+
+    return { revoked };
+  });
+}
+
 export async function renewMandate(
   options: RenewMandateOptions
 ): Promise<MandateWithStatus> {

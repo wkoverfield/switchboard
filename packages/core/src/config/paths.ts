@@ -6,6 +6,12 @@ export interface PathResolutionOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
+  /**
+   * Explicit Claude Code user config directory (as `--config-dir` supplies).
+   * When set it is the config dir directly, taking precedence over both
+   * `homeDir` and the `CLAUDE_CONFIG_DIR` environment variable.
+   */
+  claudeConfigDir?: string;
 }
 
 export interface RepoConfigPaths {

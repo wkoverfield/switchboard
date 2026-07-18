@@ -8,6 +8,7 @@ import {
   defaultClaudeHookCommand,
   inspectClaudeHooks,
   installClaudeHooks,
+  resolveClaudeConfigDir,
   resolveClaudeUserSettingsPath,
   uninstallClaudeHooks
 } from "./claude-hooks.js";
@@ -154,5 +155,57 @@ describe("claudeHookCommandFromLaunch", () => {
     ).toBe(
       "/usr/local/bin/node '/Users/w k/switchboard/dist/index.js' hooks check"
     );
+  });
+});
+
+describe("claude config dir resolution", () => {
+  it("uses CLAUDE_CONFIG_DIR directly (settings.json at its top level)", () => {
+    const env = { CLAUDE_CONFIG_DIR: "/home/alex/.claude-b" } as NodeJS.ProcessEnv;
+    expect(resolveClaudeConfigDir({ env })).toBe("/home/alex/.claude-b");
+    expect(resolveClaudeUserSettingsPath({ env })).toBe(
+      "/home/alex/.claude-b/settings.json"
+    );
+  });
+
+  it("lets an explicit config dir override CLAUDE_CONFIG_DIR", () => {
+    const env = { CLAUDE_CONFIG_DIR: "/home/alex/.claude-b" } as NodeJS.ProcessEnv;
+    expect(
+      resolveClaudeUserSettingsPath({ env, claudeConfigDir: "/tmp/sandbox" })
+    ).toBe("/tmp/sandbox/settings.json");
+  });
+
+  it("lets an injected home dir win over the ambient CLAUDE_CONFIG_DIR", () => {
+    // A sandbox injection must never escape into the real config dir the
+    // environment happens to point at.
+    const env = { CLAUDE_CONFIG_DIR: "/home/alex/.claude-b" } as NodeJS.ProcessEnv;
+    expect(resolveClaudeConfigDir({ env, homeDir: "/tmp/sandbox-home" })).toBe(
+      "/tmp/sandbox-home/.claude"
+    );
+  });
+
+  it("falls back to <homeDir>/.claude when no config dir is set", () => {
+    expect(
+      resolveClaudeUserSettingsPath({
+        env: {} as NodeJS.ProcessEnv,
+        homeDir: "/home/alex"
+      })
+    ).toBe("/home/alex/.claude/settings.json");
+  });
+
+  it("installs into an explicit config dir and never the env or home fallback", async () => {
+    const configDir = await mkdtemp(join(tmpdir(), "switchboard-cfgdir-"));
+    const envDir = await mkdtemp(join(tmpdir(), "switchboard-envdir-"));
+    const installed = await installClaudeHooks({
+      claudeConfigDir: configDir,
+      env: { CLAUDE_CONFIG_DIR: envDir } as NodeJS.ProcessEnv
+    });
+    expect(installed.targetPath).toBe(join(configDir, "settings.json"));
+    expect(existsSync(installed.targetPath)).toBe(true);
+    // The env-pointed dir was not written (explicit override won).
+    expect(existsSync(join(envDir, "settings.json"))).toBe(false);
+
+    const removed = await uninstallClaudeHooks({ claudeConfigDir: configDir });
+    expect(removed.action).toBe("removed");
+    expect(existsSync(installed.targetPath)).toBe(false);
   });
 });

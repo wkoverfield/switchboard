@@ -10540,6 +10540,23 @@ describe("hooks command", () => {
     expect(existsSync(installed.targetPath)).toBe(false);
   });
 
+  it("installs the claude tripwire into an explicit --config-dir", async () => {
+    const homeDir = makeTempProject();
+    const configDir = makeTempProject();
+    const output: string[] = [];
+    await createProgram({
+      writeOut: (message) => output.push(message),
+      homeDir
+    }).parseAsync(
+      ["hooks", "install", "claude", "--config-dir", configDir, "--json"],
+      { from: "user" }
+    );
+    const installed = JSON.parse(output[0] ?? "{}") as { targetPath: string };
+    expect(installed.targetPath).toBe(join(configDir, "settings.json"));
+    expect(existsSync(installed.targetPath)).toBe(true);
+    expect(existsSync(join(homeDir, ".claude", "settings.json"))).toBe(false);
+  });
+
   it("rejects unsupported hook clients", async () => {
     const errors: string[] = [];
     const program = createProgram({
@@ -10665,6 +10682,157 @@ describe("hooks command", () => {
       readSecretFromStdin: async () => "{not json"
     });
     await program.parseAsync(["hooks", "check"], { from: "user" });
+    expect(output).toEqual([]);
+  });
+});
+
+describe("attenuation command", () => {
+  it("installs and uninstalls spawn-time attenuation round-trip in a sandbox home", async () => {
+    const homeDir = makeTempProject();
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      homeDir
+    });
+    await program.parseAsync(
+      ["attenuation", "install", "claude", "--json"],
+      { from: "user" }
+    );
+    const installed = JSON.parse(output[0] ?? "{}") as {
+      ok: boolean;
+      schemaVersion: string;
+      action: string;
+      settingsPath: string;
+      agentPath: string;
+      hookCommand: string;
+    };
+    expect(installed.ok).toBe(true);
+    expect(installed.schemaVersion).toBe("switchboard.attenuation.v1");
+    expect(installed.action).toBe("created");
+    expect(installed.settingsPath).toBe(
+      join(homeDir, ".claude", "settings.json")
+    );
+    expect(installed.agentPath).toBe(
+      join(homeDir, ".claude", "agents", "scoped-worker.md")
+    );
+    expect(installed.hookCommand).toContain("attenuation rewrite-spawn");
+    const settings = JSON.parse(
+      readFileSync(installed.settingsPath, "utf8")
+    ) as { hooks: { PreToolUse: Array<{ matcher: string }> } };
+    expect(settings.hooks.PreToolUse).toMatchObject([{ matcher: "Agent|Task" }]);
+    expect(existsSync(installed.agentPath)).toBe(true);
+
+    // Status reflects the install.
+    const statusOutput: string[] = [];
+    await createProgram({
+      writeOut: (message) => statusOutput.push(message),
+      homeDir
+    }).parseAsync(["attenuation", "status", "claude", "--json"], {
+      from: "user"
+    });
+    expect(JSON.parse(statusOutput[0] ?? "{}")).toMatchObject({
+      status: "installed",
+      hookInstalled: true,
+      agentInstalled: true
+    });
+
+    // Uninstall restores the pre-install state (no settings, no agent).
+    const uninstallOutput: string[] = [];
+    await createProgram({
+      writeOut: (message) => uninstallOutput.push(message),
+      homeDir
+    }).parseAsync(["attenuation", "uninstall", "claude", "--json"], {
+      from: "user"
+    });
+    expect(JSON.parse(uninstallOutput[0] ?? "{}")).toMatchObject({
+      ok: true,
+      action: "removed"
+    });
+    expect(existsSync(installed.settingsPath)).toBe(false);
+    expect(existsSync(installed.agentPath)).toBe(false);
+  });
+
+  it("honors --config-dir, targeting that dir and not the default home", async () => {
+    const homeDir = makeTempProject();
+    const configDir = makeTempProject();
+    const output: string[] = [];
+    await createProgram({
+      writeOut: (message) => output.push(message),
+      homeDir
+    }).parseAsync(
+      ["attenuation", "install", "claude", "--config-dir", configDir, "--json"],
+      { from: "user" }
+    );
+    const installed = JSON.parse(output[0] ?? "{}") as {
+      settingsPath: string;
+      agentPath: string;
+    };
+    // The explicit config dir wins over the injected sandbox home.
+    expect(installed.settingsPath).toBe(join(configDir, "settings.json"));
+    expect(installed.agentPath).toBe(
+      join(configDir, "agents", "scoped-worker.md")
+    );
+    expect(existsSync(installed.settingsPath)).toBe(true);
+    expect(existsSync(join(homeDir, ".claude", "settings.json"))).toBe(false);
+
+    const uninstallOutput: string[] = [];
+    await createProgram({
+      writeOut: (message) => uninstallOutput.push(message),
+      homeDir
+    }).parseAsync(
+      ["attenuation", "uninstall", "claude", "--config-dir", configDir, "--json"],
+      { from: "user" }
+    );
+    expect(JSON.parse(uninstallOutput[0] ?? "{}")).toMatchObject({
+      action: "removed"
+    });
+    expect(existsSync(installed.settingsPath)).toBe(false);
+  });
+
+  it("rejects unsupported attenuation clients", async () => {
+    const errors: string[] = [];
+    const program = createProgram({
+      writeOut: () => undefined,
+      writeErr: (message) => errors.push(message),
+      homeDir: makeTempProject()
+    });
+    await program.parseAsync(["attenuation", "install", "codex"], {
+      from: "user"
+    });
+    expect(errors.join("\n")).toContain("supported for claude only");
+    process.exitCode = undefined;
+  });
+
+  it("redirects a generic spawn through the rewrite-spawn runtime", async () => {
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      readSecretFromStdin: async () =>
+        JSON.stringify({
+          tool_name: "Agent",
+          tool_input: { subagent_type: "general-purpose", prompt: "x" }
+        })
+    });
+    await program.parseAsync(["attenuation", "rewrite-spawn"], { from: "user" });
+    const decision = JSON.parse(output[0] ?? "{}") as {
+      hookSpecificOutput: { updatedInput: { subagent_type: string } };
+    };
+    expect(decision.hookSpecificOutput.updatedInput.subagent_type).toBe(
+      "scoped-worker"
+    );
+  });
+
+  it("stays silent for a specialized spawn the rewrite-spawn runtime should not touch", async () => {
+    const output: string[] = [];
+    const program = createProgram({
+      writeOut: (message) => output.push(message),
+      readSecretFromStdin: async () =>
+        JSON.stringify({
+          tool_name: "Agent",
+          tool_input: { subagent_type: "code-reviewer" }
+        })
+    });
+    await program.parseAsync(["attenuation", "rewrite-spawn"], { from: "user" });
     expect(output).toEqual([]);
   });
 });

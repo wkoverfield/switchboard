@@ -77,6 +77,14 @@ import {
   seatbeltApprovalWindowMs,
   seatbeltDenialMessage,
   uninstallClaudeHooks,
+  installClaudeAttenuation,
+  uninstallClaudeAttenuation,
+  inspectClaudeAttenuation,
+  attenuationRewriteSpawnDecision,
+  type InstalledClaudeAttenuation,
+  revokeMandateCascade,
+  buildFleetReport,
+  renderFleetReport,
   type AuditAction,
   type InstalledClaudeHooks,
   createProviderAddPlan,
@@ -181,6 +189,8 @@ const providerPresetCheckSchemaVersion = "switchboard.provider-preset-check.v1";
 const providerAddSchemaVersion = "switchboard.provider-add.v1";
 const setupSchemaVersion = "switchboard.setup.v1";
 const hooksSchemaVersion = "switchboard.hooks.v1";
+const attenuationSchemaVersion = "switchboard.attenuation.v1";
+const fleetSchemaVersion = "switchboard.fleet.v1";
 const setupRollbackSchemaVersion = "switchboard.setup-rollback.v1";
 const errorSchemaVersion = "switchboard.error.v1";
 
@@ -671,6 +681,15 @@ export function createProgram(io: ProgramIo = {}): Command {
   const readSecretFromStdin = io.readSecretFromStdin ?? readAllStdin;
   const readSecretFromPrompt = io.readSecretFromPrompt ?? readHiddenPrompt;
   const confirmSetup = io.confirmSetup ?? confirmDefaultYes;
+  // Resolution options for Claude config-dir writes (hooks + attenuation): an
+  // explicit --config-dir wins, else the injected sandbox home, else the
+  // resolver's CLAUDE_CONFIG_DIR / ~/.claude fallback.
+  const claudeConfigOptions = (
+    configDir?: string
+  ): { homeDir?: string; claudeConfigDir?: string } => ({
+    ...(io.homeDir ? { homeDir: io.homeDir } : {}),
+    ...(configDir ? { claudeConfigDir: configDir } : {})
+  });
   const program = new Command();
   let currentParseArgs: string[] = [];
   const writeCommandError = (options: CommandErrorOptions): void => {
@@ -2830,6 +2849,14 @@ export function createProgram(io: ProgramIo = {}): Command {
     .option("--runtime-dir <path>", "override daemon runtime directory")
     .option("--mandate <id>", "bind routed tool calls to an active pass")
     .option(
+      "--mint-child",
+      "mint a fresh attenuated child pass under the parent and serve it (spawn-time auto-attenuation)"
+    )
+    .option(
+      "--parent <id>",
+      "parent pass id for --mint-child (defaults to SWITCHBOARD_PARENT_MANDATE, then the repo's single active root pass)"
+    )
+    .option(
       "--approval-wait <duration>",
       "wait for approval decisions during gated tool calls, like 30s, 2m, or 0"
     )
@@ -2846,12 +2873,31 @@ export function createProgram(io: ProgramIo = {}): Command {
       async (options: {
         runtimeDir?: string;
         mandate?: string;
+        mintChild?: boolean;
+        parent?: string;
         approvalWait?: string;
         autoStart?: boolean;
         strict?: boolean;
         seatbelt?: boolean;
       }) => {
         const globalOptions = program.opts<{ cwd?: string }>();
+        if (options.mintChild) {
+          const childId = await mintScopedChildMandate({
+            cwd: globalOptions.cwd,
+            parentOption: options.parent,
+            mandateStorePath: io.mandateStorePath,
+            writeErr
+          });
+          if (!childId) {
+            process.exitCode = 1;
+            return;
+          }
+          // Bind the served endpoint to the freshly minted child, and export
+          // its id so a deeper spawn that inherits this process environment
+          // nests under the child (grandchild subset of child, not root).
+          options.mandate = childId;
+          process.env.SWITCHBOARD_PARENT_MANDATE = childId;
+        }
         const daemonOptions = {
           ...optionsFromRuntimeDir(options.runtimeDir),
           ...(globalOptions.cwd ? { cwd: globalOptions.cwd } : {})
@@ -4166,6 +4212,63 @@ export function createProgram(io: ProgramIo = {}): Command {
         )
     )
     .addCommand(
+      new Command("revoke")
+        .description(
+          "Revoke a pass and its whole subtree at once (cascading revocation)."
+        )
+        .argument("<id>", "pass id to revoke")
+        .option("--reason <text>", "why the pass tree is being revoked")
+        .option("--by <actor>", "actor revoking the pass tree")
+        .option("--json", "print machine-readable JSON")
+        .action(
+          async (
+            id: string,
+            options: { reason?: string; by?: string; json?: boolean }
+          ) => {
+            const globalOptions = program.opts<{ cwd?: string }>();
+            const repoPath = installTargetCwd(globalOptions.cwd);
+            const path = io.mandateStorePath ?? resolveMandateStorePath();
+            try {
+              const result = await revokeMandateCascade({
+                path,
+                id,
+                repoPath,
+                ...(options.reason ? { reason: options.reason } : {}),
+                ...(options.by ? { handoffBy: options.by } : {})
+              });
+              if (options.json) {
+                writeOut(
+                  JSON.stringify({ path, ...result }, null, 2)
+                );
+                return;
+              }
+              if (result.revoked.length === 0) {
+                writeOut(
+                  `Pass "${normalizeMandateId(id)}" and its subtree were already closed.`
+                );
+                return;
+              }
+              writeOut(
+                `Revoked ${result.revoked.length} pass(es): ${result.revoked
+                  .map((mandate) => mandate.id)
+                  .join(", ")}.`
+              );
+            } catch (error) {
+              const commandError = mandateCommandError(
+                error,
+                "mandate_revoke_failed"
+              );
+              writeCommandError({
+                json: options.json,
+                code: commandError.code,
+                message: commandError.message,
+                nextActions: commandError.nextActions
+              });
+            }
+          }
+        )
+    )
+    .addCommand(
       new Command("escalate")
         .description("Build a local escalation plan for a pass tree.")
         .argument("<id>", "root or child pass id to escalate")
@@ -5015,7 +5118,11 @@ export function createProgram(io: ProgramIo = {}): Command {
       "Install the PreToolUse Bash tripwire into user-scope Claude Code settings."
     )
     .option("--json", "print machine-readable JSON")
-    .action(async (client: string, options: { json?: boolean }) => {
+    .option(
+      "--config-dir <path>",
+      "Claude config dir to target (defaults to CLAUDE_CONFIG_DIR, then ~/.claude)"
+    )
+    .action(async (client: string, options: { json?: boolean; configDir?: string }) => {
       if (client !== "claude") {
         writeCommandError({
           json: options.json,
@@ -5030,7 +5137,7 @@ export function createProgram(io: ProgramIo = {}): Command {
       let installed: InstalledClaudeHooks;
       try {
         installed = await installClaudeHooks({
-          ...(io.homeDir ? { homeDir: io.homeDir } : {}),
+          ...claudeConfigOptions(options.configDir),
           hookCommand: claudeHookCommandFromLaunch(launch)
         });
       } catch (error) {
@@ -5083,7 +5190,11 @@ export function createProgram(io: ProgramIo = {}): Command {
       "Remove the Switchboard Bash tripwire from user-scope Claude Code settings."
     )
     .option("--json", "print machine-readable JSON")
-    .action(async (client: string, options: { json?: boolean }) => {
+    .option(
+      "--config-dir <path>",
+      "Claude config dir to target (defaults to CLAUDE_CONFIG_DIR, then ~/.claude)"
+    )
+    .action(async (client: string, options: { json?: boolean; configDir?: string }) => {
       if (client !== "claude") {
         writeCommandError({
           json: options.json,
@@ -5097,7 +5208,7 @@ export function createProgram(io: ProgramIo = {}): Command {
       let removed: Awaited<ReturnType<typeof uninstallClaudeHooks>>;
       try {
         removed = await uninstallClaudeHooks(
-          io.homeDir ? { homeDir: io.homeDir } : {}
+          claudeConfigOptions(options.configDir)
         );
       } catch (error) {
         writeCommandError({
@@ -5232,6 +5343,278 @@ export function createProgram(io: ProgramIo = {}): Command {
       } catch {
         // Swallowed by design; see above.
       }
+    });
+
+  const attenuationCommand = program
+    .command("attenuation")
+    .description(
+      "Spawn-time auto-attenuation: give each subagent its own attenuated child pass, opt-in and reversible."
+    );
+
+  attenuationCommand
+    .command("install <client>")
+    .description(
+      "Install the spawn-rewrite hook and scoped-worker agent into user-scope Claude Code settings. Off by default; this is the explicit opt-in."
+    )
+    .option("--json", "print machine-readable JSON")
+    .option(
+      "--config-dir <path>",
+      "Claude config dir to target (defaults to CLAUDE_CONFIG_DIR, then ~/.claude)"
+    )
+    .action(async (client: string, options: { json?: boolean; configDir?: string }) => {
+      if (client !== "claude") {
+        writeCommandError({
+          json: options.json,
+          code: "unsupported_attenuation_client",
+          message: `attenuation is supported for claude only, not "${client}"`,
+          nextActions: ["switchboard attenuation install claude"]
+        });
+        return;
+      }
+
+      const launch = resolveInstallLaunch({ commandArgs: [] });
+      let installed: InstalledClaudeAttenuation;
+      try {
+        installed = await installClaudeAttenuation({
+          ...claudeConfigOptions(options.configDir),
+          launch: {
+            command: launch.command,
+            ...(launch.commandArgs.length > 0
+              ? { commandArgs: launch.commandArgs }
+              : {})
+          }
+        });
+      } catch (error) {
+        writeCommandError({
+          json: options.json,
+          code: "attenuation_install_failed",
+          message: messageFromError(error),
+          nextActions: []
+        });
+        return;
+      }
+
+      if (options.json) {
+        writeOut(
+          JSON.stringify(
+            {
+              ok: true,
+              schemaVersion: attenuationSchemaVersion,
+              client: "claude",
+              action: installed.action,
+              settingsPath: installed.settingsPath,
+              agentPath: installed.agentPath,
+              settingsBackupPath: installed.settingsBackupPath,
+              agentBackupPath: installed.agentBackupPath,
+              hookCommand: installed.hookCommand,
+              launcherCommand: installed.launcherCommand,
+              launcherArgs: installed.launcherArgs
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
+
+      if (installed.action === "noop") {
+        writeOut(
+          `Spawn-time auto-attenuation is already installed (${installed.settingsPath}).`
+        );
+        return;
+      }
+
+      writeOut(
+        `${installed.action === "created" ? "Installed" : "Updated"} spawn-time auto-attenuation for Claude Code.`
+      );
+      writeOut(`  Hook:  ${installed.settingsPath}`);
+      if (installed.settingsBackupPath) {
+        writeOut(`         backup ${installed.settingsBackupPath}`);
+      }
+      writeOut(`  Agent: ${installed.agentPath}`);
+      if (installed.agentBackupPath) {
+        writeOut(`         backup ${installed.agentBackupPath}`);
+      }
+      writeOut(
+        "Every generic subagent spawn now runs under its own attenuated child pass (own id, own audit trail, seatbelt floor, lease bound to the parent). v1 children share the parent's tool set; the enforced attenuation is identity, audit, floor, lease, and cascading revocation, not tool subsetting."
+      );
+      writeOut("Remove it with: switchboard attenuation uninstall claude");
+    });
+
+  attenuationCommand
+    .command("uninstall <client>")
+    .description(
+      "Remove the spawn-rewrite hook and scoped-worker agent from user-scope Claude Code settings."
+    )
+    .option("--json", "print machine-readable JSON")
+    .option(
+      "--config-dir <path>",
+      "Claude config dir to target (defaults to CLAUDE_CONFIG_DIR, then ~/.claude)"
+    )
+    .action(async (client: string, options: { json?: boolean; configDir?: string }) => {
+      if (client !== "claude") {
+        writeCommandError({
+          json: options.json,
+          code: "unsupported_attenuation_client",
+          message: `attenuation is supported for claude only, not "${client}"`,
+          nextActions: ["switchboard attenuation uninstall claude"]
+        });
+        return;
+      }
+
+      let removed: Awaited<ReturnType<typeof uninstallClaudeAttenuation>>;
+      try {
+        removed = await uninstallClaudeAttenuation(
+          claudeConfigOptions(options.configDir)
+        );
+      } catch (error) {
+        writeCommandError({
+          json: options.json,
+          code: "attenuation_uninstall_failed",
+          message: messageFromError(error),
+          nextActions: []
+        });
+        return;
+      }
+
+      if (options.json) {
+        writeOut(
+          JSON.stringify(
+            {
+              ok: true,
+              schemaVersion: attenuationSchemaVersion,
+              client: "claude",
+              action: removed.action,
+              settingsPath: removed.settingsPath,
+              agentPath: removed.agentPath,
+              settingsBackupPath: removed.settingsBackupPath,
+              agentBackupPath: removed.agentBackupPath
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
+
+      writeOut(
+        removed.action === "noop"
+          ? `Spawn-time auto-attenuation is not installed (${removed.settingsPath}).`
+          : `Removed spawn-time auto-attenuation from ${removed.settingsPath} and ${removed.agentPath}.`
+      );
+    });
+
+  attenuationCommand
+    .command("status <client>")
+    .description("Report whether spawn-time auto-attenuation is installed.")
+    .option("--json", "print machine-readable JSON")
+    .option(
+      "--config-dir <path>",
+      "Claude config dir to target (defaults to CLAUDE_CONFIG_DIR, then ~/.claude)"
+    )
+    .action(async (client: string, options: { json?: boolean; configDir?: string }) => {
+      if (client !== "claude") {
+        writeCommandError({
+          json: options.json,
+          code: "unsupported_attenuation_client",
+          message: `attenuation is supported for claude only, not "${client}"`,
+          nextActions: ["switchboard attenuation status claude"]
+        });
+        return;
+      }
+
+      const inspection = await inspectClaudeAttenuation(
+        claudeConfigOptions(options.configDir)
+      );
+      if (options.json) {
+        writeOut(
+          JSON.stringify(
+            {
+              ok: true,
+              schemaVersion: attenuationSchemaVersion,
+              client: "claude",
+              status: inspection.status,
+              hookInstalled: inspection.hookInstalled,
+              agentInstalled: inspection.agentInstalled,
+              settingsPath: inspection.settingsPath,
+              agentPath: inspection.agentPath
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
+
+      writeOut(
+        inspection.status === "installed"
+          ? `Spawn-time auto-attenuation is installed (${inspection.settingsPath}).`
+          : inspection.status === "partial"
+            ? `Spawn-time auto-attenuation is partially installed (hook: ${inspection.hookInstalled}, agent: ${inspection.agentInstalled}). Re-run install or uninstall to reconcile.`
+            : `Spawn-time auto-attenuation is not installed (${inspection.settingsPath}).`
+      );
+    });
+
+  attenuationCommand
+    .command("rewrite-spawn")
+    .description(
+      "Hook runtime: read a PreToolUse Agent event on stdin and redirect a generic spawn to the scoped worker."
+    )
+    .action(async () => {
+      // Fail open on every internal error: a broken hook must never block a
+      // spawn. A redirect is the only output; anything else is silence + exit
+      // 0, deferring to the harness's own permission flow.
+      try {
+        const raw = await readSecretFromStdin();
+        const input = JSON.parse(raw) as {
+          tool_name?: unknown;
+          tool_input?: unknown;
+        };
+        const decision = attenuationRewriteSpawnDecision(input);
+        if (decision) {
+          writeOut(JSON.stringify(decision));
+        }
+      } catch {
+        // Swallowed by design; see above.
+      }
+    });
+
+  program
+    .command("fleet")
+    .description(
+      "Render the delegation tree after a wave: who spawned whom, what each pass called, and what was denied."
+    )
+    .option("--json", "print machine-readable JSON")
+    .action(async (options: { json?: boolean }) => {
+      const globalOptions = program.opts<{ cwd?: string }>();
+      const repoPath = installTargetCwd(globalOptions.cwd);
+      const mandateStorePath =
+        io.mandateStorePath ?? resolveMandateStorePath();
+      const auditLogPath = io.auditLogPath ?? resolveAuditLogPath();
+
+      const mandates = await listMandates({
+        path: mandateStorePath,
+        repoPath
+      });
+      const auditEntries = await readAuditLogEntries({ path: auditLogPath });
+      const report = buildFleetReport({
+        mandates,
+        auditEntries,
+        repoPath
+      });
+
+      if (options.json) {
+        writeOut(
+          JSON.stringify(
+            { ok: true, schemaVersion: fleetSchemaVersion, report },
+            null,
+            2
+          )
+        );
+        return;
+      }
+
+      writeOut(renderFleetReport(report));
     });
 
   async function runMachineSetup(context: {
@@ -11163,6 +11546,107 @@ function installTargetCwd(cwd: string | undefined): string {
   const repoPaths = resolveRepoConfigPaths(cwd ? { cwd } : {});
 
   return repoPaths.repoConfigPath ? dirname(repoPaths.repoConfigPath) : resolvedCwd;
+}
+
+/**
+ * Mint a fresh attenuated child mandate for a spawn and return its id.
+ *
+ * v1 default scope (ruled: IDENTITY + FLOOR) gives the child the SAME tool
+ * access as its parent but its own id, its own audit identity, a lease no
+ * later than the parent, the inherited seatbelt floor and deny lists, and
+ * cascading revocation. It does NOT trim the tool set. The parent is resolved
+ * from --parent, then SWITCHBOARD_PARENT_MANDATE, then the repo's single
+ * active root pass, so nested spawns bind to their immediate parent (the child
+ * exports its own id into the environment before serving).
+ */
+async function mintScopedChildMandate(options: {
+  cwd: string | undefined;
+  parentOption: string | undefined;
+  mandateStorePath: string | undefined;
+  writeErr: (message: string) => void;
+}): Promise<string | undefined> {
+  const repoPath = installTargetCwd(options.cwd);
+  const path = options.mandateStorePath ?? resolveMandateStorePath();
+
+  const parentId =
+    options.parentOption?.trim() ||
+    process.env.SWITCHBOARD_PARENT_MANDATE?.trim() ||
+    (await resolveSingleActiveRootMandateId(repoPath, path, options.writeErr));
+  if (!parentId) {
+    return undefined;
+  }
+
+  let parent: MandateWithStatus;
+  try {
+    parent = await resolveActiveMandate({ id: parentId, repoPath, path });
+  } catch (error) {
+    options.writeErr(
+      `error: ${mandateMessageInPassVocabulary(messageFromError(error))}`
+    );
+    return undefined;
+  }
+
+  const remainingMs = Date.parse(parent.expiresAt) - Date.now();
+  const leaseMinutes = Math.floor(remainingMs / 60_000);
+  if (!Number.isFinite(leaseMinutes) || leaseMinutes < 1) {
+    options.writeErr(
+      `error: parent pass "${parent.id}" has under a minute of lease left; renew it before minting a child`
+    );
+    return undefined;
+  }
+
+  const childTask = `scoped-${parent.id}-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+
+  try {
+    const child = await createChildMandate({
+      path,
+      parentId: parent.id,
+      task: childTask,
+      repoPath: parent.repoPath,
+      worktreePath: parent.worktreePath,
+      branch: parent.branch,
+      agentRole: parent.agentRole,
+      profiles: parent.profiles,
+      lease: `${leaseMinutes}m`,
+      delegatedBy: parent.id
+      // allowedTools intentionally omitted: v1 child inherits the parent's
+      // full tool set (identity + floor, not tool subsetting).
+    });
+    return child.id;
+  } catch (error) {
+    options.writeErr(
+      `error: ${mandateMessageInPassVocabulary(messageFromError(error))}`
+    );
+    return undefined;
+  }
+}
+
+async function resolveSingleActiveRootMandateId(
+  repoPath: string,
+  path: string,
+  writeErr: (message: string) => void
+): Promise<string | undefined> {
+  const active = (await listMandates({ path, repoPath })).filter(
+    (mandate) =>
+      mandate.runtimeStatus === "active" && !mandate.parentMandateId
+  );
+  if (active.length === 1) {
+    return active[0]?.id;
+  }
+  if (active.length === 0) {
+    writeErr(
+      "error: no active root pass found to attenuate from; grant one or pass --parent <id>"
+    );
+    return undefined;
+  }
+  writeErr(
+    `error: multiple active root passes found (${active
+      .map((mandate) => mandate.id)
+      .join(", ")}); pass --parent <id> to choose one`
+  );
+  return undefined;
 }
 
 async function resolveActiveMandateForCommand(options: {

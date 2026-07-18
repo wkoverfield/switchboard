@@ -1,4 +1,5 @@
 export * from "./approvals/approval-requests.js";
+export * from "./attenuation/claude-attenuation.js";
 export * from "./authority/authority-map.js";
 export * from "./authority/authority-status.js";
 export * from "./audit/audit-log.js";
@@ -8,6 +9,7 @@ export * from "./config/load-config.js";
 export * from "./config/gitignore.js";
 export * from "./config/paths.js";
 export * from "./daemon/daemon-state.js";
+export * from "./fleet/fleet-report.js";
 export * from "./hooks/claude-hooks.js";
 export * from "./install/client-config.js";
 export * from "./import/import-plan.js";
