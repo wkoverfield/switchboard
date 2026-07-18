@@ -68,7 +68,7 @@ import {
   claudeHookCommandFromLaunch,
   createApprovalRequest,
   createJsonlAuditLogger,
-  evaluateSeatbelt,
+  evaluateSeatbeltShell,
   findApprovedApprovalRequest,
   installClaudeHooks,
   resolveClaudeUserSettingsPath,
@@ -5160,7 +5160,7 @@ export function createProgram(io: ProgramIo = {}): Command {
         const policy = resolveSeatbeltPolicy(
           io.homeDir ? { homeDir: io.homeDir } : {}
         );
-        const trip = evaluateSeatbelt(command, policy);
+        const trip = evaluateSeatbeltShell(command, policy);
         if (!trip) {
           return;
         }

@@ -1,17 +1,16 @@
 import {
   createApprovalRequest,
   evaluateMandateToolPolicy,
-  evaluateSeatbelt,
+  evaluateSeatbeltMcp,
   findApprovedApprovalRequest,
   noopAuditLogger,
   safeAuditLog,
   seatbeltApprovalWindowMs,
-  seatbeltCallText,
   seatbeltDenialMessage,
   type AuditLogger,
   type MandateApprovalGate,
   type MandateToolPolicy,
-  type SeatbeltPattern
+  type SeatbeltPolicy
 } from "@switchboard-mcp/core";
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import {
@@ -33,7 +32,7 @@ import {
 // approval request, and an approved request lets a retry of the same
 // pattern and tool through until the approval expires.
 export interface SeatbeltRouterOptions {
-  policy: { enabled: boolean; patterns: SeatbeltPattern[] };
+  policy: SeatbeltPolicy;
   approvals: {
     mandateId: string;
     mandateUid?: string;
@@ -272,8 +271,9 @@ export class GenericMcpRouter {
       return;
     }
 
-    const trip = evaluateSeatbelt(
-      seatbeltCallText(route.namespacedName, args),
+    const trip = evaluateSeatbeltMcp(
+      route.namespacedName,
+      args,
       this.seatbelt.policy
     );
     if (!trip) {

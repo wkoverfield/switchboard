@@ -8,51 +8,64 @@ behaves exactly as before: the seatbelt only speaks up on catastrophe-class
 calls.
 
 Curation rule: a pattern ships in the default list only if the action it
-matches is IRREVERSIBLE and EXTERNALLY VISIBLE. Everyday flows must never
-trip it: Vercel preview deploys, Convex dev deploys, Stripe test-mode calls,
-dev-database teardown, and force-pushes to feature branches all pass
-untouched. False positives are treated as release blockers, not tuning
-items.
+matches is IRREVERSIBLE and EXTERNALLY VISIBLE. The goal is that everyday
+flows pass untouched: Vercel preview deploys, Convex dev and preview deploys,
+Stripe test-mode calls, dev-database teardown, and force-pushes to feature
+branches. A false positive on a common flow is treated as a release blocker,
+not a tuning item.
 
-## Where it applies
+## Two surfaces, evaluated differently
 
-- **Routed MCP calls.** Every call through `switchboard mcp` or
-  `switchboard serve` is checked against the denylist, whether or not a pass
-  is bound. Under an active pass the seatbelt is a floor beneath the pass
-  policy: a pass can narrow further, but cannot allow its way past the
+The seatbelt is enforced on two surfaces, and they do NOT use the same
+matching. Conflating them is what makes a naive denylist trip on a commit
+message or a `grep`.
+
+- **Routed MCP calls** (`switchboard mcp` / `switchboard serve`). Every call
+  is checked whether or not a pass is bound. Matching is by tool NAME plus
+  JSON arguments. Under an active pass the seatbelt is a floor beneath the
+  pass policy: a pass can narrow further, but cannot allow its way past the
   seatbelt.
-- **Agent shell commands (Claude Code).** `switchboard hooks install claude`
-  adds a PreToolUse hook on the Bash tool to `~/.claude/settings.json`. The
-  hook runs `switchboard hooks check`, which reads the same denylist from
-  the global config, so there is one source of truth for both surfaces.
-  `switchboard setup` installs the hook by default; `--no-hooks` records an
-  opt-out.
+- **Agent shell commands (Claude Code)** via `switchboard hooks install
+  claude`, which adds a PreToolUse Bash hook to `~/.claude/settings.json`
+  running `switchboard hooks check`. The shell surface does NOT substring-
+  match the command line. It splits the line into statements (on `&&`, `||`,
+  `;`, `|`, `&`, newline), identifies the invoked command of each, and:
+  - hard-excludes read-only and metadata commands from ever tripping (`cat`,
+    `grep`, `rg`, `sed`, `awk`, `ls`, `echo`, `printf`, `chmod`, `find`,
+    editors, and every `git` subcommand except `push`), and
+  - evaluates a deploy or push rule only when the invoked command actually is
+    that tool. So `git commit -m "fix vercel --prod"`, `grep "convex deploy"`,
+    and `cat scripts/deploy-prod.sh` do not trip: the invoked command is
+    `git commit`, `grep`, and `cat`, not `vercel`/`convex`/a deploy.
+
+Because the surfaces differ, coverage is not identical. The `prod-deploy-tool`
+name match applies ONLY to the MCP surface (on shell it would match filenames
+like `deploy-prod.sh`). DNS/domain/route53 and the Stripe live-mode CLI flag
+are shell-surface rules; the MCP surface covers deploy tool names and live
+secret keys in arguments. Both surfaces share one denylist source of truth
+(the global config), but each applies the rules that make sense for it.
 
 Honesty note: the hook is harness-level, not OS enforcement. It guards
 commands issued through Claude Code's Bash tool. It does not sandbox the
-machine, and a process outside the harness is not covered. If the
+machine, a process outside the harness is not covered, and a sufficiently
+obfuscated shell line (unusual quoting, indirection through a wrapper script)
+can evade the parser. It is defense-in-depth, not a boundary. If the
 `switchboard` binary is missing at hook time, the hook fails open.
 
 ## The v1 list
 
-Matching is a case-insensitive regular expression over the call text: the
-namespaced tool name plus JSON arguments for MCP calls, the raw command
-string for shell hooks. Patterns never match across `&&`, `||`, `;`, or `|`
-boundaries.
-
-| Pattern | Matches | Reason |
-| --- | --- | --- |
-| `prod-deploy-flag` | `deploy ... --prod` / `--production` | deploy command explicitly targeting production |
-| `vercel-prod` | `vercel ... --prod` | Vercel production deploy; previews deploy without `--prod` |
-| `convex-prod-deploy` | `convex deploy` | pushes to the production deployment; `npx convex dev` pushes to dev |
-| `prod-deploy-tool` | `deploy-prod` / `deploy_prod` tool names | production deploy tool call |
-| `stripe-live-secret-key` | `sk_live_...` / `rk_live_...` | live-mode secret keys move real money; `sk_test_` keys pass |
-| `stripe-live-mode-flag` | `stripe ... --live` | Stripe CLI live mode operates on real payments |
-| `vercel-dns-mutation` | `vercel dns add/rm/import` | DNS record mutation; `vercel dns ls` passes |
-| `vercel-domain-mutation` | `vercel domains add/rm/buy/move/transfer-in` | domain registration or transfer; `ls` and `inspect` pass |
-| `route53-record-change` | `change-resource-record-sets` | Route 53 DNS record mutation |
-| `force-push-default-branch` | `git push` with a force flag AND ref `main`/`master` | rewrites the default branch history; force-pushes to feature branches pass |
-| `force-push-refspec-default-branch` | `git push ... +main` / `+...:main` | a `+` refspec is a force push to the default branch |
+| Pattern | Surface | Trips on | Passes (examples) |
+| --- | --- | --- | --- |
+| `prod-deploy-flag` | shell | a deploy command with `--prod`/`--production`/`--target production` | `pnpm build`, `npm install --production` |
+| `vercel-prod` | shell + MCP | `vercel --prod`, `vercel deploy --prod`/`--target production`, `vercel promote`, `vercel alias set`; MCP: a vercel deploy tool with a production target | `vercel build --prod`, `vercel deploy` (preview), `vercel` |
+| `convex-prod-deploy` | shell + MCP | `convex deploy` with no preview flag; MCP: a convex deploy tool with no preview arg | `convex deploy --preview-create x`, `npx convex dev` |
+| `prod-deploy-tool` | MCP only | tool names like `..._deploy_prod` | any shell command (filenames like `deploy-prod.sh`) |
+| `stripe-live-secret-key` | shell + MCP | an `sk_live_`/`rk_live_` key in the command or arguments | `sk_test_...`, `pk_test_...`, `pk_live_...` |
+| `stripe-live-mode-flag` | shell | `stripe ... --live` | `stripe products list` |
+| `vercel-dns-mutation` | shell | `vercel dns add/rm/import` | `vercel dns ls/inspect` |
+| `vercel-domain-mutation` | shell | `vercel domains add/rm/buy/move/transfer-in` | `vercel domains ls/inspect` |
+| `route53-record-change` | shell | `aws ... change-resource-record-sets` | `aws route53 list-resource-record-sets` |
+| `force-push-default-branch` | shell | `git push` with a force flag (`--force`, `-f`, `--force-with-lease`, `--mirror`, or a `+` refspec) targeting `main`/`master` (including `refs/heads/main`, `HEAD:main`, `+refs/heads/main`, and `git -C <path> push`) | force-push to a feature branch; `git push origin main` without force; `main:not-main` |
 
 Destructive SQL is deliberately NOT in v1: QA teardown legitimately drops
 dev tables, and SQL patterns without target awareness cannot tell dev from

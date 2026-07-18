@@ -8,8 +8,11 @@ import type { PathResolutionOptions } from "../config/paths.js";
  * Manage the Switchboard Bash tripwire in user-scope Claude Code settings
  * (`~/.claude/settings.json`). Install merges a single PreToolUse entry and
  * never touches anything else in the file; uninstall removes exactly that
- * entry (and any containers the removal leaves empty), so an
- * install-then-uninstall round trip leaves the settings byte-identical.
+ * entry (and any containers the removal leaves empty). Install reserializes
+ * the file as canonical 2-space JSON, so an install-then-uninstall round
+ * trip restores the canonical/structural identity of the settings (byte
+ * identity holds only when the pre-install file was already canonically
+ * formatted; a file created from nothing is removed entirely on uninstall).
  * Existing files are always backed up before a write.
  */
 
