@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   allowUnsafeSecretBackendsEnv,
+  clearCallRepoCache,
   createApprovalRequest,
   createDaemonState,
   createMandate,
@@ -1183,6 +1184,424 @@ async function makePolicyRepo(): Promise<string> {
   return root;
 }
 
+describe("daemon runtime lazy repo resolution", () => {
+  const previousStateHome = process.env.XDG_STATE_HOME;
+  const previousConfigHome = process.env.XDG_CONFIG_HOME;
+
+  afterEach(() => {
+    restoreEnv("XDG_STATE_HOME", previousStateHome);
+    restoreEnv("XDG_CONFIG_HOME", previousConfigHome);
+    clearCallRepoCache();
+  });
+
+  it("resolves each call against the repo its path touches, then falls back to the global default", async () => {
+    // One session launched at a ~-like dir (no repo above it). The daemon is
+    // bound to that home dir, but each call carries a path into a different
+    // repo, so scope must follow the call, not the launch dir.
+    await setupGlobalConfigEnv();
+    const home = await mkdtemp(join(tmpdir(), "switchboard-lazy-home-"));
+    const repoA = await makeLazyRepo({ namespace: "repo_a", label: "repo-a" });
+    const repoB = await makeLazyRepo({ namespace: "repo_b", label: "repo-b" });
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "a",
+          type: "call_tool",
+          name: "repo_a_echo",
+          arguments: { message: "hi", path: join(repoA, "src", "x.ts") }
+        }),
+        { cwd: home }
+      )
+    ).resolves.toMatchObject({
+      id: "a",
+      ok: true,
+      type: "tool_result",
+      result: { content: [{ type: "text", text: "repo-a:hi" }] }
+    });
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "b",
+          type: "call_tool",
+          name: "repo_b_echo",
+          arguments: { message: "hi", path: join(repoB, "lib", "y.ts") }
+        }),
+        { cwd: home }
+      )
+    ).resolves.toMatchObject({
+      id: "b",
+      ok: true,
+      type: "tool_result",
+      result: { content: [{ type: "text", text: "repo-b:hi" }] }
+    });
+
+    // A context-free safe call: no path arg, session not in a repo, so it
+    // resolves to the machine-level global config (global profiles, no repo
+    // binding).
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "g",
+          type: "call_tool",
+          name: "global_echo",
+          arguments: { message: "hi" }
+        }),
+        { cwd: home }
+      )
+    ).resolves.toMatchObject({
+      id: "g",
+      ok: true,
+      type: "tool_result",
+      result: { content: [{ type: "text", text: "global:hi" }] }
+    });
+
+    const entries = await readAuditLogEntries({ path: resolveAuditLogPath() });
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          toolName: "repo_a_echo",
+          status: "ok",
+          resolvedRepoPath: repoA,
+          resolutionSource: "call-path"
+        }),
+        expect.objectContaining({
+          toolName: "repo_b_echo",
+          status: "ok",
+          resolvedRepoPath: repoB,
+          resolutionSource: "call-path"
+        }),
+        expect.objectContaining({
+          toolName: "global_echo",
+          status: "ok",
+          resolutionSource: "global-default"
+        })
+      ])
+    );
+    // The global-default entry binds no repo.
+    const globalEntry = entries.find(
+      (entry) => entry.toolName === "global_echo"
+    );
+    expect(globalEntry?.resolvedRepoPath).toBeUndefined();
+  });
+
+  it("keeps the seatbelt floor on for a context-free call (global default)", async () => {
+    await setupGlobalConfigEnv();
+    const home = await mkdtemp(join(tmpdir(), "switchboard-lazy-home-"));
+
+    const denied = await handleDaemonRequest(
+      JSON.stringify({
+        id: "cf",
+        type: "call_tool",
+        name: "global_deploy_prod",
+        arguments: { message: "ship it" }
+      }),
+      { cwd: home }
+    );
+    expect(denied).toMatchObject({
+      id: "cf",
+      ok: false,
+      error: expect.stringContaining("switchboard seatbelt: prod-deploy-tool")
+    });
+
+    const entries = await readAuditLogEntries({ path: resolveAuditLogPath() });
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          toolName: "global_deploy_prod",
+          status: "error",
+          resolutionSource: "global-default",
+          error: expect.stringContaining("switchboard seatbelt:")
+        })
+      ])
+    );
+  });
+
+  it("honors the session cwd for a context-free call when launched inside a repo", async () => {
+    await setupGlobalConfigEnv();
+    const repoC = await makeLazyRepo({ namespace: "repo_c", label: "repo-c" });
+
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "sc",
+          type: "call_tool",
+          name: "repo_c_echo",
+          arguments: { message: "hi" }
+        }),
+        { cwd: repoC }
+      )
+    ).resolves.toMatchObject({
+      id: "sc",
+      ok: true,
+      type: "tool_result",
+      result: { content: [{ type: "text", text: "repo-c:hi" }] }
+    });
+
+    const entries = await readAuditLogEntries({ path: resolveAuditLogPath() });
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          toolName: "repo_c_echo",
+          status: "ok",
+          resolvedRepoPath: repoC,
+          resolutionSource: "session-cwd"
+        })
+      ])
+    );
+  });
+
+  it("cannot let a resolved repo weaken the seatbelt floor (repo seatbelt: off ignored)", async () => {
+    // The call resolves to repo C by its path. Repo C's own config says
+    // `seatbelt: off`, but the floor is machine-scoped, so the catastrophe
+    // still denies.
+    await setupGlobalConfigEnv();
+    const home = await mkdtemp(join(tmpdir(), "switchboard-lazy-home-"));
+    const repoC = await makeLazyRepo({
+      namespace: "repo_c",
+      label: "repo-c",
+      seatbeltOff: true,
+      deployTool: true
+    });
+
+    const denied = await handleDaemonRequest(
+      JSON.stringify({
+        id: "floor",
+        type: "call_tool",
+        name: "repo_c_deploy_prod",
+        arguments: { message: "ship it", path: join(repoC, "deploy.ts") }
+      }),
+      { cwd: home }
+    );
+    expect(denied).toMatchObject({
+      id: "floor",
+      ok: false,
+      error: expect.stringContaining("switchboard seatbelt: prod-deploy-tool")
+    });
+
+    const entries = await readAuditLogEntries({ path: resolveAuditLogPath() });
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          toolName: "repo_c_deploy_prod",
+          status: "error",
+          resolvedRepoPath: repoC,
+          resolutionSource: "call-path",
+          error: expect.stringContaining("switchboard seatbelt:")
+        })
+      ])
+    );
+  });
+
+  it("keeps a strict session's floor when a path arg redirects to a permissive repo", async () => {
+    // The session is in a strict repo with no pass, so every call is denied.
+    // An agent adds a path arg pointing into a permissive repo to try to escape
+    // that; the only-strengthen gate keeps the strict floor.
+    await setupGlobalConfigEnv();
+    const strictRepo = await makeLazyRepo({
+      namespace: "svc",
+      label: "svc",
+      strict: true
+    });
+    const permissiveRepo = await makeLazyRepo({
+      namespace: "svc",
+      label: "PERMISSIVE"
+    });
+
+    const control = await handleDaemonRequest(
+      JSON.stringify({
+        id: "ctl",
+        type: "call_tool",
+        name: "svc_echo",
+        arguments: { message: "hi" }
+      }),
+      { cwd: strictRepo }
+    );
+    expect(control).toMatchObject({ id: "ctl", ok: false });
+    expect(control.error).toBe(strictNoPassReason);
+
+    const attack = await handleDaemonRequest(
+      JSON.stringify({
+        id: "atk",
+        type: "call_tool",
+        name: "svc_echo",
+        arguments: { message: "hi", path: join(permissiveRepo, "x.ts") }
+      }),
+      { cwd: strictRepo }
+    );
+    expect(attack).toMatchObject({ id: "atk", ok: false });
+    expect(attack.error).toBe(strictNoPassReason);
+  });
+
+  it("keeps a session pass's tool scope when a path arg redirects to a permissive repo", async () => {
+    // Session pass allows only svc_echo; svc_whoami is out of scope. A path arg
+    // into a permissive repo (no pass) must not lift the pass scope.
+    await setupGlobalConfigEnv();
+    const passRepo = await makeLazyRepo({ namespace: "svc", label: "svc" });
+    await createMandate({
+      task: "scoped",
+      repoPath: passRepo,
+      worktreePath: passRepo,
+      branch: "-",
+      agentRole: "implementer",
+      profiles: ["svc"],
+      allowedTools: ["svc_echo"],
+      lease: "2h"
+    });
+    const permissiveRepo = await makeLazyRepo({
+      namespace: "svc",
+      label: "PERMISSIVE"
+    });
+
+    const control = await handleDaemonRequest(
+      JSON.stringify({
+        id: "pc",
+        type: "call_tool",
+        name: "svc_whoami",
+        arguments: {}
+      }),
+      { cwd: passRepo }
+    );
+    expect(control).toMatchObject({
+      id: "pc",
+      ok: false,
+      error: 'tool "svc_whoami" is not allowed by pass policy'
+    });
+
+    const attack = await handleDaemonRequest(
+      JSON.stringify({
+        id: "pa",
+        type: "call_tool",
+        name: "svc_whoami",
+        arguments: { path: join(permissiveRepo, "x.ts") }
+      }),
+      { cwd: passRepo }
+    );
+    expect(attack).toMatchObject({
+      id: "pa",
+      ok: false,
+      error: 'tool "svc_whoami" is not allowed by pass policy'
+    });
+
+    // A tool the session pass DOES allow still routes through the redirect.
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "pe",
+          type: "call_tool",
+          name: "svc_echo",
+          arguments: { message: "hi", path: join(permissiveRepo, "x.ts") }
+        }),
+        { cwd: passRepo }
+      )
+    ).resolves.toMatchObject({ id: "pe", ok: true, type: "tool_result" });
+  });
+
+  it("applies the resolved repo's own pass when a permissive session redirects into it (not a downgrade)", async () => {
+    // The legitimate case: a session opened at ~ (no pass, permissive floor)
+    // makes a call into a repo whose pass allows only its echo tool. That pass
+    // fully governs the call; the permissive session adds nothing to lift.
+    await setupGlobalConfigEnv();
+    const home = await mkdtemp(join(tmpdir(), "switchboard-lazy-home-"));
+    const repoA = await makeLazyRepo({
+      namespace: "repo_a",
+      label: "repo-a",
+      strict: true
+    });
+    await createMandate({
+      task: "scoped-a",
+      repoPath: repoA,
+      worktreePath: repoA,
+      branch: "-",
+      agentRole: "implementer",
+      profiles: ["repo_a"],
+      allowedTools: ["repo_a_echo"],
+      lease: "2h"
+    });
+
+    // repo A's pass allows echo: the call runs against repo A.
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "ok",
+          type: "call_tool",
+          name: "repo_a_echo",
+          arguments: { message: "hi", path: join(repoA, "x.ts") }
+        }),
+        { cwd: home }
+      )
+    ).resolves.toMatchObject({
+      id: "ok",
+      ok: true,
+      type: "tool_result",
+      result: { content: [{ type: "text", text: "repo-a:hi" }] }
+    });
+
+    // repo A's pass denies whoami: the call is denied by A's pass, not the
+    // permissive session.
+    await expect(
+      handleDaemonRequest(
+        JSON.stringify({
+          id: "no",
+          type: "call_tool",
+          name: "repo_a_whoami",
+          arguments: { path: join(repoA, "x.ts") }
+        }),
+        { cwd: home }
+      )
+    ).resolves.toMatchObject({
+      id: "no",
+      ok: false,
+      error: 'tool "repo_a_whoami" is not allowed by pass policy'
+    });
+  });
+
+  it("resolves multi-repo path args deterministically regardless of key order", async () => {
+    // Two path args into two different repos are ambiguous. Resolution must not
+    // depend on argument key order (an agent could otherwise steer to the
+    // weaker repo); it refuses to redirect and falls back to the session, whose
+    // strict floor then denies both orderings identically.
+    await setupGlobalConfigEnv();
+    const strictSession = await makeLazyRepo({
+      namespace: "svc",
+      label: "svc",
+      strict: true
+    });
+    const repoP = await makeLazyRepo({ namespace: "svc", label: "P" });
+    const repoR = await makeLazyRepo({ namespace: "svc", label: "R" });
+
+    const order1 = await handleDaemonRequest(
+      JSON.stringify({
+        id: "o1",
+        type: "call_tool",
+        name: "svc_echo",
+        arguments: {
+          repository: join(repoR, "a.ts"),
+          path: join(repoP, "b.ts")
+        }
+      }),
+      { cwd: strictSession }
+    );
+    const order2 = await handleDaemonRequest(
+      JSON.stringify({
+        id: "o2",
+        type: "call_tool",
+        name: "svc_echo",
+        arguments: {
+          path: join(repoP, "b.ts"),
+          repository: join(repoR, "a.ts")
+        }
+      }),
+      { cwd: strictSession }
+    );
+    expect(order1).toMatchObject({ id: "o1", ok: false });
+    expect(order2).toMatchObject({ id: "o2", ok: false });
+    expect(order1.error).toBe(strictNoPassReason);
+    expect(order2.error).toBe(order1.error);
+  });
+});
+
 describe("daemon runtime ambient seatbelt", () => {
   const previousStateHome = process.env.XDG_STATE_HOME;
   const previousConfigHome = process.env.XDG_CONFIG_HOME;
@@ -1584,4 +2003,62 @@ async function writeGlobalSeatbeltConfig(
   const configDir = join(root, "config", "switchboard");
   await mkdir(configDir, { recursive: true });
   await writeFile(join(configDir, "config.yaml"), content);
+}
+
+// Isolate XDG_STATE_HOME and XDG_CONFIG_HOME under one sandbox and seed a
+// machine-level global config that defines a `global` profile (with a
+// deploy_prod tool for floor tests). The seatbelt is left at its default (on).
+async function setupGlobalConfigEnv(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "switchboard-lazy-base-"));
+  process.env.XDG_STATE_HOME = join(root, "state");
+  process.env.XDG_CONFIG_HOME = join(root, "config");
+  const configDir = join(root, "config", "switchboard");
+  await mkdir(configDir, { recursive: true });
+  await writeFile(
+    join(configDir, "config.yaml"),
+    lazyProfileConfig({ namespace: "global", label: "global", deployTool: true })
+  );
+  return root;
+}
+
+// A repo whose `.switchboard.yaml` binds one namespaced echo-server profile.
+async function makeLazyRepo(options: {
+  namespace: string;
+  label: string;
+  seatbeltOff?: boolean;
+  deployTool?: boolean;
+  strict?: boolean;
+}): Promise<string> {
+  const root = await mkdtemp(
+    join(tmpdir(), `switchboard-lazy-${options.namespace}-`)
+  );
+  await writeFile(join(root, ".switchboard.yaml"), lazyProfileConfig(options));
+  return root;
+}
+
+function lazyProfileConfig(options: {
+  namespace: string;
+  label: string;
+  seatbeltOff?: boolean;
+  deployTool?: boolean;
+  strict?: boolean;
+}): string {
+  return [
+    "version: 1",
+    ...(options.strict ? ["enforcement: strict"] : []),
+    ...(options.seatbeltOff ? ["seatbelt: off"] : []),
+    "profiles:",
+    `  ${options.namespace}:`,
+    "    provider: generic",
+    `    namespace: ${options.namespace}`,
+    "    upstream:",
+    "      type: stdio",
+    `      command: ${JSON.stringify(process.execPath)}`,
+    "      args:",
+    `        - ${JSON.stringify(fixtureServerPath)}`,
+    `        - ${options.label}`,
+    ...(options.deployTool
+      ? ['        - ""', '        - ""', "        - deploy_prod"]
+      : [])
+  ].join("\n");
 }

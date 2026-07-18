@@ -46,6 +46,31 @@ export function findNearestFile(
   }
 }
 
+/**
+ * Walk upward from `cwd` returning the nearest directory that contains a
+ * `.git` entry (a directory for a normal clone, a file for a linked worktree
+ * or submodule). Filesystem-only, so it does not spawn `git`; used as the
+ * repo-derivation fallback when no `.switchboard.yaml` is present.
+ */
+export function findNearestGitRoot(
+  options: PathResolutionOptions = {}
+): string | undefined {
+  let current = resolve(options.cwd ?? process.cwd());
+  const root = parse(current).root;
+
+  while (true) {
+    if (existsSync(join(current, ".git"))) {
+      return current;
+    }
+
+    if (current === root) {
+      return undefined;
+    }
+
+    current = dirname(current);
+  }
+}
+
 export function resolveRepoConfigPaths(
   options: PathResolutionOptions = {}
 ): RepoConfigPaths {

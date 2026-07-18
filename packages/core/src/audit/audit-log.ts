@@ -42,6 +42,13 @@ export interface AuditLogEntry {
   repoPath?: string;
   worktreePath?: string;
   branch?: string;
+  // Lazy per-call resolution: which repo dir this call resolved against and
+  // how it was reached (the call's own path arg, the session cwd, or the
+  // machine-level global default). Recorded so "why did this call get that
+  // policy" is inspectable per entry. `resolvedRepoPath` is absent for a
+  // global-default resolution (no repo bound).
+  resolvedRepoPath?: string;
+  resolutionSource?: "call-path" | "session-cwd" | "global-default";
   approvalRequestId?: string;
   approvalGateId?: string;
   approvalGatePattern?: string;
